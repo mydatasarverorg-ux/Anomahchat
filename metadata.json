@@ -1,0 +1,6 @@
+{
+  "name": "AetherChat - Global Messenger",
+  "description": "A real-time messaging web app with online authentication, personal 1-to-1 chats, voice notes, media sharing, and persistent cloud storage.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

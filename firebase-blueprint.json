@@ -1,0 +1,191 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile containing public display info and activity status",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Unique Firebase Authentication UID",
+          "maxLength": 128
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name of the user",
+          "maxLength": 100
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of the user",
+          "maxLength": 150
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Avatar URL or preset avatar identifier",
+          "maxLength": 1000
+        },
+        "about": {
+          "type": "string",
+          "description": "Custom bio or status line",
+          "maxLength": 200
+        },
+        "isOnline": {
+          "type": "boolean",
+          "description": "Current presence status"
+        },
+        "lastSeen": {
+          "type": "string",
+          "description": "ISO timestamp of last activity"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Account registration timestamp"
+        }
+      },
+      "required": ["userId", "displayName", "email", "createdAt"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "Conversation between two users or a group",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique conversation ID",
+          "maxLength": 128
+        },
+        "type": {
+          "type": "string",
+          "description": "Conversation type: direct or group",
+          "enum": ["direct", "group"]
+        },
+        "name": {
+          "type": "string",
+          "description": "Group chat name",
+          "maxLength": 100
+        },
+        "participantIds": {
+          "type": "array",
+          "description": "List of user UIDs participating in this chat"
+        },
+        "lastMessageText": {
+          "type": "string",
+          "description": "Snippet of the most recent message",
+          "maxLength": 500
+        },
+        "lastMessageSenderId": {
+          "type": "string",
+          "description": "Sender UID of the last message",
+          "maxLength": 128
+        },
+        "lastMessageTime": {
+          "type": "string",
+          "description": "Timestamp of the last message"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp of the conversation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last activity timestamp of the conversation"
+        }
+      },
+      "required": ["id", "type", "participantIds", "createdAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A single chat message inside a conversation",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique message ID",
+          "maxLength": 128
+        },
+        "chatId": {
+          "type": "string",
+          "description": "Parent chat ID",
+          "maxLength": 128
+        },
+        "senderId": {
+          "type": "string",
+          "description": "UID of the message author",
+          "maxLength": 128
+        },
+        "senderName": {
+          "type": "string",
+          "description": "Display name of the author",
+          "maxLength": 100
+        },
+        "senderPhoto": {
+          "type": "string",
+          "description": "Avatar URL of author",
+          "maxLength": 1000
+        },
+        "text": {
+          "type": "string",
+          "description": "Message text content",
+          "maxLength": 5000
+        },
+        "type": {
+          "type": "string",
+          "description": "Content type of the message",
+          "enum": ["text", "image", "audio", "file"]
+        },
+        "mediaUrl": {
+          "type": "string",
+          "description": "URL or data representation for media attachment",
+          "maxLength": 200000
+        },
+        "audioDuration": {
+          "type": "number",
+          "description": "Duration in seconds for voice notes"
+        },
+        "readBy": {
+          "type": "array",
+          "description": "User UIDs who have read this message"
+        },
+        "replyToId": {
+          "type": "string",
+          "description": "ID of the message being quoted",
+          "maxLength": 128
+        },
+        "replyToText": {
+          "type": "string",
+          "description": "Snippet of quoted message",
+          "maxLength": 300
+        },
+        "replyToSender": {
+          "type": "string",
+          "description": "Sender name of quoted message",
+          "maxLength": 100
+        },
+        "reactions": {
+          "type": "string",
+          "description": "JSON serialized string of emoji reactions mapping"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp of message sending"
+        }
+      },
+      "required": ["id", "chatId", "senderId", "senderName", "type", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Public directory of registered chat users"
+    },
+    "/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Direct and group chat rooms"
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Real-time message stream for a specific chat room"
+    }
+  }
+}

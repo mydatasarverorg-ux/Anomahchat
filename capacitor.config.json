@@ -1,0 +1,9 @@
+{
+  "appId": "com.mahimuhtasim.anomahchat",
+  "appName": "Anomah Chat",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}
