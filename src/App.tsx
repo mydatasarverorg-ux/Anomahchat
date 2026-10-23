@@ -28,6 +28,7 @@ function ChatDashboard() {
   const { user, loading } = useAuth();
   const [chats, setChats] = useState<ChatRoom[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [selectedChat, setSelectedChat] = useState<ChatRoom | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showShare, setShowShare] = useState(false);
@@ -39,19 +40,20 @@ function ChatDashboard() {
     const unsubscribe = subscribeToUserChats(user.userId, (data) => {
       setChats(data);
       // Auto select first chat if none selected on desktop
-      if (!activeChatId && data.length > 0 && window.innerWidth >= 768) {
+      if (!activeChatId && !selectedChat && data.length > 0 && window.innerWidth >= 768) {
         setActiveChatId(data[0].id);
+        setSelectedChat(data[0]);
       }
     });
 
     return () => unsubscribe();
-  }, [user, activeChatId]);
+  }, [user, activeChatId, selectedChat]);
 
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white">
         <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-3" />
-        <span className="text-xs text-slate-400 tracking-wide">Connecting to AetherChat Cloud...</span>
+        <span className="text-xs text-slate-400 tracking-wide">Connecting to Anomah Chat Cloud...</span>
       </div>
     );
   }
@@ -60,7 +62,7 @@ function ChatDashboard() {
     return <LoginScreen />;
   }
 
-  const activeChat = chats.find((c) => c.id === activeChatId) || null;
+  const activeChat = chats.find((c) => c.id === activeChatId) || selectedChat || null;
 
   return (
     <div className="h-screen w-screen bg-slate-950 flex overflow-hidden font-sans">
@@ -72,8 +74,12 @@ function ChatDashboard() {
       >
         <Sidebar
           chats={chats}
-          activeChatId={activeChatId}
-          onSelectChat={(id) => setActiveChatId(id)}
+          activeChatId={activeChat?.id || activeChatId}
+          onSelectChat={(id) => {
+            setActiveChatId(id);
+            const found = chats.find((c) => c.id === id);
+            if (found) setSelectedChat(found);
+          }}
           onOpenNewChat={() => setShowNewChat(true)}
           onOpenProfile={() => setShowProfile(true)}
           onOpenShare={() => setShowShare(true)}
@@ -85,7 +91,10 @@ function ChatDashboard() {
         {activeChat ? (
           <ChatArea
             chat={activeChat}
-            onBack={() => setActiveChatId(null)}
+            onBack={() => {
+              setActiveChatId(null);
+              setSelectedChat(null);
+            }}
             onStartCall={(session) => setCallSession(session)}
           />
         ) : (
@@ -162,8 +171,9 @@ function ChatDashboard() {
       {showNewChat && (
         <NewChatModal
           onClose={() => setShowNewChat(false)}
-          onSelectChat={(id) => {
-            setActiveChatId(id);
+          onSelectChat={(room) => {
+            setActiveChatId(room.id);
+            setSelectedChat(room);
             setShowNewChat(false);
           }}
         />

@@ -128,7 +128,7 @@ export function subscribeToUserChats(
 export async function getOrCreateDirectChat(
   currentUser: UserProfile,
   partner: UserProfile
-): Promise<string> {
+): Promise<ChatRoom> {
   const path = 'chats';
   try {
     // Predictable chat ID for 1-to-1 pairs: dm_{minId}_{maxId}
@@ -138,7 +138,7 @@ export async function getOrCreateDirectChat(
     const existing = await getDoc(chatRef);
 
     if (existing.exists()) {
-      return chatId;
+      return { id: chatId, ...(existing.data() as Omit<ChatRoom, 'id'>) };
     }
 
     const nowIso = new Date().toISOString();
@@ -165,7 +165,7 @@ export async function getOrCreateDirectChat(
     };
 
     await setDoc(chatRef, newChat);
-    return chatId;
+    return { id: chatId, ...newChat };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
@@ -177,7 +177,7 @@ export async function createGroupChat(
   currentUser: UserProfile,
   groupName: string,
   selectedMembers: UserProfile[]
-): Promise<string> {
+): Promise<ChatRoom> {
   const path = 'chats';
   try {
     const allMembers = [currentUser, ...selectedMembers];
@@ -208,7 +208,7 @@ export async function createGroupChat(
 
     const chatRef = doc(db, 'chats', chatId);
     await setDoc(chatRef, newChat);
-    return chatId;
+    return { id: chatId, ...newChat };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;

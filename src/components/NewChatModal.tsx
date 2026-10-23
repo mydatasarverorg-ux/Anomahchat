@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getAllUsers, getOrCreateDirectChat, createGroupChat } from '../services/chatService';
-import type { UserProfile } from '../types/chat';
+import type { UserProfile, ChatRoom } from '../types/chat';
 import { X, Search, UserPlus, Users, Check, MessageSquare, Loader2 } from 'lucide-react';
 
 interface NewChatModalProps {
   onClose: () => void;
-  onSelectChat: (chatId: string) => void;
+  onSelectChat: (chat: ChatRoom) => void;
 }
 
 export function NewChatModal({ onClose, onSelectChat }: NewChatModalProps) {
@@ -38,11 +38,11 @@ export function NewChatModal({ onClose, onSelectChat }: NewChatModalProps) {
     if (!user || creating) return;
     setCreating(true);
     try {
-      const chatId = await getOrCreateDirectChat(user, partner);
-      onSelectChat(chatId);
+      const room = await getOrCreateDirectChat(user, partner);
+      onSelectChat(room);
       onClose();
     } catch (err) {
-      console.error(err);
+      console.error('Failed to create/open chat:', err);
     } finally {
       setCreating(false);
     }
@@ -62,11 +62,11 @@ export function NewChatModal({ onClose, onSelectChat }: NewChatModalProps) {
     setCreating(true);
     try {
       const members = users.filter((u) => selectedUserIds.includes(u.userId));
-      const chatId = await createGroupChat(user, groupName.trim(), members);
-      onSelectChat(chatId);
+      const room = await createGroupChat(user, groupName.trim(), members);
+      onSelectChat(room);
       onClose();
     } catch (err) {
-      console.error(err);
+      console.error('Failed to create group:', err);
     } finally {
       setCreating(false);
     }

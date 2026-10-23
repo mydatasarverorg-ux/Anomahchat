@@ -24,11 +24,8 @@ jobs:
       - name: Setup Java JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: 'temurin'
           java-version: '17'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
 
       - name: Install Node Dependencies
         run: npm install --legacy-peer-deps --no-audit
@@ -36,22 +33,18 @@ jobs:
       - name: Build Web Application
         run: npm run build
 
-      - name: Add & Sync Capacitor Android
-        run: |
-          if [ ! -d "android" ]; then
-            npx cap add android
-          fi
-          npx cap sync android
+      - name: Sync Capacitor Android
+        run: npx cap sync android
 
-      - name: Grant Execute Permission to Gradle Wrapper
+      - name: Make Gradle Executable
         run: chmod +x android/gradlew
 
-      - name: Build Debug APK
+      - name: Build Debug Android APK
         run: |
           cd android
           ./gradlew assembleDebug --no-daemon
 
-      - name: Rename APK for Easy Identification
+      - name: Prepare APK Output
         run: |
           mkdir -p build-output
           cp android/app/build/outputs/apk/debug/app-debug.apk build-output/Anomah-Chat-vMahi-A01.apk
