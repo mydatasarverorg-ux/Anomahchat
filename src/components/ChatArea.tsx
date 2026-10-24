@@ -9,6 +9,7 @@ import {
 } from '../services/chatService';
 import type { ChatRoom, ChatMessage, CallSession } from '../types/chat';
 import { sounds } from '../utils/audioEffects';
+import { compressImageForChat } from '../utils/imageCompressor';
 import {
   Phone,
   Video,
@@ -126,25 +127,25 @@ export function ChatArea({ chat, onBack, onStartCall }: ChatAreaProps) {
     });
   };
 
-  // Image upload
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Image upload with automatic high-quality compression (WhatsApp/Messenger style)
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user) return;
+    e.target.value = '';
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const dataUrl = reader.result as string;
+    try {
+      const compressedDataUrl = await compressImageForChat(file);
       sounds.playMessageSent();
       await sendMessage({
         chatId: chat.id,
         sender: user,
         text: 'Photo',
         type: 'image',
-        mediaUrl: dataUrl,
+        mediaUrl: compressedDataUrl,
       });
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+    } catch (err) {
+      console.error('Failed to process and send image:', err);
+    }
   };
 
   // Audio Recording (Voice Notes)

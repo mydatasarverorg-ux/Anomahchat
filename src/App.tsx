@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   Smartphone,
   Sparkles,
+  WifiOff,
 } from 'lucide-react';
 
 function ChatDashboard() {
@@ -33,6 +34,19 @@ function ChatDashboard() {
   const [showProfile, setShowProfile] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [callSession, setCallSession] = useState<CallSession | null>(null);
+
+  // Online / Offline state detection (WhatsApp style)
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Subscribe to all chats where current user is a participant
   useEffect(() => {
@@ -65,7 +79,14 @@ function ChatDashboard() {
   const activeChat = chats.find((c) => c.id === activeChatId) || selectedChat || null;
 
   return (
-    <div className="h-screen w-screen bg-slate-950 flex overflow-hidden font-sans">
+    <div className="h-screen w-screen bg-slate-950 flex overflow-hidden font-sans relative">
+      {/* Offline Status Banner (WhatsApp/Messenger Style) */}
+      {!isOnline && (
+        <div className="absolute top-0 left-0 right-0 z-40 bg-amber-600/95 text-amber-50 text-[11px] font-semibold py-1 px-4 text-center flex items-center justify-center gap-2 shadow-lg backdrop-blur-sm animate-in fade-in">
+          <WifiOff className="w-3.5 h-3.5 shrink-0" />
+          <span>Offline Mode: Showing saved chats. New messages will automatically send when back online.</span>
+        </div>
+      )}
       {/* Sidebar: Visible on desktop, or on mobile when no active chat is opened */}
       <div
         className={`${
