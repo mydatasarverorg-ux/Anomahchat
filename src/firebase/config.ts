@@ -8,14 +8,14 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
-// Required connection validation
+// Safe background connection handshake check
 async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firebase connection notice: client is offline or starting up.');
-    }
+  } catch (error: unknown) {
+    // Graceful startup handling - Firestore SDK auto-reconnects and handles offline queueing seamlessly
+    const msg = error instanceof Error ? error.message : String(error);
+    console.info('Firestore initial connection notice (auto-reconnecting):', msg);
   }
 }
 

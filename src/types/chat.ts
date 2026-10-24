@@ -4,6 +4,10 @@ export interface UserProfile {
   email: string;
   photoURL: string;
   about?: string;
+  username?: string;
+  secretPin?: string;
+  pinFailedAttempts?: number;
+  pinLockedUntil?: string;
   isOnline?: boolean;
   lastSeen?: string;
   createdAt: string;

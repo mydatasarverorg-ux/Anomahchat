@@ -119,7 +119,10 @@ export function subscribeToUserChats(
       onUpdate(chats);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.GET, path);
+      console.warn('Chats snapshot notice:', error);
+      if (!error.message.includes('unavailable') && !error.message.includes('offline')) {
+        handleFirestoreError(error, OperationType.GET, path);
+      }
     }
   );
 }
@@ -236,7 +239,10 @@ export function subscribeToChatMessages(
       onUpdate(msgs);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.GET, path);
+      console.warn('Messages snapshot notice:', error);
+      if (!error.message.includes('unavailable') && !error.message.includes('offline')) {
+        handleFirestoreError(error, OperationType.GET, path);
+      }
     }
   );
 }
@@ -365,5 +371,110 @@ export async function deleteChatMessage(chatId: string, messageId: string) {
     await deleteDoc(msgRef);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+// Check if a username is available
+export async function isUsernameAvailable(username: string, currentUserId?: string): Promise<boolean> {
+  const clean = username.trim().toLowerCase().replace(/^@/, '');
+  if (!clean || clean.length < 3) return false;
+  try {
+    const q = query(collection(db, 'users'), where('username', '==', clean));
+    const snap = await getDocs(q);
+    if (snap.empty) return true;
+    if (currentUserId && snap.docs.length === 1 && snap.docs[0].id === currentUserId) {
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.warn('Error checking username:', err);
+    return true;
+  }
+}
+
+// Find user by Username or Email
+export async function findUserByIdentifier(identifier: string): Promise<UserProfile | null> {
+  const clean = identifier.trim().toLowerCase().replace(/^@/, '');
+  try {
+    // Check by username
+    const qUsername = query(collection(db, 'users'), where('username', '==', clean));
+    const snapUser = await getDocs(qUsername);
+    if (!snapUser.empty) {
+      return snapUser.docs[0].data() as UserProfile;
+    }
+    // Check by email
+    const qEmail = query(collection(db, 'users'), where('email', '==', clean));
+    const snapEmail = await getDocs(qEmail);
+    if (!snapEmail.empty) {
+      return snapEmail.docs[0].data() as UserProfile;
+    }
+    return null;
+  } catch (err) {
+    console.error('Error finding user by identifier:', err);
+    return null;
+  }
+}
+
+// Verify secret PIN and manage brute-force lockout
+export async function verifySecretPin(
+  identifier: string,
+  enteredPin: string
+): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
+  const user = await findUserByIdentifier(identifier);
+  if (!user) {
+    return { success: false, error: 'No account found with this username or email.' };
+  }
+
+  // Check lockout status
+  const now = new Date();
+  if (user.pinLockedUntil) {
+    const lockTime = new Date(user.pinLockedUntil);
+    if (lockTime > now) {
+      const remainingMinutes = Math.ceil((lockTime.getTime() - now.getTime()) / 60000);
+      return {
+        success: false,
+        error: `Account is temporarily locked due to too many failed attempts. Try again in ${remainingMinutes} minute(s).`,
+      };
+    }
+  }
+
+  if (!user.secretPin) {
+    return {
+      success: false,
+      error: 'No Secret PIN has been configured for this account yet. Please sign in with Email & Password or Google, then set your PIN in Settings.',
+    };
+  }
+
+  const userRef = doc(db, 'users', user.userId);
+
+  if (user.secretPin === enteredPin.trim()) {
+    // Reset failed attempts upon successful login
+    await updateDoc(userRef, {
+      pinFailedAttempts: 0,
+      pinLockedUntil: null,
+      isOnline: true,
+      lastSeen: now.toISOString(),
+    });
+    return { success: true, user: { ...user, pinFailedAttempts: 0, pinLockedUntil: undefined, isOnline: true } };
+  } else {
+    // Incorrect PIN -> increment failed attempts
+    const failed = (user.pinFailedAttempts || 0) + 1;
+    const updates: Partial<UserProfile> = { pinFailedAttempts: failed };
+    if (failed >= 5) {
+      const lockUntil = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
+      updates.pinLockedUntil = lockUntil;
+      await updateDoc(userRef, updates);
+      return {
+        success: false,
+        error: 'Too many incorrect attempts. This account is locked for 15 minutes for your security.',
+      };
+    } else {
+      await updateDoc(userRef, updates);
+      const remaining = 5 - failed;
+      return {
+        success: false,
+        error: `Incorrect Secret PIN! ${remaining} attempt(s) remaining before security lockout.`,
+      };
+    }
   }
 }
