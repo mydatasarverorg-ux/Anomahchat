@@ -36,10 +36,11 @@ jobs:
       - name: Sync Capacitor Android
         run: npx cap sync android
 
-      - name: Configure Android SDK Location & Licenses
+      - name: Configure Android SDK 36 & Licenses
         run: |
           echo "sdk.dir=$ANDROID_HOME" > android/local.properties
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-36" "build-tools;36.0.0" || true
 
       - name: Make Gradle Executable
         run: chmod +x android/gradlew
@@ -49,7 +50,7 @@ jobs:
           ANDROID_HOME: /usr/local/lib/android/sdk
         run: |
           cd android
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleDebug --no-daemon
 
       - name: Prepare APK Output
         run: |
