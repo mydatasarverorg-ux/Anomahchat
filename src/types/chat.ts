@@ -1,3 +1,5 @@
+export type ThemeMode = 'deep-slate' | 'minimal-light' | 'telegram-blue';
+
 export interface UserProfile {
   userId: string;
   displayName: string;
@@ -11,6 +13,12 @@ export interface UserProfile {
   isOnline?: boolean;
   lastSeen?: string;
   createdAt: string;
+  // Account Deletion & 15-Day Grace Period
+  status?: 'active' | 'scheduled_for_deletion' | 'deleted';
+  deleteRequestedAt?: string;
+  deleteScheduledAt?: string;
+  // Theme Preference
+  themePreference?: ThemeMode;
 }
 
 export type MessageType = 'text' | 'image' | 'audio' | 'file';
@@ -26,10 +34,18 @@ export interface ChatMessage {
   mediaUrl?: string;
   audioDuration?: number;
   readBy: string[];
+  seenByDetails?: Record<string, {
+    displayName: string;
+    photoURL?: string;
+    seenAt: string;
+  }>;
   replyToId?: string;
   replyToText?: string;
   replyToSender?: string;
+  replyToType?: MessageType;
   reactions?: Record<string, string[]>; // emoji -> array of userIds
+  isEdited?: boolean;
+  editedAt?: string;
   createdAt: string;
 }
 

@@ -14,14 +14,26 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { auth, googleProvider, db } from '../firebase/config';
-import { syncUserProfile, setPresence, verifySecretPin } from '../services/chatService';
-import type { UserProfile } from '../types/chat';
+import {
+  syncUserProfile,
+  setPresence,
+  verifySecretPin,
+  scheduleAccountDeletion,
+  restoreAccount,
+  checkAccountDeletionStatus,
+} from '../services/chatService';
+import type { UserProfile, ThemeMode } from '../types/chat';
 
 interface AuthContextType {
   user: UserProfile | null;
   firebaseUser: FirebaseUser | null;
   loading: boolean;
   authError: string | null;
+  theme: ThemeMode;
+  setTheme: (theme: ThemeMode) => void;
+  deletionNotice: { daysRemaining: number } | null;
+  recoverAccount: () => Promise<void>;
+  requestAccountDeletion: () => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signUpWithEmail: (email: string, pass: string, name: string, username?: string) => Promise<void>;
   signInWithEmail: (email: string, pass: string) => Promise<void>;
@@ -46,6 +58,75 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [deletionNotice, setDeletionNotice] = useState<{ daysRemaining: number } | null>(null);
+
+  const [theme, setThemeState] = useState<ThemeMode>(() => {
+    const saved = localStorage.getItem('anomah_chat_theme') as ThemeMode;
+    return saved || 'deep-slate';
+  });
+
+  const setTheme = (newTheme: ThemeMode) => {
+    setThemeState(newTheme);
+    localStorage.setItem('anomah_chat_theme', newTheme);
+    document.documentElement.setAttribute('data-theme', newTheme);
+  };
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  // Presence & Heartbeat tracking
+  useEffect(() => {
+    if (!user?.userId) return;
+
+    // Report online on login / focus
+    setPresence(user.userId, true);
+
+    const heartbeat = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        setPresence(user.userId, true);
+      }
+    }, 45000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        setPresence(user.userId, false);
+      } else {
+        setPresence(user.userId, true);
+      }
+    };
+
+    const handleTeardown = () => {
+      setPresence(user.userId, false);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pagehide', handleTeardown);
+    window.addEventListener('beforeunload', handleTeardown);
+
+    return () => {
+      clearInterval(heartbeat);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', handleTeardown);
+      window.removeEventListener('beforeunload', handleTeardown);
+    };
+  }, [user?.userId]);
+
+  // Check deletion status on login
+  const verifyDeletionStatus = (profile: UserProfile): boolean => {
+    const status = checkAccountDeletionStatus(profile);
+    if (status.isScheduled) {
+      if (status.isExpired) {
+        setAuthError('This account was scheduled for deletion and the 15-day recovery period has expired.');
+        return false;
+      } else {
+        setDeletionNotice({ daysRemaining: status.daysRemaining });
+      }
+    } else {
+      setDeletionNotice(null);
+    }
+    return true;
+  };
 
   useEffect(() => {
     // Check if returning from redirect sign-in on Android mobile APK
@@ -59,8 +140,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               email: res.user.email,
               photoURL: res.user.photoURL,
             });
-            setUser(profile);
-            setPresence(res.user.uid, true);
+            if (verifyDeletionStatus(profile)) {
+              setUser(profile);
+            } else {
+              await signOut(auth);
+            }
           } catch (err) {
             console.error('Failed to sync profile after redirect:', err);
           }
@@ -81,8 +165,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email: current.email,
             photoURL: current.photoURL,
           });
-          setUser(profile);
-          setPresence(current.uid, true);
+          if (verifyDeletionStatus(profile)) {
+            setUser(profile);
+          } else {
+            await signOut(auth);
+          }
         } catch (err) {
           console.error('Failed to sync profile on state change:', err);
         }
@@ -95,8 +182,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const snap = await getDoc(doc(db, 'users', parsed.userId));
             if (snap.exists()) {
               const fresh = snap.data() as UserProfile;
-              setUser(fresh);
-              setPresence(fresh.userId, true);
+              if (verifyDeletionStatus(fresh)) {
+                setUser(fresh);
+              } else {
+                localStorage.removeItem('anomah_active_pin_user');
+                setUser(null);
+              }
             } else {
               setUser(parsed);
             }
@@ -111,16 +202,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     });
 
-    const handleBeforeUnload = () => {
-      if (user) {
-        setPresence(user.userId, false);
-      }
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
     return () => {
       unsubscribe();
-      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, []);
 
@@ -305,6 +388,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signOut(auth);
     setUser(null);
     setFirebaseUser(null);
+    setDeletionNotice(null);
+  };
+
+  const requestAccountDeletion = async () => {
+    if (!user) return;
+    await scheduleAccountDeletion(user.userId);
+    await signOutUser();
+  };
+
+  const recoverAccount = async () => {
+    if (!user) return;
+    await restoreAccount(user.userId);
+    const updated = {
+      ...user,
+      status: 'active' as const,
+      deleteRequestedAt: undefined,
+      deleteScheduledAt: undefined,
+    };
+    setUser(updated);
+    setDeletionNotice(null);
+    if (localStorage.getItem('anomah_active_pin_user')) {
+      localStorage.setItem('anomah_active_pin_user', JSON.stringify(updated));
+    }
   };
 
   const updateProfile = async (
@@ -341,6 +447,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         firebaseUser,
         loading,
         authError,
+        theme,
+        setTheme,
+        deletionNotice,
+        recoverAccount,
+        requestAccountDeletion,
         signInWithGoogle,
         signUpWithEmail,
         signInWithEmail,

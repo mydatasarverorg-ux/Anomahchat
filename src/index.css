@@ -1,1 +1,51 @@
 @import "tailwindcss";
+
+:root {
+  --app-bg: #0b1120;
+  --app-card: #0f172a;
+  --app-surface: #1e293b;
+  --app-border: #334155;
+  --app-text: #f8fafc;
+  --app-subtext: #94a3b8;
+  --app-accent: #10b981;
+}
+
+[data-theme="minimal-light"] {
+  --app-bg: #f8fafc;
+  --app-card: #ffffff;
+  --app-surface: #f1f5f9;
+  --app-border: #e2e8f0;
+  --app-text: #0f172a;
+  --app-subtext: #64748b;
+  --app-accent: #0284c7;
+}
+
+[data-theme="telegram-blue"] {
+  --app-bg: #0e1621;
+  --app-card: #17212b;
+  --app-surface: #242f3d;
+  --app-border: #2b394a;
+  --app-text: #f5f5f5;
+  --app-subtext: #8e9ca8;
+  --app-accent: #2b5278;
+}
+
+/* Telegram / iOS style smooth transitions and custom scrollbars */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.4);
+}

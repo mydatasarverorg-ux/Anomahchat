@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { CallSession } from '../types/chat';
+import { useLanguage } from '../context/LanguageContext';
 import { sounds } from '../utils/audioEffects';
-import { PhoneOff, Mic, MicOff, Video, VideoOff, Phone, Volume2 } from 'lucide-react';
+import { PhoneOff, Mic, MicOff, Video, VideoOff, Volume2 } from 'lucide-react';
 
 interface CallModalProps {
   session: CallSession;
@@ -9,6 +10,7 @@ interface CallModalProps {
 }
 
 export function CallModal({ session, onEndCall }: CallModalProps) {
+  const { t } = useLanguage();
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(session.type === 'audio');
@@ -57,13 +59,13 @@ export function CallModal({ session, onEndCall }: CallModalProps) {
           <div className="text-xs uppercase tracking-wider font-semibold text-emerald-400 mb-2 flex items-center gap-1.5">
             <Volume2 className="w-3.5 h-3.5 animate-pulse" />
             <span>
-              {session.type === 'video' ? 'Video Call' : 'WhatsApp Audio Call'}
+              {session.type === 'video' ? t('videoCall') : t('audioCall')}
             </span>
           </div>
 
           <h3 className="text-2xl font-bold text-white mb-1">{session.recipientName}</h3>
           <p className="text-xs text-slate-400">
-            {status === 'ringing' ? 'Ringing...' : formatSeconds(duration)}
+            {status === 'ringing' ? t('callRinging') : formatSeconds(duration)}
           </p>
         </div>
 
@@ -77,7 +79,7 @@ export function CallModal({ session, onEndCall }: CallModalProps) {
                   alt={session.recipientName}
                   className="w-20 h-20 rounded-full mx-auto mb-2 border-2 border-emerald-400"
                 />
-                <span className="text-xs text-slate-300">Live Camera Stream Active</span>
+                <span className="text-xs text-slate-300">{t('liveCameraStream')}</span>
               </div>
               <div className="absolute top-3 right-3 px-2 py-0.5 rounded bg-black/60 text-[10px] text-emerald-400 font-mono">
                 HD 1080p
@@ -106,7 +108,7 @@ export function CallModal({ session, onEndCall }: CallModalProps) {
             className={`w-12 h-12 rounded-full flex items-center justify-center transition cursor-pointer ${
               isMuted ? 'bg-red-500 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
             }`}
-            title={isMuted ? 'Unmute' : 'Mute'}
+            title={isMuted ? t('unmute') : t('mute')}
           >
             {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
           </button>
@@ -117,7 +119,7 @@ export function CallModal({ session, onEndCall }: CallModalProps) {
               className={`w-12 h-12 rounded-full flex items-center justify-center transition cursor-pointer ${
                 isVideoOff ? 'bg-red-500 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
               }`}
-              title={isVideoOff ? 'Turn Camera On' : 'Turn Camera Off'}
+              title={isVideoOff ? t('turnCameraOn') : t('turnCameraOff')}
             >
               {isVideoOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
             </button>
@@ -126,7 +128,7 @@ export function CallModal({ session, onEndCall }: CallModalProps) {
           <button
             onClick={onEndCall}
             className="w-14 h-14 rounded-full bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shadow-lg shadow-red-600/30 transition cursor-pointer"
-            title="End Call"
+            title={t('endCall')}
           >
             <PhoneOff className="w-6 h-6" />
           </button>

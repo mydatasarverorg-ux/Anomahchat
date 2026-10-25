@@ -77,6 +77,73 @@ export async function setPresence(userId: string, isOnline: boolean) {
   }
 }
 
+// Subscribe to a single user's real-time profile for presence tracking
+export function subscribeToUserProfile(
+  userId: string,
+  onUpdate: (user: UserProfile | null) => void
+): Unsubscribe {
+  const path = `users/${userId}`;
+  const userRef = doc(db, 'users', userId);
+  return onSnapshot(
+    userRef,
+    (snap) => {
+      if (snap.exists()) {
+        onUpdate(snap.data() as UserProfile);
+      } else {
+        onUpdate(null);
+      }
+    },
+    (error) => {
+      console.warn('User profile subscribe notice:', error);
+    }
+  );
+}
+
+// Format accurate online or last seen text
+export function formatLastSeenStatus(lastSeen?: string, isOnline?: boolean): {
+  isOnline: boolean;
+  statusText: string;
+} {
+  if (!lastSeen) {
+    return isOnline ? { isOnline: true, statusText: 'Online' } : { isOnline: false, statusText: 'Offline' };
+  }
+
+  const lastSeenDate = new Date(lastSeen);
+  const now = new Date();
+  const diffMs = now.getTime() - lastSeenDate.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHours = Math.floor(diffMin / 60);
+
+  // If marked online and pinged within last 2 minutes, treat as genuinely active
+  if (isOnline && diffMin < 2) {
+    return { isOnline: true, statusText: 'Online' };
+  }
+
+  if (diffMin < 1) {
+    return { isOnline: false, statusText: 'Active just now' };
+  }
+  if (diffMin < 60) {
+    return { isOnline: false, statusText: `Active ${diffMin}m ago` };
+  }
+  if (diffHours < 24) {
+    return { isOnline: false, statusText: `Active ${diffHours}h ago` };
+  }
+  const isYesterday =
+    now.getDate() - lastSeenDate.getDate() === 1 &&
+    now.getMonth() === lastSeenDate.getMonth() &&
+    now.getFullYear() === lastSeenDate.getFullYear();
+
+  const timeStr = lastSeenDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (isYesterday) {
+    return { isOnline: false, statusText: `Last seen yesterday at ${timeStr}` };
+  }
+  return {
+    isOnline: false,
+    statusText: `Last seen ${lastSeenDate.toLocaleDateString([], { month: 'short', day: 'numeric' })} at ${timeStr}`,
+  };
+}
+
 // Fetch all registered users
 export async function getAllUsers(currentUserId: string): Promise<UserProfile[]> {
   const path = 'users';
@@ -308,15 +375,29 @@ export async function sendMessage(params: {
   }
 }
 
-// Mark messages as read by current user (Double Blue Ticks)
-export async function markChatMessagesAsRead(chatId: string, userId: string, unreadMessages: ChatMessage[]) {
+// Mark messages as read by current user (Double Blue Ticks & Seen Avatars)
+export async function markChatMessagesAsRead(
+  chatId: string,
+  user: UserProfile,
+  unreadMessages: ChatMessage[]
+) {
   const path = `chats/${chatId}/messages`;
   try {
+    const nowIso = new Date().toISOString();
     for (const msg of unreadMessages) {
-      if (!msg.readBy.includes(userId)) {
+      if (!msg.readBy.includes(user.userId)) {
         const msgRef = doc(db, 'chats', chatId, 'messages', msg.id);
+        const existingDetails = msg.seenByDetails || {};
         await updateDoc(msgRef, {
-          readBy: [...msg.readBy, userId],
+          readBy: [...msg.readBy, user.userId],
+          seenByDetails: {
+            ...existingDetails,
+            [user.userId]: {
+              displayName: user.displayName,
+              photoURL: user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.userId}`,
+              seenAt: nowIso,
+            },
+          },
         });
       }
     }
@@ -369,6 +450,45 @@ export async function deleteChatMessage(chatId: string, messageId: string) {
   try {
     const msgRef = doc(db, 'chats', chatId, 'messages', messageId);
     await deleteDoc(msgRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+// Edit message text
+export async function editChatMessage(chatId: string, messageId: string, newText: string) {
+  const path = `chats/${chatId}/messages/${messageId}`;
+  try {
+    const msgRef = doc(db, 'chats', chatId, 'messages', messageId);
+    await updateDoc(msgRef, {
+      text: newText.trim(),
+      isEdited: true,
+      editedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+// Delete or leave conversation
+export async function deleteChatRoom(chatId: string, currentUserId: string) {
+  const path = `chats/${chatId}`;
+  try {
+    const chatRef = doc(db, 'chats', chatId);
+    const snap = await getDoc(chatRef);
+    if (!snap.exists()) return;
+    const data = snap.data() as ChatRoom;
+
+    // If direct chat or last participant, delete chat and clean up
+    const remaining = data.participantIds.filter((id) => id !== currentUserId);
+    if (remaining.length <= 1 || data.type === 'direct') {
+      await deleteDoc(chatRef);
+    } else {
+      await updateDoc(chatRef, {
+        participantIds: remaining,
+        updatedAt: new Date().toISOString(),
+      });
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
@@ -477,4 +597,53 @@ export async function verifySecretPin(
       };
     }
   }
+}
+
+// 15-Day Account Deletion Schedule
+export async function scheduleAccountDeletion(userId: string): Promise<void> {
+  const userRef = doc(db, 'users', userId);
+  const now = new Date();
+  const deleteDate = new Date(now.getTime() + 15 * 24 * 60 * 60 * 1000); // 15 days later
+
+  await updateDoc(userRef, {
+    status: 'scheduled_for_deletion',
+    deleteRequestedAt: now.toISOString(),
+    deleteScheduledAt: deleteDate.toISOString(),
+    isOnline: false,
+    lastSeen: now.toISOString(),
+  });
+}
+
+// Restore / Cancel Account Deletion
+export async function restoreAccount(userId: string): Promise<void> {
+  const userRef = doc(db, 'users', userId);
+  await updateDoc(userRef, {
+    status: 'active',
+    deleteRequestedAt: null,
+    deleteScheduledAt: null,
+    isOnline: true,
+    lastSeen: new Date().toISOString(),
+  });
+}
+
+// Calculate days remaining for scheduled deletion
+export function checkAccountDeletionStatus(user: UserProfile): {
+  isScheduled: boolean;
+  isExpired: boolean;
+  daysRemaining: number;
+} {
+  if (user.status !== 'scheduled_for_deletion' || !user.deleteScheduledAt) {
+    return { isScheduled: false, isExpired: false, daysRemaining: 15 };
+  }
+
+  const scheduledDate = new Date(user.deleteScheduledAt).getTime();
+  const now = Date.now();
+  const diffMs = scheduledDate - now;
+
+  if (diffMs <= 0) {
+    return { isScheduled: true, isExpired: true, daysRemaining: 0 };
+  }
+
+  const daysRemaining = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+  return { isScheduled: true, isExpired: false, daysRemaining };
 }

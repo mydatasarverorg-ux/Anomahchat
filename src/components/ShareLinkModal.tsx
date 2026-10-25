@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { Copy, Check, Globe, Users, QrCode, X } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext';
+import { Copy, Check, Globe, Users, X } from 'lucide-react';
 
 export function ShareLinkModal({ onClose }: { onClose: () => void }) {
+  const { t } = useLanguage();
   const [copied, setCopied] = useState(false);
   const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
 
@@ -16,7 +18,7 @@ export function ShareLinkModal({ onClose }: { onClose: () => void }) {
       <div className="bg-slate-900 border border-emerald-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl relative">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+          className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -26,13 +28,13 @@ export function ShareLinkModal({ onClose }: { onClose: () => void }) {
             <Globe className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-base font-bold text-white">Chat with Anyone Worldwide</h3>
-            <p className="text-xs text-slate-400">Share this URL to connect across devices & countries</p>
+            <h3 className="text-base font-bold text-white">{t('shareTitle')}</h3>
+            <p className="text-xs text-slate-400">{t('shareSubtitle')}</p>
           </div>
         </div>
 
         <p className="text-xs text-slate-300 leading-relaxed mb-4">
-          Anyone who opens this link can log in to <strong>Anomah Chat</strong> from their smartphone, tablet, or PC anywhere in the world and chat with you in real time. Created by Mahi Muhtasim (vMahi A01).
+          {t('shareBody')}
         </p>
 
         <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-3 mb-4 flex items-center gap-2">
@@ -49,12 +51,12 @@ export function ShareLinkModal({ onClose }: { onClose: () => void }) {
             {copied ? (
               <>
                 <Check className="w-3.5 h-3.5" />
-                <span>Copied!</span>
+                <span>{t('copied')}</span>
               </>
             ) : (
               <>
                 <Copy className="w-3.5 h-3.5" />
-                <span>Copy</span>
+                <span>{t('copy')}</span>
               </>
             )}
           </button>
@@ -62,10 +64,10 @@ export function ShareLinkModal({ onClose }: { onClose: () => void }) {
 
         <div className="bg-emerald-950/40 border border-emerald-500/20 rounded-xl p-3 text-xs text-emerald-300 space-y-1">
           <div className="font-semibold flex items-center gap-1.5">
-            <Users className="w-3.5 h-3.5" /> Quick Testing Tip:
+            <Users className="w-3.5 h-3.5" /> {t('shareTipTitle')}
           </div>
           <p className="text-[11px] text-emerald-200/80">
-            Open this URL in an <strong>Incognito window</strong> or on your <strong>mobile phone</strong> to see real-time two-way chatting, delivery blue ticks, and voice notes live in action!
+            {t('shareTipBody')}
           </p>
         </div>
 
@@ -74,7 +76,7 @@ export function ShareLinkModal({ onClose }: { onClose: () => void }) {
             onClick={onClose}
             className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium cursor-pointer"
           >
-            Close
+            {t('close')}
           </button>
         </div>
       </div>
