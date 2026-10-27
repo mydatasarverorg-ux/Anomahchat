@@ -13,7 +13,12 @@ import { NewChatModal } from './components/NewChatModal';
 import { ProfileModal } from './components/ProfileModal';
 import { ShareLinkModal } from './components/ShareLinkModal';
 import { CallModal } from './components/CallModal';
+import { BannedScreen } from './components/BannedScreen';
+import { WarningNoticeModal } from './components/WarningNoticeModal';
+import { AnnouncementBanner } from './components/AnnouncementBanner';
+import { AdminModal } from './components/AdminModal';
 import { subscribeToUserChats } from './services/chatService';
+import { isSuperAdmin } from './services/adminService';
 import type { ChatRoom, CallSession } from './types/chat';
 import {
   MessageSquare,
@@ -33,6 +38,7 @@ function ChatDashboard() {
   const [showNewChat, setShowNewChat] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showShare, setShowShare] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [callSession, setCallSession] = useState<CallSession | null>(null);
 
   // Online / Offline state detection (WhatsApp style)
@@ -76,6 +82,11 @@ function ChatDashboard() {
     return <LoginScreen />;
   }
 
+  // Active Suspension Enforcement
+  if (user.isBanned) {
+    return <BannedScreen />;
+  }
+
   const activeChat = chats.find((c) => c.id === activeChatId) || selectedChat || null;
 
   return (
@@ -116,6 +127,9 @@ function ChatDashboard() {
         </div>
       )}
 
+      {/* Global Broadcast Announcement Banner */}
+      <AnnouncementBanner />
+
       <div className="flex-1 flex overflow-hidden relative">
       {/* Sidebar: Visible on desktop, or on mobile when no active chat is opened */}
       <div
@@ -134,6 +148,7 @@ function ChatDashboard() {
           onOpenNewChat={() => setShowNewChat(true)}
           onOpenProfile={() => setShowProfile(true)}
           onOpenShare={() => setShowShare(true)}
+          onOpenAdmin={() => setShowAdmin(true)}
         />
       </div>
 
@@ -188,6 +203,14 @@ function ChatDashboard() {
       </main>
       </div>
 
+      {/* User Warning Modal if Warning Issued */}
+      <WarningNoticeModal />
+
+      {/* Super Admin Control Panel Modal */}
+      {showAdmin && isSuperAdmin(user?.email) && (
+        <AdminModal onClose={() => setShowAdmin(false)} />
+      )}
+
       {/* Modals */}
       {showNewChat && (
         <NewChatModal
@@ -200,7 +223,12 @@ function ChatDashboard() {
         />
       )}
 
-      {showProfile && <ProfileModal onClose={() => setShowProfile(false)} />}
+      {showProfile && (
+        <ProfileModal
+          onClose={() => setShowProfile(false)}
+          onOpenAdmin={() => setShowAdmin(true)}
+        />
+      )}
 
       {showShare && <ShareLinkModal onClose={() => setShowShare(false)} />}
 

@@ -84,9 +84,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const heartbeat = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        setPresence(user.userId, true);
+        // Record 1 active minute
+        setPresence(user.userId, true, 1);
       }
-    }, 45000);
+    }, 60000);
 
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {

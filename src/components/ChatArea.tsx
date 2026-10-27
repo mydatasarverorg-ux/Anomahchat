@@ -35,7 +35,11 @@ import {
   X,
   Search,
   Image as ImageIcon,
+  Flag,
+  ShieldAlert,
 } from 'lucide-react';
+import { isSuperAdmin } from '../services/adminService';
+import { ReportModal } from './ReportModal';
 
 interface ChatAreaProps {
   chat: ChatRoom;
@@ -57,6 +61,16 @@ export function ChatArea({ chat, onBack, onStartCall }: ChatAreaProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // Reporting State
+  const [reportTarget, setReportTarget] = useState<{
+    targetUserId: string;
+    targetUserName: string;
+    targetUserEmail?: string;
+    chatId?: string;
+    messageId?: string;
+    messageText?: string;
+  } | null>(null);
 
   // Real-time recipient profile & presence tracking
   const [partnerUser, setPartnerUser] = useState<UserProfile | null>(null);
@@ -498,6 +512,24 @@ export function ChatArea({ chat, onBack, onStartCall }: ChatAreaProps) {
                 onClick={(e) => e.stopPropagation()}
                 className="absolute right-0 top-11 z-40 w-52 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl py-1.5 animate-in fade-in"
               >
+                {partnerId && partnerId !== user?.userId && (
+                  <button
+                    onClick={() => {
+                      setShowHeaderMenu(false);
+                      setReportTarget({
+                        targetUserId: partnerId,
+                        targetUserName: title,
+                        targetUserEmail: partnerUser?.email || partnerDetails?.email,
+                        chatId: chat.id,
+                      });
+                    }}
+                    className="w-full px-4 py-2 text-left text-xs text-amber-400 hover:bg-amber-500/15 flex items-center gap-2 cursor-pointer font-medium transition"
+                  >
+                    <Flag className="w-4 h-4" />
+                    <span>{t('reportUserAction')}</span>
+                  </button>
+                )}
+
                 <button
                   onClick={() => {
                     setShowHeaderMenu(false);
@@ -842,7 +874,26 @@ export function ChatArea({ chat, onBack, onStartCall }: ChatAreaProps) {
               </button>
             )}
 
-            {activeMenuMessage.senderId === user?.userId && (
+            {activeMenuMessage.senderId !== user?.userId && (
+              <button
+                onClick={() => {
+                  setReportTarget({
+                    targetUserId: activeMenuMessage.senderId,
+                    targetUserName: activeMenuMessage.senderName,
+                    chatId: chat.id,
+                    messageId: activeMenuMessage.id,
+                    messageText: activeMenuMessage.text,
+                  });
+                  setActiveMenuMessage(null);
+                }}
+                className="w-full px-3.5 py-2 text-left text-xs text-amber-300 hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer transition font-medium"
+              >
+                <Flag className="w-3.5 h-3.5" />
+                <span>{t('reportMessageAction')}</span>
+              </button>
+            )}
+
+            {(activeMenuMessage.senderId === user?.userId || isSuperAdmin(user?.email)) && (
               <button
                 onClick={() => {
                   setMessageToDelete(activeMenuMessage);
@@ -851,7 +902,11 @@ export function ChatArea({ chat, onBack, onStartCall }: ChatAreaProps) {
                 className="w-full px-3.5 py-2 text-left text-xs text-red-400 hover:bg-red-500/15 flex items-center gap-2.5 cursor-pointer transition font-medium border-t border-slate-800"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>{t('deleteForEveryoneAction')}</span>
+                <span>
+                  {isSuperAdmin(user?.email) && activeMenuMessage.senderId !== user?.userId
+                    ? 'Admin Delete Message'
+                    : t('deleteForEveryoneAction')}
+                </span>
               </button>
             )}
           </div>
@@ -1059,6 +1114,19 @@ export function ChatArea({ chat, onBack, onStartCall }: ChatAreaProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* User / Message Report Modal */}
+      {reportTarget && (
+        <ReportModal
+          targetUserId={reportTarget.targetUserId}
+          targetUserName={reportTarget.targetUserName}
+          targetUserEmail={reportTarget.targetUserEmail}
+          chatId={reportTarget.chatId}
+          messageId={reportTarget.messageId}
+          messageText={reportTarget.messageText}
+          onClose={() => setReportTarget(null)}
+        />
       )}
     </div>
   );

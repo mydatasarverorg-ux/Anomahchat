@@ -2,7 +2,7 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "User profile containing public display info and activity status",
+      "description": "User profile containing public display info, presence, security, and moderation status",
       "type": "object",
       "properties": {
         "userId": {
@@ -29,6 +29,42 @@
           "type": "string",
           "description": "Custom bio or status line",
           "maxLength": 200
+        },
+        "username": {
+          "type": "string",
+          "description": "Unique username handle",
+          "maxLength": 50
+        },
+        "role": {
+          "type": "string",
+          "description": "User permission role (admin or user)",
+          "enum": ["admin", "user"]
+        },
+        "isBanned": {
+          "type": "boolean",
+          "description": "Whether this user is banned by admin"
+        },
+        "banReason": {
+          "type": "string",
+          "description": "Admin justification for user ban",
+          "maxLength": 500
+        },
+        "bannedAt": {
+          "type": "string",
+          "description": "Timestamp when user was banned"
+        },
+        "warningNotice": {
+          "type": "string",
+          "description": "Official warning message issued to the user",
+          "maxLength": 1000
+        },
+        "warningIssuedAt": {
+          "type": "string",
+          "description": "Timestamp when warning was issued"
+        },
+        "warningDismissed": {
+          "type": "boolean",
+          "description": "Whether user acknowledged the warning"
         },
         "isOnline": {
           "type": "boolean",
@@ -172,12 +208,209 @@
         }
       },
       "required": ["id", "chatId", "senderId", "senderName", "type", "createdAt"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Abuse or violation report submitted by users for admin moderation",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique report ID",
+          "maxLength": 128
+        },
+        "reporterId": {
+          "type": "string",
+          "description": "UID of the reporting user",
+          "maxLength": 128
+        },
+        "reporterName": {
+          "type": "string",
+          "description": "Display name of reporter",
+          "maxLength": 100
+        },
+        "reporterEmail": {
+          "type": "string",
+          "description": "Email of reporter",
+          "maxLength": 150
+        },
+        "targetUserId": {
+          "type": "string",
+          "description": "UID of user being reported",
+          "maxLength": 128
+        },
+        "targetUserName": {
+          "type": "string",
+          "description": "Name of user being reported",
+          "maxLength": 100
+        },
+        "reason": {
+          "type": "string",
+          "description": "Report category",
+          "enum": ["harassment", "hate_speech", "spam", "scam", "inappropriate", "impersonation", "other"]
+        },
+        "details": {
+          "type": "string",
+          "description": "Detailed explanation of violation",
+          "maxLength": 2000
+        },
+        "status": {
+          "type": "string",
+          "description": "Review status of the report",
+          "enum": ["pending", "resolved", "dismissed"]
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when report was submitted"
+        }
+      },
+      "required": ["id", "reporterId", "targetUserId", "reason", "details", "status", "createdAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Platform-wide broadcast notice from the Super Admin",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique announcement ID",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "description": "Announcement headline",
+          "maxLength": 150
+        },
+        "content": {
+          "type": "string",
+          "description": "Announcement body message",
+          "maxLength": 3000
+        },
+        "type": {
+          "type": "string",
+          "description": "Category styling of announcement",
+          "enum": ["info", "warning", "alert", "update"]
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Whether notice is actively displayed"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Publish timestamp"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "Admin UID who created the broadcast",
+          "maxLength": 128
+        }
+      },
+      "required": ["id", "title", "content", "type", "active", "createdAt", "createdBy"]
+    },
+    "AdminLog": {
+      "title": "AdminLog",
+      "description": "Audit trail log tracking actions taken by Super Admin",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique log ID",
+          "maxLength": 128
+        },
+        "adminEmail": {
+          "type": "string",
+          "description": "Email of admin who took the action",
+          "maxLength": 150
+        },
+        "action": {
+          "type": "string",
+          "description": "Type of moderation action taken",
+          "maxLength": 100
+        },
+        "targetId": {
+          "type": "string",
+          "description": "UID or entity ID targeted by action",
+          "maxLength": 128
+        },
+        "details": {
+          "type": "string",
+          "description": "Descriptive details of moderation action",
+          "maxLength": 1000
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Timestamp when action occurred"
+        }
+      },
+      "required": ["id", "adminEmail", "action", "details", "timestamp"]
+    },
+    "RecoveryRequest": {
+      "title": "RecoveryRequest",
+      "description": "Password or account reset request submitted to the Super Admin desk",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique recovery request ID",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "description": "Registered email address requiring recovery",
+          "maxLength": 150
+        },
+        "name": {
+          "type": "string",
+          "description": "Applicant full name",
+          "maxLength": 100
+        },
+        "username": {
+          "type": "string",
+          "description": "Applicant username handle",
+          "maxLength": 50
+        },
+        "contactPhone": {
+          "type": "string",
+          "description": "Alternate contact phone or WhatsApp number",
+          "maxLength": 50
+        },
+        "details": {
+          "type": "string",
+          "description": "Explanation or verification details",
+          "maxLength": 1000
+        },
+        "status": {
+          "type": "string",
+          "description": "Status of recovery ticket",
+          "enum": ["pending", "resolved", "dismissed"]
+        },
+        "temporaryPassword": {
+          "type": "string",
+          "description": "Temporary password assigned by Super Admin",
+          "maxLength": 100
+        },
+        "temporaryPin": {
+          "type": "string",
+          "description": "Temporary PIN assigned by Super Admin",
+          "maxLength": 10
+        },
+        "adminNotes": {
+          "type": "string",
+          "description": "Internal notes or instructions from admin",
+          "maxLength": 1000
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Submission timestamp"
+        }
+      },
+      "required": ["id", "email", "status", "createdAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
-      "description": "Public directory of registered chat users"
+      "description": "Public directory of registered chat users with moderation flags"
     },
     "/chats/{chatId}": {
       "schema": "Chat",
@@ -186,6 +419,22 @@
     "/chats/{chatId}/messages/{messageId}": {
       "schema": "Message",
       "description": "Real-time message stream for a specific chat room"
+    },
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "User abuse and conduct reports reviewable only by Super Admin"
+    },
+    "/announcements/{announcementId}": {
+      "schema": "Announcement",
+      "description": "Public broadcasts published by Super Admin"
+    },
+    "/admin_logs/{logId}": {
+      "schema": "AdminLog",
+      "description": "Audit trail entries created by Super Admin operations"
+    },
+    "/recovery_requests/{requestId}": {
+      "schema": "RecoveryRequest",
+      "description": "Password and access recovery requests submitted for manual Super Admin assistance"
     }
   }
 }

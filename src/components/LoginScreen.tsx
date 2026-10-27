@@ -19,7 +19,12 @@ import {
   AtSign,
   X,
   Languages,
+  Phone,
+  FileQuestion,
+  Search,
 } from 'lucide-react';
+import { submitRecoveryRequest, checkUserRecoveryRequests } from '../services/adminService';
+import type { PasswordRecoveryRequest } from '../types/chat';
 
 export function LoginScreen() {
   const {
@@ -57,6 +62,16 @@ export function LoginScreen() {
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
 
+  // Recovery Desk Form Fields
+  const [recoveryTab, setRecoveryTab] = useState<'email' | 'request' | 'status'>('email');
+  const [recoveryName, setRecoveryName] = useState('');
+  const [recoveryUsername, setRecoveryUsername] = useState('');
+  const [recoveryPhone, setRecoveryPhone] = useState('');
+  const [recoveryDetails, setRecoveryDetails] = useState('');
+  const [recoverySubmitting, setRecoverySubmitting] = useState(false);
+  const [userRequests, setUserRequests] = useState<PasswordRecoveryRequest[]>([]);
+  const [checkedStatus, setCheckedStatus] = useState(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     clearAuthError();
@@ -69,7 +84,7 @@ export function LoginScreen() {
           setLocalError(language === 'bn' ? 'ইউজারনেম বা ইমেইল এবং পিন লিখুন।' : 'Please enter both your Username/Email and Secret PIN.');
           return;
         }
-        await loginWithSecretPin(pinIdentifier, enteredPin);
+        await loginWithSecretPin(pinIdentifier.trim(), enteredPin.trim());
       } else if (authMode === 'email-signup') {
         if (!name.trim()) {
           setLocalError(language === 'bn' ? 'আপনার পুরো নাম লিখুন।' : 'Please enter your full name or nickname.');
@@ -495,39 +510,306 @@ export function LoginScreen() {
         </div>
       </div>
 
-      {/* Forgot Password Modal */}
+      {/* Password Recovery Desk Modal */}
       {showForgotModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm p-6 shadow-2xl relative">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 animate-in fade-in select-none">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl w-full max-w-md p-5 sm:p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button
-              onClick={() => setShowForgotModal(false)}
+              onClick={() => {
+                setShowForgotModal(false);
+                setCheckedStatus(false);
+                setUserRequests([]);
+              }}
               className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
-            <h4 className="text-base font-bold text-white mb-1 flex items-center gap-2">
-              <Mail className="w-4 h-4 text-emerald-400" /> {t('loginForgotModalTitle')}
-            </h4>
-            <p className="text-xs text-slate-400 mb-4">
-              {t('loginForgotModalDesc')}
+
+            <div className="flex items-center gap-2 mb-1">
+              <KeyRound className="w-5 h-5 text-emerald-400" />
+              <h4 className="text-base font-bold text-white">
+                {t('recoveryDeskTitle')}
+              </h4>
+            </div>
+            <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+              {t('recoveryDeskSubtitle')}
             </p>
-            <form onSubmit={handleForgotPassword} className="space-y-3">
-              <input
-                type="email"
-                required
-                placeholder="your.email@example.com"
-                value={forgotEmail}
-                onChange={(e) => setForgotEmail(e.target.value)}
-                className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
-              />
+
+            {/* Mode Switcher Tabs */}
+            <div className="grid grid-cols-3 p-1 bg-slate-950 border border-slate-800 rounded-xl mb-4 text-xs font-semibold">
               <button
-                type="submit"
-                disabled={forgotLoading || !forgotEmail.trim()}
-                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                type="button"
+                onClick={() => setRecoveryTab('email')}
+                className={`py-1.5 px-2 rounded-lg transition cursor-pointer text-center truncate ${
+                  recoveryTab === 'email'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
               >
-                {forgotLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>{t('loginSendResetBtn')}</span>}
+                {t('loginSendResetBtn')}
               </button>
-            </form>
+              <button
+                type="button"
+                onClick={() => setRecoveryTab('request')}
+                className={`py-1.5 px-2 rounded-lg transition cursor-pointer text-center truncate ${
+                  recoveryTab === 'request'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {t('submitRecoveryBtn')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setRecoveryTab('status')}
+                className={`py-1.5 px-2 rounded-lg transition cursor-pointer text-center truncate ${
+                  recoveryTab === 'status'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {t('checkStatusBtn')}
+              </button>
+            </div>
+
+            {/* TAB 1: Automated Firebase Reset Email */}
+            {recoveryTab === 'email' && (
+              <form onSubmit={handleForgotPassword} className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-300 block">{t('applicantEmail')}</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="your.email@example.com"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-400 leading-normal">
+                  {t('loginForgotModalDesc')}
+                </p>
+                <button
+                  type="submit"
+                  disabled={forgotLoading || !forgotEmail.trim()}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 transition"
+                >
+                  {forgotLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>{t('loginSendResetBtn')}</span>}
+                </button>
+              </form>
+            )}
+
+            {/* TAB 2: Submit Admin Manual Recovery Ticket */}
+            {recoveryTab === 'request' && (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!forgotEmail.trim()) return;
+                  setRecoverySubmitting(true);
+                  try {
+                    await submitRecoveryRequest({
+                      email: forgotEmail.trim(),
+                      name: recoveryName.trim() || undefined,
+                      username: recoveryUsername.trim() || undefined,
+                      contactPhone: recoveryPhone.trim() || undefined,
+                      details: recoveryDetails.trim() || undefined,
+                    });
+                    setInfoMessage(t('recoverySubmittedSuccess'));
+                    setShowForgotModal(false);
+                    setRecoveryDetails('');
+                  } catch (err: unknown) {
+                    setLocalError(err instanceof Error ? err.message : 'Failed to submit recovery request.');
+                  } finally {
+                    setRecoverySubmitting(false);
+                  }
+                }}
+                className="space-y-3"
+              >
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-300 block">
+                    {t('applicantEmail')} <span className="text-emerald-400">*</span>
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="registered.email@example.com"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-300 block">{t('applicantName')}</label>
+                    <input
+                      type="text"
+                      placeholder="Your Name"
+                      value={recoveryName}
+                      onChange={(e) => setRecoveryName(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-300 block">Username</label>
+                    <input
+                      type="text"
+                      placeholder="@username"
+                      value={recoveryUsername}
+                      onChange={(e) => setRecoveryUsername(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-300 block">{t('applicantPhone')}</label>
+                  <input
+                    type="text"
+                    placeholder="+880 1..."
+                    value={recoveryPhone}
+                    onChange={(e) => setRecoveryPhone(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-300 block">{t('applicantDetails')}</label>
+                  <textarea
+                    rows={2}
+                    placeholder="Explain what happened or any verification info..."
+                    value={recoveryDetails}
+                    onChange={(e) => setRecoveryDetails(e.target.value)}
+                    className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 resize-none"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={recoverySubmitting || !forgotEmail.trim()}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 transition"
+                >
+                  {recoverySubmitting ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <KeyRound className="w-4 h-4" />
+                  )}
+                  <span>{t('submitRecoveryBtn')}</span>
+                </button>
+              </form>
+            )}
+
+            {/* TAB 3: Check Status of Submitted Ticket */}
+            {recoveryTab === 'status' && (
+              <div className="space-y-3">
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!forgotEmail.trim()) return;
+                    setRecoverySubmitting(true);
+                    try {
+                      const results = await checkUserRecoveryRequests(forgotEmail.trim());
+                      setUserRequests(results);
+                      setCheckedStatus(true);
+                    } catch {
+                      setLocalError('Failed to fetch ticket status.');
+                    } finally {
+                      setRecoverySubmitting(false);
+                    }
+                  }}
+                  className="flex gap-2"
+                >
+                  <input
+                    type="email"
+                    required
+                    placeholder="Enter your registered email..."
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={recoverySubmitting || !forgotEmail.trim()}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50 transition"
+                  >
+                    {recoverySubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                    <span>{t('checkStatusBtn')}</span>
+                  </button>
+                </form>
+
+                {checkedStatus && (
+                  <div className="space-y-2 pt-2 border-t border-slate-800">
+                    {userRequests.length === 0 ? (
+                      <p className="text-xs text-slate-400 py-3 text-center">
+                        No recovery request found for this email address.
+                      </p>
+                    ) : (
+                      userRequests.map((req) => (
+                        <div
+                          key={req.id}
+                          className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2 text-xs"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                req.status === 'resolved'
+                                  ? 'bg-emerald-500/20 text-emerald-300'
+                                  : req.status === 'dismissed'
+                                  ? 'bg-rose-500/20 text-rose-300'
+                                  : 'bg-amber-500/20 text-amber-300'
+                              }`}
+                            >
+                              {req.status === 'resolved'
+                                ? t('recoveryStatusResolved')
+                                : req.status === 'dismissed'
+                                ? t('recoveryStatusDismissed')
+                                : t('recoveryStatusPending')}
+                            </span>
+                            <span className="text-[10px] text-slate-500">
+                              {new Date(req.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
+
+                          {req.temporaryPin && (
+                            <div className="bg-emerald-950/40 border border-emerald-500/30 p-2 rounded-lg text-emerald-200">
+                              <span className="font-semibold block text-[10px] uppercase">
+                                {t('tempPinLabel')}:
+                              </span>
+                              <span className="text-base font-mono font-bold tracking-widest text-emerald-300">
+                                {req.temporaryPin}
+                              </span>
+                              <span className="block text-[10px] text-emerald-400/80 mt-0.5">
+                                You can now log in using your email/username and this PIN!
+                              </span>
+                            </div>
+                          )}
+
+                          {req.temporaryPassword && (
+                            <div className="bg-emerald-950/40 border border-emerald-500/30 p-2 rounded-lg text-emerald-200">
+                              <span className="font-semibold block text-[10px] uppercase">
+                                {t('tempPasswordLabel')}:
+                              </span>
+                              <span className="font-mono font-bold text-white">
+                                {req.temporaryPassword}
+                              </span>
+                            </div>
+                          )}
+
+                          {req.adminNotes && (
+                            <div className="text-[11px] text-slate-300 bg-slate-900 p-2 rounded-lg border border-slate-800">
+                              <span className="text-[10px] text-slate-400 font-semibold block">
+                                {t('adminNotesLabel')}:
+                              </span>
+                              <p>{req.adminNotes}</p>
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
