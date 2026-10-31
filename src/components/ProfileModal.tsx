@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { isUsernameAvailable } from '../services/chatService';
-import { isSuperAdmin } from '../services/adminService';
+import { isSuperAdmin, SUPER_ADMIN_EMAIL } from '../services/adminService';
 import type { ThemeMode } from '../types/chat';
 import {
   X,
@@ -44,6 +44,7 @@ export function ProfileModal({
   } = useAuth();
 
   const { language, setLanguage, t } = useLanguage();
+  const isUserSuperAdmin = isSuperAdmin(user?.email);
 
   const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'appearance' | 'language' | 'danger'>('profile');
 
@@ -298,21 +299,44 @@ export function ProfileModal({
                 { id: 'security', label: t('tabSecurity'), icon: Shield },
                 { id: 'appearance', label: t('tabAppearance'), icon: Palette },
                 { id: 'language', label: t('tabLanguage'), icon: Languages },
-                { id: 'danger', label: t('tabDanger'), icon: Trash2, danger: true },
+                ...(isUserSuperAdmin
+                  ? [
+                      {
+                        id: 'danger' as const,
+                        label: language === 'bn' ? 'অ্যাডমিন রুট সুরক্ষা' : 'Root Security',
+                        icon: Shield,
+                        adminProtected: true,
+                      },
+                    ]
+                  : [
+                      {
+                        id: 'danger' as const,
+                        label: t('tabDanger'),
+                        icon: Trash2,
+                        danger: true,
+                      },
+                    ]),
               ].map((item) => {
                 const Icon = item.icon;
                 const isActive = activeTab === item.id;
+                const isItemDanger = 'danger' in item && item.danger;
+                const isItemProtected = 'adminProtected' in item && item.adminProtected;
+
                 return (
                   <button
                     key={item.id}
                     onClick={() => setActiveTab(item.id as any)}
                     className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer shrink-0 sm:w-full text-left ${
                       isActive
-                        ? item.danger
+                        ? isItemDanger
                           ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                          : isItemProtected
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 ring-1 ring-emerald-500/30'
                           : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                        : item.danger
+                        : isItemDanger
                         ? 'text-rose-400 hover:bg-rose-500/10'
+                        : isItemProtected
+                        ? 'text-emerald-400 hover:bg-emerald-500/10'
                         : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
                     }`}
                   >
@@ -634,27 +658,80 @@ export function ProfileModal({
                 </div>
               )}
 
-              {/* TAB 5: Danger Zone (Account Deletion) */}
+              {/* TAB 5: Danger Zone (Account Deletion) OR Super Admin Root Protection */}
               {activeTab === 'danger' && (
-                <div className="p-4 bg-rose-950/20 border border-rose-900/40 rounded-2xl space-y-3">
-                  <div className="flex items-center gap-2 text-rose-400">
-                    <AlertCircle className="w-4 h-4" />
-                    <h4 className="text-xs font-bold uppercase tracking-wider">{t('dangerZoneTitle')}</h4>
+                isUserSuperAdmin ? (
+                  <div className="p-5 bg-gradient-to-r from-emerald-950/40 via-slate-900 to-slate-950/80 border border-emerald-500/40 rounded-2xl space-y-4 shadow-md animate-in fade-in">
+                    <div className="flex items-center gap-3 text-emerald-400">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                        <Shield className="w-5 h-5 text-emerald-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <h4 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider">
+                          {language === 'bn' ? 'সুপার অ্যাডমিন রুট অ্যাকাউন্ট — স্থায়ী সুরক্ষা সক্রিয়' : 'Super Admin Root Account — Permanent Protection Active'}
+                        </h4>
+                        <span className="text-[10px] text-emerald-300 font-mono font-bold bg-emerald-950/70 px-2 py-0.5 rounded-md border border-emerald-500/30 mt-0.5 inline-block">
+                          {SUPER_ADMIN_EMAIL}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-slate-950/70 rounded-xl border border-slate-800 text-xs text-slate-300 space-y-2.5 leading-relaxed">
+                      <p>
+                        {language === 'bn'
+                          ? 'এই অ্যাকাউন্টটি (chinisdramaorg@gmail.com) সিস্টেমের মূল অ্যাডমিনিস্ট্রেটর অ্যাকাউন্ট। সম্পূর্ণ প্ল্যাটফর্মের নিরাপত্তা, নিয়ন্ত্রণ এবং পরিচালন ব্যবস্থা অক্ষুণ্ণ রাখতে এই অ্যাকাউন্ট ডিলিট বা বাতিল করার অপশন স্থায়ীভাবে নিষ্ক্রিয় রাখা হয়েছে।'
+                          : 'This account (chinisdramaorg@gmail.com) is the Master Super Admin Root Account. To ensure uninterrupted platform security, governance, and control, this account is permanently protected against deletion.'}
+                      </p>
+                      <div className="flex items-center gap-2 text-emerald-400 font-semibold text-[11px] pt-1">
+                        <Check className="w-4 h-4 shrink-0" />
+                        <span>
+                          {language === 'bn'
+                            ? 'ভুলবশত ক্লিক করলেও কোনো প্রকার ডিলিট হওয়ার সুযোগ নেই (১০০% নিরাপদ)।'
+                            : 'Permanent deletion lockout active. No accidental deletion is possible.'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-[11px] text-slate-500 italic">
+                        {language === 'bn' ? 'স্ট্যাটাস: অপরিবর্তনীয় ও সুরক্ষিত' : 'Status: Immutable & Protected'}
+                      </span>
+                      {onOpenAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onClose();
+                            onOpenAdmin();
+                          }}
+                          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold cursor-pointer transition shadow flex items-center gap-1.5"
+                        >
+                          <Shield className="w-3.5 h-3.5" />
+                          <span>{language === 'bn' ? 'অ্যাডমিন প্যানেল খুলুন' : 'Open Admin Panel'}</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">{t('dangerZoneP1')}</p>
-                  <ul className="text-[11px] text-slate-400 space-y-1 list-disc pl-4">
-                    <li>{t('dangerZoneL1')}</li>
-                    <li>{t('dangerZoneL2')}</li>
-                    <li>{t('dangerZoneL3')}</li>
-                  </ul>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmDeleteModal(true)}
-                    className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow"
-                  >
-                    {t('scheduleDeletionBtn')}
-                  </button>
-                </div>
+                ) : (
+                  <div className="p-4 bg-rose-950/20 border border-rose-900/40 rounded-2xl space-y-3">
+                    <div className="flex items-center gap-2 text-rose-400">
+                      <AlertCircle className="w-4 h-4" />
+                      <h4 className="text-xs font-bold uppercase tracking-wider">{t('dangerZoneTitle')}</h4>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">{t('dangerZoneP1')}</p>
+                    <ul className="text-[11px] text-slate-400 space-y-1 list-disc pl-4">
+                      <li>{t('dangerZoneL1')}</li>
+                      <li>{t('dangerZoneL2')}</li>
+                      <li>{t('dangerZoneL3')}</li>
+                    </ul>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteModal(true)}
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow"
+                    >
+                      {t('scheduleDeletionBtn')}
+                    </button>
+                  </div>
+                )
               )}
             </div>
 

@@ -17,7 +17,10 @@ export function CallModal({ session, onEndCall }: CallModalProps) {
   const [status, setStatus] = useState<'ringing' | 'connected'>('ringing');
 
   useEffect(() => {
-    // Play ringtone while ringing
+    // Initial ringtone on mount
+    sounds.playCallRingtone();
+
+    // Play ringtone periodically while ringing
     const ringInterval = setInterval(() => {
       if (status === 'ringing') {
         sounds.playCallRingtone();

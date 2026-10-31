@@ -21,6 +21,7 @@ import {
   Shield,
   MoreVertical,
   X,
+  ArrowLeft,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -31,6 +32,8 @@ interface SidebarProps {
   onOpenProfile: () => void;
   onOpenShare: () => void;
   onOpenAdmin?: () => void;
+  ghostUser?: UserProfile | null;
+  onExitGhostMode?: () => void;
 }
 
 export function Sidebar({
@@ -41,6 +44,8 @@ export function Sidebar({
   onOpenProfile,
   onOpenShare,
   onOpenAdmin,
+  ghostUser,
+  onExitGhostMode,
 }: SidebarProps) {
   const { user, signOutUser } = useAuth();
   const { language, toggleLanguage, t } = useLanguage();
@@ -95,17 +100,24 @@ export function Sidebar({
     }
 
     // Direct chat: find partner
-    const partnerId = chat.participantIds.find((id) => id !== user?.userId) || chat.participantIds[0];
+    const effectiveUser = ghostUser || user;
+    const partnerId = chat.participantIds.find((id) => id !== effectiveUser?.userId) || chat.participantIds[0];
     const liveProfile = liveUsersMap[partnerId];
     const details = chat.participantDetails?.[partnerId];
     const presence = liveProfile
       ? formatLastSeenStatus(liveProfile.lastSeen, liveProfile.isOnline)
       : { isOnline: false, statusText: t('offline') };
 
+    const isSuspended = Boolean(
+      chat.isSuspended ||
+      liveProfile?.isBanned ||
+      details?.isBanned
+    );
     return {
       name: liveProfile?.displayName || details?.displayName || (language === 'bn' ? 'ব্যবহারকারী' : 'User'),
       photo: liveProfile?.photoURL || details?.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${partnerId}`,
-      isOnline: presence.isOnline,
+      isOnline: presence.isOnline && !isSuspended,
+      isSuspended,
       about: liveProfile?.email || details?.email || '',
     };
   };
@@ -137,43 +149,57 @@ export function Sidebar({
     }
   };
 
+  const displayUser = ghostUser || user;
+
   return (
     <aside className="w-full md:w-80 lg:w-96 bg-slate-900 border-r border-slate-800 flex flex-col h-full select-none shrink-0">
       {/* Normalized Top Header - Telegram / WhatsApp Clean Standard */}
       <div className="h-15 px-4 bg-slate-900/95 border-b border-slate-800/80 flex items-center justify-between shrink-0">
         {/* User Capsule */}
         <div
-          onClick={onOpenProfile}
-          className="flex items-center gap-2.5 p-1 -ml-1 rounded-2xl hover:bg-slate-800/70 cursor-pointer transition max-w-[190px]"
-          title={t('openProfileTooltip')}
+          onClick={ghostUser ? onExitGhostMode : onOpenProfile}
+          className={`flex items-center gap-2.5 p-1 -ml-1 rounded-2xl hover:bg-slate-800/70 cursor-pointer transition max-w-[210px] ${
+            ghostUser ? 'ring-1 ring-sky-500/40 bg-sky-950/20' : ''
+          }`}
+          title={ghostUser ? (language === 'bn' ? 'গোস্ট মোড থেকে অ্যাডমিন প্যানেলে ফিরুন' : 'Exit Ghost Mode') : t('openProfileTooltip')}
         >
           <div className="relative shrink-0">
             <img
-              src={user?.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.userId}`}
-              alt={user?.displayName || 'Me'}
-              className="w-9 h-9 rounded-full object-cover border border-slate-700 bg-slate-800 shadow-sm"
+              src={displayUser?.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${displayUser?.userId}`}
+              alt={displayUser?.displayName || 'User'}
+              className={`w-9 h-9 rounded-full object-cover border bg-slate-800 shadow-sm ${
+                ghostUser ? 'border-sky-400' : 'border-slate-700'
+              }`}
             />
-            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-slate-900" />
+            {ghostUser ? (
+              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-sky-400 rounded-full border-2 border-slate-900" />
+            ) : (
+              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-slate-900" />
+            )}
           </div>
           <div className="truncate">
             <span className="text-xs font-bold text-white block truncate leading-tight">
-              {user?.displayName}
+              {displayUser?.displayName}
             </span>
-            <span className="text-[10px] text-emerald-400 block font-medium leading-tight mt-0.5">
-              {t('online')}
+            <span className={`text-[10px] block font-medium leading-tight mt-0.5 ${
+              ghostUser ? 'text-sky-300' : 'text-emerald-400'
+            }`}>
+              {ghostUser ? (language === 'bn' ? '👁️ ইনবক্স পরিদর্শন' : '👁️ Ghost Inbox') : t('online')}
             </span>
           </div>
         </div>
 
         {/* Right Action Icons: Exactly 2 clean icons (New Chat + More Menu) */}
         <div className="flex items-center gap-1 relative" ref={menuRef}>
-          <button
-            onClick={onOpenNewChat}
-            className="p-2 rounded-xl text-slate-300 hover:text-emerald-400 hover:bg-slate-800 transition cursor-pointer"
-            title={t('newChatTooltip')}
-          >
-            <MessageSquarePlus className="w-4 h-4" />
-          </button>
+          {!ghostUser && (
+            <button
+              onClick={onOpenNewChat}
+              className="p-2 rounded-xl text-slate-300 hover:text-emerald-400 hover:bg-slate-800 transition cursor-pointer"
+              title={t('newChatTooltip')}
+            >
+              <MessageSquarePlus className="w-4 h-4" />
+            </button>
+          )}
 
           <button
             onClick={() => setShowMenu(!showMenu)}
@@ -190,6 +216,20 @@ export function Sidebar({
           {/* Standard 3-Dot Dropdown Menu (Telegram macOS / WhatsApp Web style) */}
           {showMenu && (
             <div className="absolute right-0 top-11 z-50 w-56 bg-slate-900/95 border border-slate-750 rounded-2xl shadow-2xl py-1.5 backdrop-blur-md animate-in fade-in zoom-in-95 duration-100">
+              {/* Exit Ghost Mode Action if in Ghost Mode */}
+              {ghostUser && onExitGhostMode && (
+                <button
+                  onClick={() => {
+                    setShowMenu(false);
+                    onExitGhostMode();
+                  }}
+                  className="w-full px-3.5 py-2 text-left text-xs bg-sky-950/50 text-sky-300 hover:bg-sky-900/60 hover:text-white flex items-center gap-2.5 cursor-pointer font-bold transition border-b border-slate-800"
+                >
+                  <ArrowLeft className="w-4 h-4 text-sky-400" />
+                  <span>{t('exitGhostModeBtn')}</span>
+                </button>
+              )}
+
               {/* Profile & Settings */}
               <button
                 onClick={() => {
@@ -361,9 +401,16 @@ export function Sidebar({
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-xs font-semibold text-white truncate max-w-[130px]">
-                      {display.name}
-                    </span>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-xs font-semibold text-white truncate max-w-[125px]">
+                        {display.name}
+                      </span>
+                      {display.isSuspended && (
+                        <span className="px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold shrink-0">
+                          {t('userUnavailableBadge')}
+                        </span>
+                      )}
+                    </div>
                     <span className="text-[10px] text-slate-400 shrink-0 font-medium">
                       {formatTime(chat.lastMessageTime || chat.updatedAt)}
                     </span>
@@ -377,17 +424,19 @@ export function Sidebar({
                       <span className="truncate">{chat.lastMessageText || t('noMessageYet')}</span>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setChatToDelete(chat);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/15 transition cursor-pointer shrink-0"
-                      title={t('deleteChatTooltip')}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {!ghostUser && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setChatToDelete(chat);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/15 transition cursor-pointer shrink-0"
+                        title={t('deleteChatTooltip')}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -409,7 +458,7 @@ export function Sidebar({
       </div>
 
       {/* Delete Chat Confirmation Modal */}
-      {chatToDelete && (
+      {!ghostUser && chatToDelete && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
             <div className="flex items-center gap-3 text-red-400">

@@ -12,7 +12,7 @@ import {
   updateProfile as updateFirebaseProfile,
   type User as FirebaseUser,
 } from 'firebase/auth';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { auth, googleProvider, db } from '../firebase/config';
 import {
   syncUserProfile,
@@ -22,6 +22,7 @@ import {
   restoreAccount,
   checkAccountDeletionStatus,
 } from '../services/chatService';
+import { SUPER_ADMIN_EMAIL } from '../services/adminService';
 import type { UserProfile, ThemeMode } from '../types/chat';
 
 interface AuthContextType {
@@ -111,6 +112,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('pagehide', handleTeardown);
       window.removeEventListener('beforeunload', handleTeardown);
     };
+  }, [user?.userId]);
+
+  // Live synchronization of current user profile (ban status, unban, warnings, details)
+  useEffect(() => {
+    if (!user?.userId) return;
+
+    const userDocRef = doc(db, 'users', user.userId);
+    const unsubscribe = onSnapshot(userDocRef, (snap) => {
+      if (snap.exists()) {
+        const fresh = snap.data() as UserProfile;
+        setUser((prev) => {
+          if (!prev) return fresh;
+          if (
+            prev.isBanned !== fresh.isBanned ||
+            prev.banReason !== fresh.banReason ||
+            prev.bannedUntil !== fresh.bannedUntil ||
+            prev.warningNotice !== fresh.warningNotice ||
+            prev.displayName !== fresh.displayName ||
+            prev.photoURL !== fresh.photoURL ||
+            prev.secretPin !== fresh.secretPin
+          ) {
+            return { ...prev, ...fresh };
+          }
+          return prev;
+        });
+      }
+    }, (error) => {
+      console.warn('User profile sync subscription notice:', error);
+    });
+
+    return () => unsubscribe();
   }, [user?.userId]);
 
   // Check deletion status on login
@@ -394,6 +426,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const requestAccountDeletion = async () => {
     if (!user) return;
+    if (user.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) {
+      console.warn('Super Admin root account deletion prevented.');
+      return;
+    }
     await scheduleAccountDeletion(user.userId);
     await signOutUser();
   };

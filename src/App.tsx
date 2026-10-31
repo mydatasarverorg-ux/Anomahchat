@@ -19,7 +19,7 @@ import { AnnouncementBanner } from './components/AnnouncementBanner';
 import { AdminModal } from './components/AdminModal';
 import { subscribeToUserChats } from './services/chatService';
 import { isSuperAdmin } from './services/adminService';
-import type { ChatRoom, CallSession } from './types/chat';
+import type { ChatRoom, CallSession, UserProfile } from './types/chat';
 import {
   MessageSquare,
   Lock,
@@ -27,11 +27,13 @@ import {
   Loader2,
   Sparkles,
   WifiOff,
+  Eye,
+  ArrowLeft,
 } from 'lucide-react';
 
 function ChatDashboard() {
   const { user, loading, deletionNotice, recoverAccount, signOutUser } = useAuth();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [chats, setChats] = useState<ChatRoom[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [selectedChat, setSelectedChat] = useState<ChatRoom | null>(null);
@@ -40,6 +42,9 @@ function ChatDashboard() {
   const [showShare, setShowShare] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [callSession, setCallSession] = useState<CallSession | null>(null);
+
+  // Ghost Inspection State (Admin enters user DM without login)
+  const [ghostUser, setGhostUser] = useState<UserProfile | null>(null);
 
   // Online / Offline state detection (WhatsApp style)
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -54,10 +59,11 @@ function ChatDashboard() {
     };
   }, []);
 
-  // Subscribe to all chats where current user is a participant
+  // Subscribe to all chats where current user (or ghost inspected user) is a participant
   useEffect(() => {
-    if (!user) return;
-    const unsubscribe = subscribeToUserChats(user.userId, (data) => {
+    const targetUserId = ghostUser ? ghostUser.userId : user?.userId;
+    if (!targetUserId) return;
+    const unsubscribe = subscribeToUserChats(targetUserId, (data) => {
       setChats(data);
       // Auto select first chat if none selected on desktop
       if (!activeChatId && !selectedChat && data.length > 0 && window.innerWidth >= 768) {
@@ -67,7 +73,30 @@ function ChatDashboard() {
     });
 
     return () => unsubscribe();
-  }, [user, activeChatId, selectedChat]);
+  }, [user, ghostUser, activeChatId, selectedChat]);
+
+  // Handle mobile hardware back and Escape key while in Ghost Mode
+  useEffect(() => {
+    if (!ghostUser) return;
+    window.history.pushState({ modal: 'ghostMode' }, '');
+    const handlePopState = () => {
+      setGhostUser(null);
+      setActiveChatId(null);
+      setSelectedChat(null);
+      setShowAdmin(true);
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        handlePopState();
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [ghostUser]);
 
   if (loading) {
     return (
@@ -130,6 +159,44 @@ function ChatDashboard() {
       {/* Global Broadcast Announcement Banner */}
       <AnnouncementBanner />
 
+      {/* Admin Ghost Mode Top Persistent Banner */}
+      {ghostUser && (
+        <div className="bg-gradient-to-r from-sky-600 via-indigo-600 to-sky-700 text-white px-4 py-2.5 text-xs flex flex-wrap items-center justify-between gap-2.5 z-50 shadow-lg animate-in slide-in-from-top-2 border-b border-white/20">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-black/25 flex items-center justify-center shrink-0 border border-white/30 shadow-sm">
+              <Eye className="w-4 h-4 text-white" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-extrabold bg-white/20 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider border border-white/30">
+                  {t('ghostModeBannerTitle')}
+                </span>
+                <span className="font-bold text-sm text-white truncate">{ghostUser.displayName}</span>
+                <span className="text-sky-100 text-xs truncate hidden sm:inline">({ghostUser.email})</span>
+              </div>
+              <p className="text-[11px] text-sky-100 truncate mt-0.5 hidden md:block">
+                {t('ghostModeBannerDesc').replace('{name}', ghostUser.displayName).replace('{email}', ghostUser.email)}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => {
+                setGhostUser(null);
+                setActiveChatId(null);
+                setSelectedChat(null);
+                setShowAdmin(true);
+              }}
+              className="px-3.5 py-1.5 bg-white text-slate-900 hover:bg-slate-100 rounded-xl font-bold text-xs cursor-pointer shadow-md transition flex items-center gap-1.5 active:scale-95"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>{t('exitGhostModeBtn')}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 flex overflow-hidden relative">
       {/* Sidebar: Visible on desktop, or on mobile when no active chat is opened */}
       <div
@@ -149,6 +216,13 @@ function ChatDashboard() {
           onOpenProfile={() => setShowProfile(true)}
           onOpenShare={() => setShowShare(true)}
           onOpenAdmin={() => setShowAdmin(true)}
+          ghostUser={ghostUser}
+          onExitGhostMode={() => {
+            setGhostUser(null);
+            setActiveChatId(null);
+            setSelectedChat(null);
+            setShowAdmin(true);
+          }}
         />
       </div>
 
@@ -162,6 +236,13 @@ function ChatDashboard() {
               setSelectedChat(null);
             }}
             onStartCall={(session) => setCallSession(session)}
+            ghostUser={ghostUser}
+            onExitGhostMode={() => {
+              setGhostUser(null);
+              setActiveChatId(null);
+              setSelectedChat(null);
+              setShowAdmin(true);
+            }}
           />
         ) : (
           /* Normalized Empty State - Clean Telegram/WhatsApp style */
@@ -208,7 +289,19 @@ function ChatDashboard() {
 
       {/* Super Admin Control Panel Modal */}
       {showAdmin && isSuperAdmin(user?.email) && (
-        <AdminModal onClose={() => setShowAdmin(false)} />
+        <AdminModal
+          onClose={() => setShowAdmin(false)}
+          onEnterGhostMode={(targetUser, targetChatId) => {
+            setGhostUser(targetUser);
+            setShowAdmin(false);
+            if (targetChatId) {
+              setActiveChatId(targetChatId);
+            } else {
+              setActiveChatId(null);
+              setSelectedChat(null);
+            }
+          }}
+        />
       )}
 
       {/* Modals */}

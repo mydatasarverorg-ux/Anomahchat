@@ -44,45 +44,92 @@ export async function logAdminAction(
   const logId = `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const path = `admin_logs/${logId}`;
   try {
-    const logEntry: AdminAuditLog = {
+    const logEntry: Record<string, unknown> = {
       id: logId,
       adminEmail,
       action,
-      targetId,
-      targetName,
       details,
       timestamp: new Date().toISOString(),
     };
-    await setDoc(doc(db, 'admin_logs', logId), logEntry);
+
+    if (targetId) {
+      logEntry.targetId = targetId;
+    }
+    if (targetName) {
+      logEntry.targetName = targetName;
+    }
+
+    await setDoc(doc(db, 'admin_logs', logId), logEntry as unknown as AdminAuditLog);
   } catch (error) {
     console.error('Failed to write admin log:', error);
     // Don't block core action if logging encounters issue
   }
 }
 
-// Ban or suspend a user
+// Ban or suspend a user with optional duration
 export async function banUser(
   targetUserId: string,
   targetEmail: string,
   targetName: string,
   reason: string,
-  adminEmail: string
+  adminEmail: string,
+  durationDays?: number | 'permanent'
 ): Promise<void> {
+  // Absolute protection for Root Super Admin
+  if (isSuperAdmin(targetEmail)) {
+    throw new Error('Root Super Admin account cannot be suspended.');
+  }
+
   const path = `users/${targetUserId}`;
   try {
     const userRef = doc(db, 'users', targetUserId);
-    const nowIso = new Date().toISOString();
-    await updateDoc(userRef, {
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    let bannedUntil: string | null = null;
+    let durationLogText = 'Permanent';
+
+    if (typeof durationDays === 'number' && durationDays > 0) {
+      const untilDate = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
+      bannedUntil = untilDate.toISOString();
+      durationLogText = `${durationDays} day(s) (until ${untilDate.toLocaleDateString()})`;
+    }
+
+    const updates: Record<string, unknown> = {
       isBanned: true,
       banReason: reason.trim() || 'Violating platform guidelines and community safety standards.',
       bannedAt: nowIso,
       bannedBy: adminEmail,
+      bannedUntil,
       isOnline: false,
-    });
+    };
+
+    await updateDoc(userRef, updates);
+
+    // Synchronize suspension status across all active chats involving this user
+    try {
+      const chatsSnap = await getDocs(
+        query(collection(db, 'chats'), where('participantIds', 'array-contains', targetUserId))
+      );
+      for (const chatDoc of chatsSnap.docs) {
+        const cdata = chatDoc.data() as ChatRoom;
+        const chatUpdates: Record<string, unknown> = {
+          [`participantDetails.${targetUserId}.isBanned`]: true,
+        };
+        if (cdata.type === 'direct') {
+          chatUpdates.isSuspended = true;
+          chatUpdates.suspendedUserId = targetUserId;
+          chatUpdates.suspendedUserName = targetName || targetEmail;
+        }
+        await updateDoc(doc(db, 'chats', chatDoc.id), chatUpdates);
+      }
+    } catch (syncErr) {
+      console.warn('Sync ban to chats notice:', syncErr);
+    }
 
     await logAdminAction(
       'ban_user',
-      `Suspended user account. Reason: "${reason.trim()}"`,
+      `Suspended user account for ${durationLogText}. Reason: "${reason.trim()}"`,
       adminEmail,
       targetUserId,
       targetName || targetEmail
@@ -92,7 +139,7 @@ export async function banUser(
   }
 }
 
-// Unban a user
+// Unban / Reactivate a user
 export async function unbanUser(
   targetUserId: string,
   targetEmail: string,
@@ -107,11 +154,33 @@ export async function unbanUser(
       banReason: null,
       bannedAt: null,
       bannedBy: null,
+      bannedUntil: null,
     });
+
+    // Synchronize reinstatement across all active chats involving this user
+    try {
+      const chatsSnap = await getDocs(
+        query(collection(db, 'chats'), where('participantIds', 'array-contains', targetUserId))
+      );
+      for (const chatDoc of chatsSnap.docs) {
+        const cdata = chatDoc.data() as ChatRoom;
+        const chatUpdates: Record<string, unknown> = {
+          [`participantDetails.${targetUserId}.isBanned`]: false,
+        };
+        if (cdata.type === 'direct') {
+          chatUpdates.isSuspended = false;
+          chatUpdates.suspendedUserId = null;
+          chatUpdates.suspendedUserName = null;
+        }
+        await updateDoc(doc(db, 'chats', chatDoc.id), chatUpdates);
+      }
+    } catch (syncErr) {
+      console.warn('Sync unban to chats notice:', syncErr);
+    }
 
     await logAdminAction(
       'unban_user',
-      'Lifted ban and reinstated account access.',
+      'Lifted suspension and reinstated account access.',
       adminEmail,
       targetUserId,
       targetName || targetEmail
@@ -209,14 +278,33 @@ export async function submitReport(reportData: {
   const reportId = `rep_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const path = `reports/${reportId}`;
   try {
-    const newReport: UserReport = {
+    const newReport: Record<string, unknown> = {
       id: reportId,
-      ...reportData,
+      reporterId: reportData.reporterId,
+      reporterName: reportData.reporterName,
+      reporterEmail: reportData.reporterEmail || '',
+      targetUserId: reportData.targetUserId,
+      targetUserName: reportData.targetUserName,
+      reason: reportData.reason,
       details: reportData.details.trim(),
       status: 'pending',
       createdAt: new Date().toISOString(),
     };
-    await setDoc(doc(db, 'reports', reportId), newReport);
+
+    if (reportData.targetUserEmail) {
+      newReport.targetUserEmail = reportData.targetUserEmail;
+    }
+    if (reportData.chatId) {
+      newReport.chatId = reportData.chatId;
+    }
+    if (reportData.messageId) {
+      newReport.messageId = reportData.messageId;
+    }
+    if (reportData.messageText) {
+      newReport.messageText = reportData.messageText;
+    }
+
+    await setDoc(doc(db, 'reports', reportId), newReport as unknown as UserReport);
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
   }
@@ -235,7 +323,8 @@ export function subscribeToReports(callback: (reports: UserReport[]) => void): U
     },
     (error) => {
       console.warn('Reports subscription notice:', error);
-      if (!error.message.includes('offline') && !error.message.includes('unavailable')) {
+      const msg = error.message.toLowerCase();
+      if (!msg.includes('offline') && !msg.includes('unavailable') && !msg.includes('could not reach') && !msg.includes('timeout')) {
         handleFirestoreError(error, OperationType.GET, path);
       }
     }
@@ -301,7 +390,8 @@ export function subscribeToAnnouncements(
     },
     (error) => {
       console.warn('Announcements subscription notice:', error);
-      if (!error.message.includes('offline') && !error.message.includes('unavailable')) {
+      const msg = error.message.toLowerCase();
+      if (!msg.includes('offline') && !msg.includes('unavailable') && !msg.includes('could not reach') && !msg.includes('timeout')) {
         handleFirestoreError(error, OperationType.GET, path);
       }
     }
@@ -381,7 +471,8 @@ export function subscribeToAdminLogs(callback: (logs: AdminAuditLog[]) => void):
     },
     (error) => {
       console.warn('Admin logs subscription notice:', error);
-      if (!error.message.includes('offline') && !error.message.includes('unavailable')) {
+      const msg = error.message.toLowerCase();
+      if (!msg.includes('offline') && !msg.includes('unavailable') && !msg.includes('could not reach') && !msg.includes('timeout')) {
         handleFirestoreError(error, OperationType.GET, path);
       }
     }
@@ -425,19 +516,20 @@ export async function submitRecoveryRequest(data: {
   const reqId = `rec_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const path = `recovery_requests/${reqId}`;
 
-  const reqDoc: PasswordRecoveryRequest = {
+  const reqDoc: Record<string, unknown> = {
     id: reqId,
     email: cleanEmail,
-    name: data.name?.trim() || undefined,
-    username: data.username?.trim().replace(/^@/, '') || undefined,
-    contactPhone: data.contactPhone?.trim() || undefined,
-    details: data.details?.trim() || undefined,
     status: 'pending',
     createdAt: new Date().toISOString(),
   };
 
+  if (data.name?.trim()) reqDoc.name = data.name.trim();
+  if (data.username?.trim()) reqDoc.username = data.username.trim().replace(/^@/, '');
+  if (data.contactPhone?.trim()) reqDoc.contactPhone = data.contactPhone.trim();
+  if (data.details?.trim()) reqDoc.details = data.details.trim();
+
   try {
-    await setDoc(doc(db, 'recovery_requests', reqId), reqDoc);
+    await setDoc(doc(db, 'recovery_requests', reqId), reqDoc as unknown as PasswordRecoveryRequest);
     return reqId;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);

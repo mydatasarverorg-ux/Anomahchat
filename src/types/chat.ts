@@ -29,6 +29,7 @@ export interface UserProfile {
   banReason?: string;
   bannedAt?: string;
   bannedBy?: string;
+  bannedUntil?: string; // ISO timestamp when temporary suspension expires
   warningNotice?: string;
   warningIssuedAt?: string;
   warningDismissed?: boolean;
@@ -154,7 +155,11 @@ export interface ChatRoom {
     displayName: string;
     photoURL?: string;
     email: string;
+    isBanned?: boolean;
   }>;
+  isSuspended?: boolean;
+  suspendedUserId?: string | null;
+  suspendedUserName?: string | null;
   lastMessageText?: string;
   lastMessageSenderId?: string;
   lastMessageTime?: string;

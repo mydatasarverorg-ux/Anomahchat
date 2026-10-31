@@ -210,7 +210,8 @@ export function subscribeToUserChats(
     },
     (error) => {
       console.warn('Chats snapshot notice:', error);
-      if (!error.message.includes('unavailable') && !error.message.includes('offline')) {
+      const msg = error.message.toLowerCase();
+      if (!msg.includes('unavailable') && !msg.includes('offline') && !msg.includes('could not reach') && !msg.includes('timeout')) {
         handleFirestoreError(error, OperationType.GET, path);
       }
     }
@@ -241,13 +242,13 @@ export async function getOrCreateDirectChat(
       participantDetails: {
         [currentUser.userId]: {
           displayName: currentUser.displayName,
-          photoURL: currentUser.photoURL,
-          email: currentUser.email,
+          photoURL: currentUser.photoURL || '',
+          email: currentUser.email || '',
         },
         [partner.userId]: {
           displayName: partner.displayName,
-          photoURL: partner.photoURL,
-          email: partner.email,
+          photoURL: partner.photoURL || '',
+          email: partner.email || '',
         },
       },
       lastMessageText: 'Started conversation',
@@ -330,7 +331,8 @@ export function subscribeToChatMessages(
     },
     (error) => {
       console.warn('Messages snapshot notice:', error);
-      if (!error.message.includes('unavailable') && !error.message.includes('offline')) {
+      const msg = error.message.toLowerCase();
+      if (!msg.includes('unavailable') && !msg.includes('offline') && !msg.includes('could not reach') && !msg.includes('timeout')) {
         handleFirestoreError(error, OperationType.GET, path);
       }
     }
@@ -349,6 +351,27 @@ export async function sendMessage(params: {
 }): Promise<void> {
   const path = `chats/${params.chatId}/messages`;
   try {
+    // Strictly block suspended senders from sending any message anywhere
+    if (params.sender.isBanned) {
+      throw new Error('Your account has been suspended by administration. You cannot send messages.');
+    }
+
+    // Check parent chat suspension status (direct chats with suspended users are completely locked)
+    const parentChatRef = doc(db, 'chats', params.chatId);
+    const parentSnap = await getDoc(parentChatRef);
+    if (parentSnap.exists()) {
+      const parentData = parentSnap.data() as ChatRoom;
+      if (parentData.isSuspended) {
+        throw new Error('This conversation is locked because a participant has been suspended.');
+      }
+      if (parentData.type === 'direct') {
+        const partnerId = parentData.participantIds?.find((id) => id !== params.sender.userId);
+        if (partnerId && parentData.participantDetails?.[partnerId]?.isBanned) {
+          throw new Error('This user has been suspended. Messaging is disabled.');
+        }
+      }
+    }
+
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const nowIso = new Date().toISOString();
     const messageRef = doc(db, 'chats', params.chatId, 'messages', messageId);
@@ -381,7 +404,6 @@ export async function sendMessage(params: {
     await setDoc(messageRef, messageData);
 
     // Update parent chat snippet
-    const parentChatRef = doc(db, 'chats', params.chatId);
     let snippet = messageData.text;
     if (params.type === 'audio') snippet = '🎤 Voice note';
     if (params.type === 'image') snippet = '📷 Photo';

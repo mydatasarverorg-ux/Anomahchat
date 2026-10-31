@@ -157,22 +157,27 @@ export function NewChatModal({ onClose, onSelectChat }: NewChatModalProps) {
           ) : (
             filteredUsers.map((u) => {
               const isSelected = selectedUserIds.includes(u.userId);
+              const isSuspended = Boolean(u.isBanned);
               const presence = formatLastSeenStatus(u.lastSeen, u.isOnline);
               return (
                 <div
                   key={u.userId}
                   onClick={() => {
+                    if (isSuspended) return;
                     if (mode === 'direct') {
                       handleStartDirectChat(u);
                     } else {
                       toggleSelectUser(u.userId);
                     }
                   }}
-                  className={`flex items-center gap-3 p-2.5 rounded-xl transition cursor-pointer border ${
-                    isSelected
-                      ? 'bg-emerald-950/60 border-emerald-500/50'
-                      : 'bg-slate-800/40 hover:bg-slate-800 border-slate-700/50'
+                  className={`flex items-center gap-3 p-2.5 rounded-xl transition border ${
+                    isSuspended
+                      ? 'opacity-60 cursor-not-allowed bg-slate-800/20 border-slate-800'
+                      : isSelected
+                      ? 'bg-emerald-950/60 border-emerald-500/50 cursor-pointer'
+                      : 'bg-slate-800/40 hover:bg-slate-800 border-slate-700/50 cursor-pointer'
                   }`}
+                  title={isSuspended ? t('userSuspendedCannotChat') : undefined}
                 >
                   <div className="relative">
                     <img
@@ -180,19 +185,34 @@ export function NewChatModal({ onClose, onSelectChat }: NewChatModalProps) {
                       alt={u.displayName}
                       className="w-9 h-9 rounded-full bg-slate-700 object-cover"
                     />
-                    {presence.isOnline && (
+                    {presence.isOnline && !isSuspended && (
                       <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-slate-900 rounded-full" />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-semibold text-white truncate flex items-center justify-between">
-                      <span>{u.displayName}</span>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="truncate">{u.displayName}</span>
+                        {isSuspended && (
+                          <span className="px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold shrink-0">
+                            {t('userUnavailableBadge')}
+                          </span>
+                        )}
+                      </div>
                       <span
                         className={`text-[10px] ${
-                          presence.isOnline ? 'text-emerald-400 font-medium' : 'text-slate-400'
+                          isSuspended
+                            ? 'text-amber-400 font-semibold'
+                            : presence.isOnline
+                            ? 'text-emerald-400 font-medium'
+                            : 'text-slate-400'
                         }`}
                       >
-                        {presence.isOnline ? t('online') : (presence.statusText === 'Offline' ? t('offline') : presence.statusText)}
+                        {isSuspended
+                          ? t('userUnavailableBadge')
+                          : presence.isOnline
+                          ? t('online')
+                          : (presence.statusText === 'Offline' ? t('offline') : presence.statusText)}
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-400 truncate">{u.about || u.email}</div>
