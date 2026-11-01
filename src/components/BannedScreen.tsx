@@ -76,7 +76,7 @@ export function BannedScreen() {
     : '';
 
   return (
-    <div className="min-h-screen w-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-white relative overflow-hidden select-none">
+    <div className="min-h-screen w-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-white relative overflow-hidden select-none safe-area-container">
       {/* Background radial accent */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-red-600/10 rounded-full blur-3xl pointer-events-none" />
 

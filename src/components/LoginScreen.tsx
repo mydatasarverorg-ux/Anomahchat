@@ -131,7 +131,7 @@ export function LoginScreen() {
   const activeError = localError || authError;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-950 via-slate-900 to-slate-950 text-slate-100 flex flex-col items-center justify-center p-3 md:p-6 relative">
+    <div className="min-h-screen bg-gradient-to-br from-emerald-950 via-slate-900 to-slate-950 text-slate-100 flex flex-col items-center justify-center p-3 md:p-6 relative safe-area-container">
       {/* Top Bar Quick Language Switcher */}
       <div className="w-full max-w-4xl flex justify-end mb-2.5 px-2">
         <div className="inline-flex items-center gap-1 bg-slate-900/80 border border-slate-750 p-1 rounded-xl shadow-lg backdrop-blur-md">

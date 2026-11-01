@@ -119,7 +119,7 @@ function ChatDashboard() {
   const activeChat = chats.find((c) => c.id === activeChatId) || selectedChat || null;
 
   return (
-    <div className="h-screen w-screen bg-slate-950 flex flex-col overflow-hidden font-sans relative">
+    <div className="h-screen w-screen bg-slate-950 flex flex-col overflow-hidden font-sans relative safe-area-container">
       {/* 15-Day Account Deletion Recovery Banner */}
       {deletionNotice && (
         <div className="bg-gradient-to-r from-red-600 to-rose-600 text-white px-4 py-2.5 text-xs flex flex-wrap items-center justify-between gap-2 z-50 shadow-md">
