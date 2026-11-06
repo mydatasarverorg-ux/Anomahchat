@@ -1,5 +1,25 @@
 // \0rolldown/runtime.js
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod, mod.exports), cb = null), mod.exports);
+var __copyProps = (to, from, except, desc) => {
+	if (from && typeof from === "object" || typeof from === "function") for (var keys = __getOwnPropNames(from), i = 0, n = keys.length, key; i < n; i++) {
+		key = keys[i];
+		if (!__hasOwnProp.call(to, key) && key !== except) __defProp(to, key, {
+			get: ((k) => from[k]).bind(null, key),
+			enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable
+		});
+	}
+	return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(isNodeMode || !mod || !mod.__esModule || !__hasOwnProp.call(mod, "default") ? __defProp(target, "default", {
+	value: mod,
+	enumerable: true
+}) : target, mod));
 // \0vite/modulepreload-polyfill.js
 (function polyfill() {
 	const relList = document.createElement("link").relList;
@@ -11431,7 +11451,7 @@ var require_client = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	module.exports = require_react_dom_client_production();
 }));
 // node_modules/@firebase/util/dist/postinstall.mjs
-var import_react = require_react();
+var import_react = /* @__PURE__ */ __toESM(require_react(), 1);
 var import_client = require_client();
 /**
 * @license
@@ -54765,6 +54785,26 @@ var Copy = createLucideIcon("copy", [["rect", {
 * This source code is licensed under the ISC license.
 * See the LICENSE file in the root directory of this source tree.
 */
+var Download = createLucideIcon("download", [
+	["path", {
+		d: "M12 15V3",
+		key: "m9g1x1"
+	}],
+	["path", {
+		d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4",
+		key: "ih7n3h"
+	}],
+	["path", {
+		d: "m7 10 5 5 5-5",
+		key: "brsn70"
+	}]
+]);
+/**
+* @license lucide-react v0.546.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
 var EllipsisVertical = createLucideIcon("ellipsis-vertical", [
 	["circle", {
 		cx: "12",
@@ -55381,6 +55421,46 @@ var Settings = createLucideIcon("settings", [["path", {
 * This source code is licensed under the ISC license.
 * See the LICENSE file in the root directory of this source tree.
 */
+var Share2 = createLucideIcon("share-2", [
+	["circle", {
+		cx: "18",
+		cy: "5",
+		r: "3",
+		key: "gq8acd"
+	}],
+	["circle", {
+		cx: "6",
+		cy: "12",
+		r: "3",
+		key: "w7nqdw"
+	}],
+	["circle", {
+		cx: "18",
+		cy: "19",
+		r: "3",
+		key: "1xt0gg"
+	}],
+	["line", {
+		x1: "8.59",
+		x2: "15.42",
+		y1: "13.51",
+		y2: "17.49",
+		key: "47mynk"
+	}],
+	["line", {
+		x1: "15.41",
+		x2: "8.59",
+		y1: "6.51",
+		y2: "10.49",
+		key: "1n3mei"
+	}]
+]);
+/**
+* @license lucide-react v0.546.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
 var ShieldAlert = createLucideIcon("shield-alert", [
 	["path", {
 		d: "M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z",
@@ -55404,6 +55484,24 @@ var ShieldAlert = createLucideIcon("shield-alert", [
 var Shield = createLucideIcon("shield", [["path", {
 	d: "M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z",
 	key: "oel41y"
+}]]);
+/**
+* @license lucide-react v0.546.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
+var Smartphone = createLucideIcon("smartphone", [["rect", {
+	width: "14",
+	height: "20",
+	x: "5",
+	y: "2",
+	rx: "2",
+	ry: "2",
+	key: "1yt0o3"
+}], ["path", {
+	d: "M12 18h.01",
+	key: "mhygvu"
 }]]);
 /**
 * @license lucide-react v0.546.0 - ISC
@@ -55461,6 +55559,30 @@ var Sparkles = createLucideIcon("sparkles", [
 		cy: "20",
 		r: "2",
 		key: "6kqj1y"
+	}]
+]);
+/**
+* @license lucide-react v0.546.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
+var SquarePlus = createLucideIcon("square-plus", [
+	["rect", {
+		width: "18",
+		height: "18",
+		x: "3",
+		y: "3",
+		rx: "2",
+		key: "afitv7"
+	}],
+	["path", {
+		d: "M8 12h8",
+		key: "1wcyev"
+	}],
+	["path", {
+		d: "M12 8v8",
+		key: "napkw2"
 	}]
 ]);
 /**
@@ -58543,6 +58665,254 @@ function NewChatModal({ onClose, onSelectChat }) {
 		})
 	});
 }
+// src/hooks/usePWAInstall.ts
+function usePWAInstall() {
+	const [deferredPrompt, setDeferredPrompt] = (0, import_react.useState)(null);
+	const [isInstalled, setIsInstalled] = (0, import_react.useState)(false);
+	const [isIOS, setIsIOS] = (0, import_react.useState)(false);
+	const [isNativeApp, setIsNativeApp] = (0, import_react.useState)(false);
+	(0, import_react.useEffect)(() => {
+		const isCapacitorNative = typeof window !== "undefined" && Boolean(window?.Capacitor?.isNativePlatform?.());
+		setIsNativeApp(isCapacitorNative);
+		const isStandalone = typeof window !== "undefined" && (window.matchMedia("(display-mode: standalone)").matches || window.navigator?.standalone === true);
+		setIsInstalled(isStandalone);
+		const userAgent = typeof window !== "undefined" ? window.navigator.userAgent.toLowerCase() : "";
+		const isIOSDevice = /iphone|ipad|ipod/.test(userAgent);
+		setIsIOS(isIOSDevice);
+		const handleBeforeInstallPrompt = (e) => {
+			e.preventDefault();
+			setDeferredPrompt(e);
+		};
+		const handleAppInstalled = () => {
+			setIsInstalled(true);
+			setDeferredPrompt(null);
+		};
+		window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+		window.addEventListener("appinstalled", handleAppInstalled);
+		return () => {
+			window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+			window.removeEventListener("appinstalled", handleAppInstalled);
+		};
+	}, []);
+	const install = async () => {
+		if (!deferredPrompt) return false;
+		await deferredPrompt.prompt();
+		const { outcome } = await deferredPrompt.userChoice;
+		if (outcome === "accepted") {
+			setIsInstalled(true);
+			setDeferredPrompt(null);
+			return true;
+		}
+		return false;
+	};
+	return {
+		isInstallable: Boolean(deferredPrompt),
+		isInstalled,
+		isIOS,
+		isNativeApp,
+		install
+	};
+}
+// src/components/PWAInstallButton.tsx
+var PWAInstallButton = ({ variant = "sidebar" }) => {
+	const { isInstallable, isInstalled, isIOS, isNativeApp, install } = usePWAInstall();
+	const { language } = useLanguage();
+	const [showIOSModal, setShowIOSModal] = (0, import_react.useState)(false);
+	const [dismissed, setDismissed] = (0, import_react.useState)(false);
+	if (isNativeApp || isInstalled || dismissed) return null;
+	if (!isInstallable && !isIOS) return null;
+	const handleAction = async () => {
+		if (isIOS) setShowIOSModal(true);
+		else await install();
+	};
+	const label = language === "bn" ? "অ্যাপ ইনস্টল করুন" : "Install App";
+	const tagline = language === "bn" ? "হোম স্ক্রিনে যুক্ত করে ফুল-স্ক্রিন অ্যাপ হিসেবে চালান" : "Add to home screen for full-screen app experience";
+	if (variant === "banner") return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+		className: "bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-900/80 border-b border-emerald-500/30 px-3 py-2 flex items-center justify-between gap-2 shadow-sm animate-in slide-in-from-top-1 z-20",
+		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			className: "flex items-center gap-2.5 min-w-0",
+			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+				className: "w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center shrink-0",
+				children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Smartphone, { className: "w-4 h-4 text-emerald-400" })
+			}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "truncate",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+					className: "text-xs font-bold text-white block leading-tight truncate",
+					children: language === "bn" ? "অনোমাহ চ্যাট অ্যাপ ইনস্টল করুন" : "Install Anomah Chat"
+				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+					className: "text-[10px] text-emerald-300 block leading-tight truncate",
+					children: tagline
+				})]
+			})]
+		}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			className: "flex items-center gap-1.5 shrink-0",
+			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+				onClick: handleAction,
+				className: "px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow flex items-center gap-1.5 cursor-pointer active:scale-95",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Download, { className: "w-3.5 h-3.5" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: label })]
+			}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+				onClick: () => setDismissed(true),
+				className: "p-1 text-slate-400 hover:text-white rounded-md transition cursor-pointer",
+				title: "Dismiss",
+				children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-3.5 h-3.5" })
+			})]
+		})]
+	}), showIOSModal && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+		className: "fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4",
+		children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			className: "bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-5 shadow-2xl relative",
+			children: [
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+					onClick: () => setShowIOSModal(false),
+					className: "absolute top-3.5 right-3.5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer",
+					children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-4 h-4" })
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "flex items-center gap-2.5 mb-3",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+						className: "w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center",
+						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Smartphone, { className: "w-4 h-4 text-emerald-400" })
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", {
+						className: "text-sm font-bold text-white",
+						children: language === "bn" ? "আইফোনে ইনস্টল করার নিয়ম" : "Install on iPhone / iPad"
+					})]
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "space-y-2.5 text-xs text-slate-300 mb-4 bg-slate-800/60 p-3 rounded-xl border border-slate-700/60",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "flex items-start gap-2",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
+							children: "1"
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex-1",
+							children: [language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+								"সাফারি ব্রাউজারের নিচে ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "শেয়ার বোতামে (Share)" }),
+								" চাপ দিন।"
+							] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+								"Tap the ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Share" }),
+								" button in Safari toolbar."
+							] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "inline-flex items-center gap-1 ml-1 text-emerald-400",
+								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Share2, { className: "w-3.5 h-3.5" })
+							})]
+						})]
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "flex items-start gap-2",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
+							children: "2"
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex-1",
+							children: [language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+								"একটু নিচে স্ক্রল করে ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Add to Home Screen" }),
+								" চাপুন।"
+							] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+								"Scroll down and tap ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Add to Home Screen" }),
+								"."
+							] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "inline-flex items-center gap-1 ml-1 text-emerald-400",
+								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SquarePlus, { className: "w-3.5 h-3.5" })
+							})]
+						})]
+					})]
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+					onClick: () => setShowIOSModal(false),
+					className: "w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer",
+					children: language === "bn" ? "বুঝতে পেরেছি" : "Got it"
+				})
+			]
+		})
+	})] });
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+		onClick: handleAction,
+		className: "w-full px-3 py-2 bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-500/30 text-emerald-300 hover:text-white rounded-xl text-xs font-bold transition flex items-center justify-between cursor-pointer shadow-sm group",
+		title: tagline,
+		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			className: "flex items-center gap-2",
+			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Download, { className: "w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: label })]
+		}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+			className: "text-[10px] uppercase font-bold px-1.5 py-0.5 bg-emerald-500/20 border border-emerald-400/30 rounded text-emerald-300",
+			children: "PWA"
+		})]
+	}), showIOSModal && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+		className: "fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4",
+		children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			className: "bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-5 shadow-2xl relative",
+			children: [
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+					onClick: () => setShowIOSModal(false),
+					className: "absolute top-3.5 right-3.5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer",
+					children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-4 h-4" })
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "flex items-center gap-2.5 mb-3",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+						className: "w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center",
+						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Smartphone, { className: "w-4 h-4 text-emerald-400" })
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", {
+						className: "text-sm font-bold text-white",
+						children: language === "bn" ? "আইফোনে ইনস্টল করার নিয়ম" : "Install on iPhone / iPad"
+					})]
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "space-y-2.5 text-xs text-slate-300 mb-4 bg-slate-800/60 p-3 rounded-xl border border-slate-700/60",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "flex items-start gap-2",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
+							children: "1"
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex-1",
+							children: [language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+								"সাফারি ব্রাউজারের নিচে ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "শেয়ার বোতামে (Share)" }),
+								" চাপ দিন।"
+							] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+								"Tap the ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Share" }),
+								" button in Safari toolbar."
+							] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "inline-flex items-center gap-1 ml-1 text-emerald-400",
+								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Share2, { className: "w-3.5 h-3.5" })
+							})]
+						})]
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "flex items-start gap-2",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
+							children: "2"
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex-1",
+							children: [language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+								"একটু নিচে স্ক্রল করে ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Add to Home Screen" }),
+								" চাপুন।"
+							] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+								"Scroll down and tap ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Add to Home Screen" }),
+								"."
+							] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "inline-flex items-center gap-1 ml-1 text-emerald-400",
+								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SquarePlus, { className: "w-3.5 h-3.5" })
+							})]
+						})]
+					})]
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+					onClick: () => setShowIOSModal(false),
+					className: "w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer",
+					children: language === "bn" ? "বুঝতে পেরেছি" : "Got it"
+				})
+			]
+		})
+	})] });
+};
 // src/components/ProfileModal.tsx
 function ProfileModal({ onClose, onOpenAdmin }) {
 	const { user, firebaseUser, updateProfile, changePassword, sendPasswordReset, theme, setTheme, requestAccountDeletion } = useAuth();
@@ -58762,62 +59132,69 @@ function ProfileModal({ onClose, onOpenAdmin }) {
 							})]
 						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 							className: "flex sm:flex-col gap-1 overflow-x-auto sm:overflow-visible",
-							children: [[
-								{
-									id: "profile",
-									label: t("tabProfile"),
-									icon: User
-								},
-								{
-									id: "security",
-									label: t("tabSecurity"),
-									icon: Shield
-								},
-								{
-									id: "appearance",
-									label: t("tabAppearance"),
-									icon: Palette
-								},
-								{
-									id: "language",
-									label: t("tabLanguage"),
-									icon: Languages
-								},
-								...isUserSuperAdmin ? [{
-									id: "danger",
-									label: language === "bn" ? "অ্যাডমিন রুট সুরক্ষা" : "Root Security",
-									icon: Shield,
-									adminProtected: true
-								}] : [{
-									id: "danger",
-									label: t("tabDanger"),
-									icon: Trash2,
-									danger: true
-								}]
-							].map((item) => {
-								const Icon = item.icon;
-								const isActive = activeTab === item.id;
-								const isItemDanger = "danger" in item && item.danger;
-								const isItemProtected = "adminProtected" in item && item.adminProtected;
-								return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-									onClick: () => setActiveTab(item.id),
-									className: `flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer shrink-0 sm:w-full text-left ${isActive ? isItemDanger ? "bg-rose-500/20 text-rose-300 border border-rose-500/30" : isItemProtected ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 ring-1 ring-emerald-500/30" : "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" : isItemDanger ? "text-rose-400 hover:bg-rose-500/10" : isItemProtected ? "text-emerald-400 hover:bg-emerald-500/10" : "text-slate-400 hover:text-white hover:bg-slate-800/50"}`,
-									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Icon, { className: "w-4 h-4 shrink-0" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-										className: "truncate",
-										children: item.label
-									})]
-								}, item.id);
-							}), isSuperAdmin(user?.email) && onOpenAdmin && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-								onClick: () => {
-									onClose();
-									onOpenAdmin();
-								},
-								className: "flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-emerald-400 hover:bg-emerald-950/40 border border-emerald-500/20 transition cursor-pointer shrink-0 sm:w-full mt-2",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-									className: "flex items-center gap-2.5",
-									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Shield, { className: "w-4 h-4 text-emerald-400" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("superAdminBadge") })]
-								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ExternalLink, { className: "w-3 h-3 text-emerald-400 opacity-80" })]
-							})]
+							children: [
+								[
+									{
+										id: "profile",
+										label: t("tabProfile"),
+										icon: User
+									},
+									{
+										id: "security",
+										label: t("tabSecurity"),
+										icon: Shield
+									},
+									{
+										id: "appearance",
+										label: t("tabAppearance"),
+										icon: Palette
+									},
+									{
+										id: "language",
+										label: t("tabLanguage"),
+										icon: Languages
+									},
+									...isUserSuperAdmin ? [{
+										id: "danger",
+										label: language === "bn" ? "অ্যাডমিন রুট সুরক্ষা" : "Root Security",
+										icon: Shield,
+										adminProtected: true
+									}] : [{
+										id: "danger",
+										label: t("tabDanger"),
+										icon: Trash2,
+										danger: true
+									}]
+								].map((item) => {
+									const Icon = item.icon;
+									const isActive = activeTab === item.id;
+									const isItemDanger = "danger" in item && item.danger;
+									const isItemProtected = "adminProtected" in item && item.adminProtected;
+									return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+										onClick: () => setActiveTab(item.id),
+										className: `flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer shrink-0 sm:w-full text-left ${isActive ? isItemDanger ? "bg-rose-500/20 text-rose-300 border border-rose-500/30" : isItemProtected ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 ring-1 ring-emerald-500/30" : "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" : isItemDanger ? "text-rose-400 hover:bg-rose-500/10" : isItemProtected ? "text-emerald-400 hover:bg-emerald-500/10" : "text-slate-400 hover:text-white hover:bg-slate-800/50"}`,
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Icon, { className: "w-4 h-4 shrink-0" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+											className: "truncate",
+											children: item.label
+										})]
+									}, item.id);
+								}),
+								isSuperAdmin(user?.email) && onOpenAdmin && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+									onClick: () => {
+										onClose();
+										onOpenAdmin();
+									},
+									className: "flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-emerald-400 hover:bg-emerald-950/40 border border-emerald-500/20 transition cursor-pointer shrink-0 sm:w-full mt-2",
+									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										className: "flex items-center gap-2.5",
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Shield, { className: "w-4 h-4 text-emerald-400" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("superAdminBadge") })]
+									}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ExternalLink, { className: "w-3 h-3 text-emerald-400 opacity-80" })]
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+									className: "mt-2",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PWAInstallButton, { variant: "sidebar" })
+								})
+							]
 						})]
 					}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 						className: "flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-900/60 flex flex-col justify-between",
@@ -61987,6 +62364,7 @@ function ChatDashboard() {
 				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(WifiOff, { className: "w-3.5 h-3.5 shrink-0" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("offlineBanner") })]
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(AnnouncementBanner, {}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(PWAInstallButton, { variant: "banner" }),
 			ghostUser && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 				className: "bg-gradient-to-r from-sky-600 via-indigo-600 to-sky-700 text-white px-4 py-2.5 text-xs flex flex-wrap items-center justify-between gap-2.5 z-50 shadow-lg animate-in slide-in-from-top-2 border-b border-white/20",
 				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {

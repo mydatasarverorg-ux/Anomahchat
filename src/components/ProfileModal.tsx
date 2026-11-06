@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { isUsernameAvailable } from '../services/chatService';
 import { isSuperAdmin, SUPER_ADMIN_EMAIL } from '../services/adminService';
+import { PWAInstallButton } from './PWAInstallButton';
 import type { ThemeMode } from '../types/chat';
 import {
   X,
@@ -362,6 +363,11 @@ export function ProfileModal({
                   <ExternalLink className="w-3 h-3 text-emerald-400 opacity-80" />
                 </button>
               )}
+
+              {/* Install PWA Option */}
+              <div className="mt-2">
+                <PWAInstallButton variant="sidebar" />
+              </div>
             </div>
           </div>
 
