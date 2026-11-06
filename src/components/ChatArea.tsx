@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import {
@@ -637,9 +637,18 @@ export function ChatArea({
     onBack();
   };
 
-  const filteredMessages = messages.filter((m) =>
-    searchQuery.trim() ? m.text?.toLowerCase().includes(searchQuery.toLowerCase()) : true
-  );
+  // Strictly sorted messages by chronological timestamp and ID fallback
+  const filteredMessages = useMemo(() => {
+    const list = searchQuery.trim()
+      ? messages.filter((m) => m.text?.toLowerCase().includes(searchQuery.toLowerCase()))
+      : messages;
+    return [...list].sort((a, b) => {
+      const timeA = new Date(a.createdAt).getTime();
+      const timeB = new Date(b.createdAt).getTime();
+      if (timeA !== timeB) return timeA - timeB;
+      return (a.id || '').localeCompare(b.id || '');
+    });
+  }, [messages, searchQuery]);
 
   // Distinct color per sender in group chat
   const getSenderColor = (senderId: string) => {
@@ -898,7 +907,7 @@ export function ChatArea({
       )}
 
       {/* Messages List Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 overflow-y-auto p-4">
         {filteredMessages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center text-slate-400 p-6">
             <div className="w-16 h-16 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mb-3 text-slate-500">
@@ -913,6 +922,13 @@ export function ChatArea({
           filteredMessages.map((msg, idx) => {
             const isMine = msg.senderId === effectiveUser?.userId;
             const isLastMessage = idx === filteredMessages.length - 1;
+            const prevMsg = idx > 0 ? filteredMessages[idx - 1] : null;
+            const isSameSenderAsPrev = prevMsg && prevMsg.senderId === msg.senderId;
+
+            // Date separator calculation
+            const msgDateStr = new Date(msg.createdAt).toDateString();
+            const prevDateStr = prevMsg ? new Date(prevMsg.createdAt).toDateString() : null;
+            const isNewDay = !prevMsg || msgDateStr !== prevDateStr;
 
             // Seen list (avatars of people who saw this message)
             const seenList = Object.entries(msg.seenByDetails || {}).filter(
@@ -920,11 +936,35 @@ export function ChatArea({
             );
 
             return (
-              <div
-                key={msg.id}
-                id={`msg-${msg.id}`}
-                className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} group relative`}
-              >
+              <div key={msg.id} className="w-full">
+                {isNewDay && (
+                  <div className="flex items-center justify-center my-3">
+                    <span className="px-3 py-1 rounded-full text-[10px] font-semibold bg-slate-900/90 text-slate-400 border border-slate-800 shadow-sm select-none">
+                      {(() => {
+                        const d = new Date(msg.createdAt);
+                        const today = new Date();
+                        if (d.toDateString() === today.toDateString()) {
+                          return language === 'bn' ? 'আজ' : 'Today';
+                        }
+                        const yest = new Date();
+                        yest.setDate(today.getDate() - 1);
+                        if (d.toDateString() === yest.toDateString()) {
+                          return language === 'bn' ? 'গতকাল' : 'Yesterday';
+                        }
+                        return d.toLocaleDateString(language === 'bn' ? 'bn-BD' : 'en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                        });
+                      })()}
+                    </span>
+                  </div>
+                )}
+                <div
+                  id={`msg-${msg.id}`}
+                  className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} group relative ${
+                    isSameSenderAsPrev ? 'mt-1' : 'mt-3.5'
+                  }`}
+                >
                 {/* Group chat: Sender Name & Avatar above incoming bubble */}
                 {!isMine && chat.type === 'group' && (
                   <div className="flex items-center gap-1.5 mb-1 ml-1">
@@ -1168,6 +1208,7 @@ export function ChatArea({
                     )}
                   </div>
                 )}
+                </div>
               </div>
             );
           })

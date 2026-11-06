@@ -327,6 +327,13 @@ export function subscribeToChatMessages(
       snapshot.forEach((docItem) => {
         msgs.push({ id: docItem.id, ...(docItem.data() as Omit<ChatMessage, 'id'>) });
       });
+      // Stable in-memory sorting to guarantee strict chronological timeline across all devices
+      msgs.sort((a, b) => {
+        const timeA = new Date(a.createdAt).getTime();
+        const timeB = new Date(b.createdAt).getTime();
+        if (timeA !== timeB) return timeA - timeB;
+        return (a.id || '').localeCompare(b.id || '');
+      });
       onUpdate(msgs);
     },
     (error) => {
@@ -359,8 +366,9 @@ export async function sendMessage(params: {
     // Check parent chat suspension status (direct chats with suspended users are completely locked)
     const parentChatRef = doc(db, 'chats', params.chatId);
     const parentSnap = await getDoc(parentChatRef);
+    let parentData: ChatRoom | null = null;
     if (parentSnap.exists()) {
-      const parentData = parentSnap.data() as ChatRoom;
+      parentData = parentSnap.data() as ChatRoom;
       if (parentData.isSuspended) {
         throw new Error('This conversation is locked because a participant has been suspended.');
       }
@@ -372,8 +380,21 @@ export async function sendMessage(params: {
       }
     }
 
-    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const nowIso = new Date().toISOString();
+    // Monotonic clock-skew protection:
+    // If the client device's clock is lagging behind the room's previous message timeline,
+    // advance the effective timestamp so replies are strictly ordered AFTER the last message.
+    const clientNowMs = Date.now();
+    let lastTimeMs = 0;
+    if (parentData?.lastMessageTime) {
+      const parsed = new Date(parentData.lastMessageTime).getTime();
+      if (!isNaN(parsed) && parsed > 0) {
+        lastTimeMs = parsed;
+      }
+    }
+    const effectiveTimeMs = Math.max(clientNowMs, lastTimeMs + 1000);
+    const effectiveIso = new Date(effectiveTimeMs).toISOString();
+
+    const messageId = `msg_${effectiveTimeMs}_${Math.random().toString(36).substring(2, 7)}`;
     const messageRef = doc(db, 'chats', params.chatId, 'messages', messageId);
 
     const messageData: ChatMessage = {
@@ -385,7 +406,7 @@ export async function sendMessage(params: {
       text: (params.text || '').trim().slice(0, 5000),
       type: params.type || 'text',
       readBy: [params.sender.userId],
-      createdAt: nowIso,
+      createdAt: effectiveIso,
     };
 
     if (params.mediaUrl) {
@@ -411,8 +432,8 @@ export async function sendMessage(params: {
     await updateDoc(parentChatRef, {
       lastMessageText: snippet.slice(0, 500),
       lastMessageSenderId: params.sender.userId,
-      lastMessageTime: nowIso,
-      updatedAt: nowIso,
+      lastMessageTime: effectiveIso,
+      updatedAt: effectiveIso,
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
