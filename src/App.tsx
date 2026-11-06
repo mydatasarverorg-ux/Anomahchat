@@ -16,7 +16,6 @@ import { CallModal } from './components/CallModal';
 import { BannedScreen } from './components/BannedScreen';
 import { WarningNoticeModal } from './components/WarningNoticeModal';
 import { AnnouncementBanner } from './components/AnnouncementBanner';
-import { PWAInstallButton } from './components/PWAInstallButton';
 import { AdminModal } from './components/AdminModal';
 import { subscribeToUserChats } from './services/chatService';
 import { isSuperAdmin } from './services/adminService';
@@ -159,9 +158,6 @@ function ChatDashboard() {
 
       {/* Global Broadcast Announcement Banner */}
       <AnnouncementBanner />
-
-      {/* PWA In-App Install Banner (Suppressed in Native APK & Standalone PWA) */}
-      <PWAInstallButton variant="banner" />
 
       {/* Admin Ghost Mode Top Persistent Banner */}
       {ghostUser && (

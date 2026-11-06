@@ -55181,6 +55181,36 @@ var Mic = createLucideIcon("mic", [
 * This source code is licensed under the ISC license.
 * See the LICENSE file in the root directory of this source tree.
 */
+var Monitor = createLucideIcon("monitor", [
+	["rect", {
+		width: "20",
+		height: "14",
+		x: "2",
+		y: "3",
+		rx: "2",
+		key: "48i651"
+	}],
+	["line", {
+		x1: "8",
+		x2: "16",
+		y1: "21",
+		y2: "21",
+		key: "1svkeh"
+	}],
+	["line", {
+		x1: "12",
+		x2: "12",
+		y1: "17",
+		y2: "21",
+		key: "vw1qmm"
+	}]
+]);
+/**
+* @license lucide-react v0.546.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
 var Moon = createLucideIcon("moon", [["path", {
 	d: "M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401",
 	key: "kfwtm"
@@ -58665,15 +58695,535 @@ function NewChatModal({ onClose, onSelectChat }) {
 		})
 	});
 }
+// node_modules/@capacitor/core/dist/index.js
+/*! Capacitor: https://capacitorjs.com/ - MIT License */
+var ExceptionCode;
+(function(ExceptionCode) {
+	/**
+	* API is not implemented.
+	*
+	* This usually means the API can't be used because it is not implemented for
+	* the current platform.
+	*/
+	ExceptionCode["Unimplemented"] = "UNIMPLEMENTED";
+	/**
+	* API is not available.
+	*
+	* This means the API can't be used right now because:
+	*   - it is currently missing a prerequisite, such as network connectivity
+	*   - it requires a particular platform or browser version
+	*/
+	ExceptionCode["Unavailable"] = "UNAVAILABLE";
+})(ExceptionCode || (ExceptionCode = {}));
+var CapacitorException = class extends Error {
+	constructor(message, code, data) {
+		super(message);
+		this.message = message;
+		this.code = code;
+		this.data = data;
+	}
+};
+var getPlatformId = (win) => {
+	var _a, _b;
+	if (win === null || win === void 0 ? void 0 : win.androidBridge) return "android";
+	else if ((_b = (_a = win === null || win === void 0 ? void 0 : win.webkit) === null || _a === void 0 ? void 0 : _a.messageHandlers) === null || _b === void 0 ? void 0 : _b.bridge) return "ios";
+	else return "web";
+};
+var createCapacitor = (win) => {
+	const capCustomPlatform = win.CapacitorCustomPlatform || null;
+	const cap = win.Capacitor || {};
+	const Plugins = cap.Plugins = cap.Plugins || {};
+	const getPlatform = () => {
+		return capCustomPlatform !== null ? capCustomPlatform.name : getPlatformId(win);
+	};
+	const isNativePlatform = () => getPlatform() !== "web";
+	const isPluginAvailable = (pluginName) => {
+		const plugin = registeredPlugins.get(pluginName);
+		if (plugin === null || plugin === void 0 ? void 0 : plugin.platforms.has(getPlatform())) return true;
+		if (getPluginHeader(pluginName)) return true;
+		return false;
+	};
+	const getPluginHeader = (pluginName) => {
+		var _a;
+		return (_a = cap.PluginHeaders) === null || _a === void 0 ? void 0 : _a.find((h) => h.name === pluginName);
+	};
+	const handleError = (err) => win.console.error(err);
+	const registeredPlugins = /* @__PURE__ */ new Map();
+	const registerPlugin = (pluginName, jsImplementations = {}) => {
+		const registeredPlugin = registeredPlugins.get(pluginName);
+		if (registeredPlugin) {
+			console.warn(`Capacitor plugin "${pluginName}" already registered. Cannot register plugins twice.`);
+			return registeredPlugin.proxy;
+		}
+		const platform = getPlatform();
+		const pluginHeader = getPluginHeader(pluginName);
+		let jsImplementation;
+		const loadPluginImplementation = async () => {
+			if (!jsImplementation && platform in jsImplementations) jsImplementation = typeof jsImplementations[platform] === "function" ? jsImplementation = await jsImplementations[platform]() : jsImplementation = jsImplementations[platform];
+			else if (capCustomPlatform !== null && !jsImplementation && "web" in jsImplementations) jsImplementation = typeof jsImplementations["web"] === "function" ? jsImplementation = await jsImplementations["web"]() : jsImplementation = jsImplementations["web"];
+			return jsImplementation;
+		};
+		const createPluginMethod = (impl, prop) => {
+			var _a, _b;
+			if (pluginHeader) {
+				const methodHeader = pluginHeader === null || pluginHeader === void 0 ? void 0 : pluginHeader.methods.find((m) => prop === m.name);
+				if (methodHeader) {
+					if (methodHeader.rtype === "promise") return (options) => cap.nativePromise(pluginName, prop.toString(), options);
+					else return (options, callback) => cap.nativeCallback(pluginName, prop.toString(), options, callback);
+				} else if (impl) return (_a = impl[prop]) === null || _a === void 0 ? void 0 : _a.bind(impl);
+			} else if (impl) return (_b = impl[prop]) === null || _b === void 0 ? void 0 : _b.bind(impl);
+			else throw new CapacitorException(`"${pluginName}" plugin is not implemented on ${platform}`, ExceptionCode.Unimplemented);
+		};
+		const createPluginMethodWrapper = (prop) => {
+			let remove;
+			const wrapper = (...args) => {
+				const p = loadPluginImplementation().then((impl) => {
+					const fn = createPluginMethod(impl, prop);
+					if (fn) {
+						const p = fn(...args);
+						remove = p === null || p === void 0 ? void 0 : p.remove;
+						return p;
+					} else throw new CapacitorException(`"${pluginName}.${prop}()" is not implemented on ${platform}`, ExceptionCode.Unimplemented);
+				});
+				if (prop === "addListener") p.remove = async () => remove();
+				return p;
+			};
+			wrapper.toString = () => `${prop.toString()}() { [capacitor code] }`;
+			Object.defineProperty(wrapper, "name", {
+				value: prop,
+				writable: false,
+				configurable: false
+			});
+			return wrapper;
+		};
+		const addListener = createPluginMethodWrapper("addListener");
+		const removeListener = createPluginMethodWrapper("removeListener");
+		const addListenerNative = (eventName, callback) => {
+			const call = addListener({ eventName }, callback);
+			const remove = async () => {
+				const callbackId = await call;
+				removeListener({
+					eventName,
+					callbackId
+				}, callback);
+			};
+			const p = new Promise((resolve) => call.then(() => resolve({ remove })));
+			p.remove = async () => {
+				console.warn(`Using addListener() without 'await' is deprecated.`);
+				await remove();
+			};
+			return p;
+		};
+		const proxy = new Proxy({}, { get(_, prop) {
+			switch (prop) {
+				case "$$typeof": return;
+				case "toJSON": return () => ({});
+				case "addListener": return pluginHeader ? addListenerNative : addListener;
+				case "removeListener": return removeListener;
+				default: return createPluginMethodWrapper(prop);
+			}
+		} });
+		Plugins[pluginName] = proxy;
+		registeredPlugins.set(pluginName, {
+			name: pluginName,
+			proxy,
+			platforms: /* @__PURE__ */ new Set([...Object.keys(jsImplementations), ...pluginHeader ? [platform] : []])
+		});
+		return proxy;
+	};
+	if (!cap.convertFileSrc) cap.convertFileSrc = (filePath) => filePath;
+	cap.getPlatform = getPlatform;
+	cap.handleError = handleError;
+	cap.isNativePlatform = isNativePlatform;
+	cap.isPluginAvailable = isPluginAvailable;
+	cap.registerPlugin = registerPlugin;
+	cap.Exception = CapacitorException;
+	cap.DEBUG = !!cap.DEBUG;
+	cap.isLoggingEnabled = !!cap.isLoggingEnabled;
+	return cap;
+};
+var initCapacitorGlobal = (win) => win.Capacitor = createCapacitor(win);
+var Capacitor = /*#__PURE__*/ initCapacitorGlobal(typeof globalThis !== "undefined" ? globalThis : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : typeof global !== "undefined" ? global : {});
+var registerPlugin = Capacitor.registerPlugin;
+/**
+* Base class web plugins should extend.
+*/
+var WebPlugin = class {
+	constructor() {
+		this.listeners = {};
+		this.retainedEventArguments = {};
+		this.windowListeners = {};
+	}
+	addListener(eventName, listenerFunc) {
+		let firstListener = false;
+		if (!this.listeners[eventName]) {
+			this.listeners[eventName] = [];
+			firstListener = true;
+		}
+		this.listeners[eventName].push(listenerFunc);
+		const windowListener = this.windowListeners[eventName];
+		if (windowListener && !windowListener.registered) this.addWindowListener(windowListener);
+		if (firstListener) this.sendRetainedArgumentsForEvent(eventName);
+		const remove = async () => this.removeListener(eventName, listenerFunc);
+		return Promise.resolve({ remove });
+	}
+	async removeAllListeners() {
+		this.listeners = {};
+		for (const listener in this.windowListeners) this.removeWindowListener(this.windowListeners[listener]);
+		this.windowListeners = {};
+	}
+	notifyListeners(eventName, data, retainUntilConsumed) {
+		const listeners = this.listeners[eventName];
+		if (!listeners) {
+			if (retainUntilConsumed) {
+				let args = this.retainedEventArguments[eventName];
+				if (!args) args = [];
+				args.push(data);
+				this.retainedEventArguments[eventName] = args;
+			}
+			return;
+		}
+		listeners.forEach((listener) => listener(data));
+	}
+	hasListeners(eventName) {
+		var _a;
+		return !!((_a = this.listeners[eventName]) === null || _a === void 0 ? void 0 : _a.length);
+	}
+	registerWindowListener(windowEventName, pluginEventName) {
+		this.windowListeners[pluginEventName] = {
+			registered: false,
+			windowEventName,
+			pluginEventName,
+			handler: (event) => {
+				this.notifyListeners(pluginEventName, event);
+			}
+		};
+	}
+	unimplemented(msg = "not implemented") {
+		return new Capacitor.Exception(msg, ExceptionCode.Unimplemented);
+	}
+	unavailable(msg = "not available") {
+		return new Capacitor.Exception(msg, ExceptionCode.Unavailable);
+	}
+	async removeListener(eventName, listenerFunc) {
+		const listeners = this.listeners[eventName];
+		if (!listeners) return;
+		const index = listeners.indexOf(listenerFunc);
+		if (index !== -1) this.listeners[eventName].splice(index, 1);
+		if (!this.listeners[eventName].length) this.removeWindowListener(this.windowListeners[eventName]);
+	}
+	addWindowListener(handle) {
+		window.addEventListener(handle.windowEventName, handle.handler);
+		handle.registered = true;
+	}
+	removeWindowListener(handle) {
+		if (!handle) return;
+		window.removeEventListener(handle.windowEventName, handle.handler);
+		handle.registered = false;
+	}
+	sendRetainedArgumentsForEvent(eventName) {
+		const args = this.retainedEventArguments[eventName];
+		if (!args) return;
+		delete this.retainedEventArguments[eventName];
+		args.forEach((arg) => {
+			this.notifyListeners(eventName, arg);
+		});
+	}
+};
+/******** END WEB VIEW PLUGIN ********/
+/******** COOKIES PLUGIN ********/
+/**
+* Safely web encode a string value (inspired by js-cookie)
+* @param str The string value to encode
+*/
+var encode = (str) => encodeURIComponent(str).replace(/%(2[346B]|5E|60|7C)/g, decodeURIComponent).replace(/[()]/g, escape);
+/**
+* Safely web decode a string value (inspired by js-cookie)
+* @param str The string value to decode
+*/
+var decode = (str) => str.replace(/(%[\dA-F]{2})+/gi, decodeURIComponent);
+var CapacitorCookiesPluginWeb = class extends WebPlugin {
+	async getCookies() {
+		const cookies = document.cookie;
+		const cookieMap = {};
+		cookies.split(";").forEach((cookie) => {
+			if (cookie.length <= 0) return;
+			let [key, value] = cookie.replace(/=/, "CAP_COOKIE").split("CAP_COOKIE");
+			key = decode(key).trim();
+			value = decode(value).trim();
+			cookieMap[key] = value;
+		});
+		return cookieMap;
+	}
+	async setCookie(options) {
+		try {
+			const encodedKey = encode(options.key);
+			const encodedValue = encode(options.value);
+			const expires = options.expires ? `; expires=${options.expires.replace("expires=", "")}` : "";
+			const path = (options.path || "/").replace("path=", "");
+			const domain = options.url != null && options.url.length > 0 ? `domain=${options.url}` : "";
+			document.cookie = `${encodedKey}=${encodedValue || ""}${expires}; path=${path}; ${domain};`;
+		} catch (error) {
+			return Promise.reject(error);
+		}
+	}
+	async deleteCookie(options) {
+		try {
+			document.cookie = `${options.key}=; Max-Age=0`;
+		} catch (error) {
+			return Promise.reject(error);
+		}
+	}
+	async clearCookies() {
+		try {
+			const cookies = document.cookie.split(";") || [];
+			for (const cookie of cookies) document.cookie = cookie.replace(/^ +/, "").replace(/=.*/, `=;expires=${(/* @__PURE__ */ new Date()).toUTCString()};path=/`);
+		} catch (error) {
+			return Promise.reject(error);
+		}
+	}
+	async clearAllCookies() {
+		try {
+			await this.clearCookies();
+		} catch (error) {
+			return Promise.reject(error);
+		}
+	}
+};
+registerPlugin("CapacitorCookies", { web: () => new CapacitorCookiesPluginWeb() });
+/**
+* Read in a Blob value and return it as a base64 string
+* @param blob The blob value to convert to a base64 string
+*/
+var readBlobAsBase64 = async (blob) => new Promise((resolve, reject) => {
+	const reader = new FileReader();
+	reader.onload = () => {
+		const base64String = reader.result;
+		resolve(base64String.indexOf(",") >= 0 ? base64String.split(",")[1] : base64String);
+	};
+	reader.onerror = (error) => reject(error);
+	reader.readAsDataURL(blob);
+});
+/**
+* Normalize an HttpHeaders map by lowercasing all of the values
+* @param headers The HttpHeaders object to normalize
+*/
+var normalizeHttpHeaders = (headers = {}) => {
+	const originalKeys = Object.keys(headers);
+	return Object.keys(headers).map((k) => k.toLocaleLowerCase()).reduce((acc, key, index) => {
+		acc[key] = headers[originalKeys[index]];
+		return acc;
+	}, {});
+};
+/**
+* Builds a string of url parameters that
+* @param params A map of url parameters
+* @param shouldEncode true if you should encodeURIComponent() the values (true by default)
+*/
+var buildUrlParams = (params, shouldEncode = true) => {
+	if (!params) return null;
+	return Object.entries(params).reduce((accumulator, entry) => {
+		const [key, value] = entry;
+		let encodedValue;
+		let item;
+		if (Array.isArray(value)) {
+			item = "";
+			value.forEach((str) => {
+				encodedValue = shouldEncode ? encodeURIComponent(str) : str;
+				item += `${key}=${encodedValue}&`;
+			});
+			item.slice(0, -1);
+		} else {
+			encodedValue = shouldEncode ? encodeURIComponent(value) : value;
+			item = `${key}=${encodedValue}`;
+		}
+		return `${accumulator}&${item}`;
+	}, "").substr(1);
+};
+/**
+* Build the RequestInit object based on the options passed into the initial request
+* @param options The Http plugin options
+* @param extra Any extra RequestInit values
+*/
+var buildRequestInit = (options, extra = {}) => {
+	const output = Object.assign({
+		method: options.method || "GET",
+		headers: options.headers
+	}, extra);
+	const type = normalizeHttpHeaders(options.headers)["content-type"] || "";
+	if (typeof options.data === "string") output.body = options.data;
+	else if (type.includes("application/x-www-form-urlencoded")) {
+		const params = new URLSearchParams();
+		for (const [key, value] of Object.entries(options.data || {})) params.set(key, value);
+		output.body = params.toString();
+	} else if (type.includes("multipart/form-data") || options.data instanceof FormData) {
+		const form = new FormData();
+		if (options.data instanceof FormData) options.data.forEach((value, key) => {
+			form.append(key, value);
+		});
+		else for (const key of Object.keys(options.data)) form.append(key, options.data[key]);
+		output.body = form;
+		const headers = new Headers(output.headers);
+		headers.delete("content-type");
+		output.headers = headers;
+	} else if (type.includes("application/json") || typeof options.data === "object") output.body = JSON.stringify(options.data);
+	return output;
+};
+var CapacitorHttpPluginWeb = class extends WebPlugin {
+	/**
+	* Perform an Http request given a set of options
+	* @param options Options to build the HTTP request
+	*/
+	async request(options) {
+		const requestInit = buildRequestInit(options, options.webFetchExtra);
+		const urlParams = buildUrlParams(options.params, options.shouldEncodeUrlParams);
+		const url = urlParams ? `${options.url}?${urlParams}` : options.url;
+		const response = await fetch(url, requestInit);
+		const contentType = response.headers.get("content-type") || "";
+		let { responseType = "text" } = response.ok ? options : {};
+		if (contentType.includes("application/json")) responseType = "json";
+		let data;
+		let blob;
+		switch (responseType) {
+			case "arraybuffer":
+			case "blob":
+				blob = await response.blob();
+				data = await readBlobAsBase64(blob);
+				break;
+			case "json":
+				data = await response.json();
+				break;
+			default: data = await response.text();
+		}
+		const headers = {};
+		response.headers.forEach((value, key) => {
+			headers[key] = value;
+		});
+		return {
+			data,
+			headers,
+			status: response.status,
+			url: response.url
+		};
+	}
+	/**
+	* Perform an Http GET request given a set of options
+	* @param options Options to build the HTTP request
+	*/
+	async get(options) {
+		return this.request(Object.assign(Object.assign({}, options), { method: "GET" }));
+	}
+	/**
+	* Perform an Http POST request given a set of options
+	* @param options Options to build the HTTP request
+	*/
+	async post(options) {
+		return this.request(Object.assign(Object.assign({}, options), { method: "POST" }));
+	}
+	/**
+	* Perform an Http PUT request given a set of options
+	* @param options Options to build the HTTP request
+	*/
+	async put(options) {
+		return this.request(Object.assign(Object.assign({}, options), { method: "PUT" }));
+	}
+	/**
+	* Perform an Http PATCH request given a set of options
+	* @param options Options to build the HTTP request
+	*/
+	async patch(options) {
+		return this.request(Object.assign(Object.assign({}, options), { method: "PATCH" }));
+	}
+	/**
+	* Perform an Http DELETE request given a set of options
+	* @param options Options to build the HTTP request
+	*/
+	async delete(options) {
+		return this.request(Object.assign(Object.assign({}, options), { method: "DELETE" }));
+	}
+};
+registerPlugin("CapacitorHttp", { web: () => new CapacitorHttpPluginWeb() });
+/******** END HTTP PLUGIN ********/
+/******** SYSTEM BARS PLUGIN ********/
+/**
+* Available status bar styles.
+*/
+var SystemBarsStyle;
+(function(SystemBarsStyle) {
+	/**
+	* Light system bar content on a dark background.
+	*
+	* @since 8.0.0
+	*/
+	SystemBarsStyle["Dark"] = "DARK";
+	/**
+	* For dark system bar content on a light background.
+	*
+	* @since 8.0.0
+	*/
+	SystemBarsStyle["Light"] = "LIGHT";
+	/**
+	* The style is based on the device appearance or the underlying content.
+	* If the device is using Dark mode, the system bars content will be light.
+	* If the device is using Light mode, the system bars content will be dark.
+	*
+	* @since 8.0.0
+	*/
+	SystemBarsStyle["Default"] = "DEFAULT";
+})(SystemBarsStyle || (SystemBarsStyle = {}));
+/**
+* Available system bar types.
+*/
+var SystemBarType;
+(function(SystemBarType) {
+	/**
+	* The top status bar on both Android and iOS.
+	*
+	* @since 8.0.0
+	*/
+	SystemBarType["StatusBar"] = "StatusBar";
+	/**
+	* The navigation bar (or gesture bar on iOS) on both Android and iOS.
+	*
+	* @since 8.0.0
+	*/
+	SystemBarType["NavigationBar"] = "NavigationBar";
+})(SystemBarType || (SystemBarType = {}));
+var SystemBarsPluginWeb = class extends WebPlugin {
+	async setStyle() {
+		this.unavailable("not available for web");
+	}
+	async setAnimation() {
+		this.unavailable("not available for web");
+	}
+	async show() {
+		this.unavailable("not available for web");
+	}
+	async hide() {
+		this.unavailable("not available for web");
+	}
+};
+registerPlugin("SystemBars", { web: () => new SystemBarsPluginWeb() });
 // src/hooks/usePWAInstall.ts
+var checkIsNativeApp = () => {
+	if (typeof window === "undefined") return false;
+	if (Capacitor.isNativePlatform()) return true;
+	if (window?.Capacitor?.isNativePlatform?.()) return true;
+	if (window.location.protocol === "capacitor:" || window.location.protocol === "ionic:") return true;
+	const ua = window.navigator.userAgent.toLowerCase();
+	if (ua.includes("capacitor") || ua.includes("wv")) return true;
+	return false;
+};
 function usePWAInstall() {
 	const [deferredPrompt, setDeferredPrompt] = (0, import_react.useState)(null);
 	const [isInstalled, setIsInstalled] = (0, import_react.useState)(false);
 	const [isIOS, setIsIOS] = (0, import_react.useState)(false);
-	const [isNativeApp, setIsNativeApp] = (0, import_react.useState)(false);
+	const [isNativeApp, setIsNativeApp] = (0, import_react.useState)(() => checkIsNativeApp());
 	(0, import_react.useEffect)(() => {
-		const isCapacitorNative = typeof window !== "undefined" && Boolean(window?.Capacitor?.isNativePlatform?.());
-		setIsNativeApp(isCapacitorNative);
+		if (checkIsNativeApp()) {
+			setIsNativeApp(true);
+			return;
+		}
 		const isStandalone = typeof window !== "undefined" && (window.matchMedia("(display-mode: standalone)").matches || window.navigator?.standalone === true);
 		setIsInstalled(isStandalone);
 		const userAgent = typeof window !== "undefined" ? window.navigator.userAgent.toLowerCase() : "";
@@ -58718,200 +59268,349 @@ var PWAInstallButton = ({ variant = "sidebar" }) => {
 	const { isInstallable, isInstalled, isIOS, isNativeApp, install } = usePWAInstall();
 	const { language } = useLanguage();
 	const [showIOSModal, setShowIOSModal] = (0, import_react.useState)(false);
+	const [showDesktopGuide, setShowDesktopGuide] = (0, import_react.useState)(false);
 	const [dismissed, setDismissed] = (0, import_react.useState)(false);
 	if (isNativeApp || isInstalled || dismissed) return null;
-	if (!isInstallable && !isIOS) return null;
 	const handleAction = async () => {
-		if (isIOS) setShowIOSModal(true);
-		else await install();
+		if (isIOS) {
+			setShowIOSModal(true);
+			return;
+		}
+		if (isInstallable) {
+			if (!await install()) setShowDesktopGuide(true);
+		} else setShowDesktopGuide(true);
 	};
 	const label = language === "bn" ? "অ্যাপ ইনস্টল করুন" : "Install App";
-	const tagline = language === "bn" ? "হোম স্ক্রিনে যুক্ত করে ফুল-স্ক্রিন অ্যাপ হিসেবে চালান" : "Add to home screen for full-screen app experience";
-	if (variant === "banner") return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-		className: "bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-900/80 border-b border-emerald-500/30 px-3 py-2 flex items-center justify-between gap-2 shadow-sm animate-in slide-in-from-top-1 z-20",
-		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-			className: "flex items-center gap-2.5 min-w-0",
-			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-				className: "w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center shrink-0",
-				children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Smartphone, { className: "w-4 h-4 text-emerald-400" })
+	const tagline = language === "bn" ? "ডেক্সটপ বা মোবাইলে ১-ক্লিকে অ্যাপ হিসেবে চালান" : "Install on PC or phone for instant full-screen experience";
+	if (variant === "banner") return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+		/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			className: "bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-900/90 border-b border-emerald-500/30 px-3 py-2 flex items-center justify-between gap-2 shadow-md animate-in slide-in-from-top-1 z-20",
+			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "flex items-center gap-2.5 min-w-0",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+					className: "w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center shrink-0",
+					children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Monitor, { className: "w-4 h-4 text-emerald-400" })
+				}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "truncate",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "text-xs font-bold text-white block leading-tight truncate",
+						children: language === "bn" ? "অনমাহ চ্যাট (PWA) ইনস্টল করুন" : "Install Anomah Chat"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "text-[10px] text-emerald-300 block leading-tight truncate",
+						children: tagline
+					})]
+				})]
 			}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-				className: "truncate",
-				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-					className: "text-xs font-bold text-white block leading-tight truncate",
-					children: language === "bn" ? "অনোমাহ চ্যাট অ্যাপ ইনস্টল করুন" : "Install Anomah Chat"
-				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-					className: "text-[10px] text-emerald-300 block leading-tight truncate",
-					children: tagline
+				className: "flex items-center gap-1.5 shrink-0",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+					onClick: handleAction,
+					className: "px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-sm flex items-center gap-1.5 cursor-pointer active:scale-95",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Download, { className: "w-3.5 h-3.5" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: label })]
+				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+					onClick: () => setDismissed(true),
+					className: "p-1 text-slate-400 hover:text-white rounded-md transition cursor-pointer",
+					title: "Dismiss",
+					children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-3.5 h-3.5" })
 				})]
 			})]
-		}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-			className: "flex items-center gap-1.5 shrink-0",
-			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-				onClick: handleAction,
-				className: "px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow flex items-center gap-1.5 cursor-pointer active:scale-95",
-				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Download, { className: "w-3.5 h-3.5" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: label })]
-			}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-				onClick: () => setDismissed(true),
-				className: "p-1 text-slate-400 hover:text-white rounded-md transition cursor-pointer",
-				title: "Dismiss",
-				children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-3.5 h-3.5" })
+		}),
+		showDesktopGuide && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+			className: "fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4",
+			children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6 shadow-2xl relative text-white",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						onClick: () => setShowDesktopGuide(false),
+						className: "absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer",
+						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-4 h-4" })
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "flex items-center gap-3 mb-4",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-400",
+							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Monitor, { className: "w-5 h-5" })
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", {
+							className: "text-sm font-bold text-white",
+							children: language === "bn" ? "কম্পিউটার বা ল্যাপটপে ইনস্টল করার নিয়ম" : "Install on PC / Laptop"
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+							className: "text-[11px] text-slate-400",
+							children: "Google Chrome / Microsoft Edge"
+						})] })]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "space-y-3 text-xs text-slate-200 bg-slate-950/80 p-4 rounded-xl border border-slate-800 mb-5",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex items-start gap-2.5",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "w-5 h-5 rounded-full bg-emerald-500/30 text-emerald-300 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
+								children: "1"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { children: language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+								"ব্রাউজারের অ্যাড্রেস বারের (URL Bar) ডানপাশে থাকা ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "ইনস্টল আইকনে (📥)" }),
+								" ক্লিক করুন।"
+							] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+								"Click the ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Install App icon (📥)" }),
+								" on the right side of your browser address bar."
+							] }) })]
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex items-start gap-2.5",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "w-5 h-5 rounded-full bg-emerald-500/30 text-emerald-300 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
+								children: "2"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { children: language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+								"অথবা ব্রাউজারের ওপরের ডানপাশের ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "থ্রি-ডট মেনু (⋮)" }),
+								" ক্লিক করে ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\"Save and share\"" }),
+								" বা ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\"Install Anomah Chat...\"" }),
+								" চাপুন।"
+							] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+								"Or click the ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "three-dots menu (⋮)" }),
+								" at top right and choose ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\"Install Anomah Chat...\"" }),
+								"."
+							] }) })]
+						})]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						onClick: () => setShowDesktopGuide(false),
+						className: "w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow",
+						children: language === "bn" ? "ঠিক আছে" : "Got it"
+					})
+				]
+			})
+		}),
+		showIOSModal && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+			className: "fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4",
+			children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-5 shadow-2xl relative",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						onClick: () => setShowIOSModal(false),
+						className: "absolute top-3.5 right-3.5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer",
+						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-4 h-4" })
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "flex items-center gap-2.5 mb-3",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center",
+							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Smartphone, { className: "w-4 h-4 text-emerald-400" })
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", {
+							className: "text-sm font-bold text-white",
+							children: language === "bn" ? "আইফোনে ইনস্টল করার নিয়ম" : "Install on iPhone / iPad"
+						})]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "space-y-2.5 text-xs text-slate-300 mb-4 bg-slate-800/60 p-3 rounded-xl border border-slate-700/60",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex items-start gap-2",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
+								children: "1"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex-1",
+								children: [language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+									"সাফারি ব্রাউজারের নিচে ",
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "শেয়ার বোতামে (Share)" }),
+									" চাপ দিন।"
+								] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+									"Tap the ",
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Share" }),
+									" button in Safari toolbar."
+								] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+									className: "inline-flex items-center gap-1 ml-1 text-emerald-400",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Share2, { className: "w-3.5 h-3.5" })
+								})]
+							})]
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex items-start gap-2",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
+								children: "2"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex-1",
+								children: [language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+									"একটু নিচে স্ক্রল করে ",
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Add to Home Screen" }),
+									" চাপুন।"
+								] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+									"Scroll down and tap ",
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Add to Home Screen" }),
+									"."
+								] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+									className: "inline-flex items-center gap-1 ml-1 text-emerald-400",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SquarePlus, { className: "w-3.5 h-3.5" })
+								})]
+							})]
+						})]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						onClick: () => setShowIOSModal(false),
+						className: "w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer",
+						children: language === "bn" ? "বুঝতে পেরেছি" : "Got it"
+					})
+				]
+			})
+		})
+	] });
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+		/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+			onClick: handleAction,
+			className: "w-full px-3 py-2 bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-500/30 text-emerald-300 hover:text-white rounded-xl text-xs font-bold transition flex items-center justify-between cursor-pointer shadow-sm group",
+			title: tagline,
+			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "flex items-center gap-2",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Download, { className: "w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: label })]
+			}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+				className: "text-[10px] uppercase font-bold px-1.5 py-0.5 bg-emerald-500/20 border border-emerald-400/30 rounded text-emerald-300",
+				children: "PWA"
 			})]
-		})]
-	}), showIOSModal && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-		className: "fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4",
-		children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-			className: "bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-5 shadow-2xl relative",
-			children: [
-				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-					onClick: () => setShowIOSModal(false),
-					className: "absolute top-3.5 right-3.5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer",
-					children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-4 h-4" })
-				}),
-				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-					className: "flex items-center gap-2.5 mb-3",
-					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-						className: "w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center",
-						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Smartphone, { className: "w-4 h-4 text-emerald-400" })
-					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", {
-						className: "text-sm font-bold text-white",
-						children: language === "bn" ? "আইফোনে ইনস্টল করার নিয়ম" : "Install on iPhone / iPad"
-					})]
-				}),
-				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-					className: "space-y-2.5 text-xs text-slate-300 mb-4 bg-slate-800/60 p-3 rounded-xl border border-slate-700/60",
-					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "flex items-start gap-2",
+		}),
+		showDesktopGuide && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+			className: "fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4",
+			children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6 shadow-2xl relative text-white",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						onClick: () => setShowDesktopGuide(false),
+						className: "absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer",
+						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-4 h-4" })
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "flex items-center gap-3 mb-4",
 						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-							className: "w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
-							children: "1"
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "flex-1",
-							children: [language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-								"সাফারি ব্রাউজারের নিচে ",
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "শেয়ার বোতামে (Share)" }),
-								" চাপ দিন।"
+							className: "w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-400",
+							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Monitor, { className: "w-5 h-5" })
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", {
+							className: "text-sm font-bold text-white",
+							children: language === "bn" ? "কম্পিউটার বা ল্যাপটপে ইনস্টল করার নিয়ম" : "Install on PC / Laptop"
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+							className: "text-[11px] text-slate-400",
+							children: "Google Chrome / Microsoft Edge"
+						})] })]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "space-y-3 text-xs text-slate-200 bg-slate-950/80 p-4 rounded-xl border border-slate-800 mb-5",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex items-start gap-2.5",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "w-5 h-5 rounded-full bg-emerald-500/30 text-emerald-300 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
+								children: "1"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { children: language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+								"ব্রাউজারের অ্যাড্রেস বারের (URL Bar) ডানপাশে থাকা ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "ইনস্টল আইকনে (📥)" }),
+								" ক্লিক করুন।"
 							] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-								"Tap the ",
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Share" }),
-								" button in Safari toolbar."
-							] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-								className: "inline-flex items-center gap-1 ml-1 text-emerald-400",
-								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Share2, { className: "w-3.5 h-3.5" })
-							})]
-						})]
-					}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "flex items-start gap-2",
-						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-							className: "w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
-							children: "2"
+								"Click the ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Install App icon (📥)" }),
+								" on the right side of your browser address bar."
+							] }) })]
 						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "flex-1",
-							children: [language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-								"একটু নিচে স্ক্রল করে ",
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Add to Home Screen" }),
+							className: "flex items-start gap-2.5",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "w-5 h-5 rounded-full bg-emerald-500/30 text-emerald-300 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
+								children: "2"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { children: language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+								"অথবা ব্রাউজারের ওপরের ডানপাশের ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "থ্রি-ডট মেনু (⋮)" }),
+								" ক্লিক করে ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\"Save and share\"" }),
+								" বা ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\"Install Anomah Chat...\"" }),
 								" চাপুন।"
 							] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-								"Scroll down and tap ",
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Add to Home Screen" }),
+								"Or click the ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "three-dots menu (⋮)" }),
+								" at top right and choose ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\"Install Anomah Chat...\"" }),
 								"."
-							] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-								className: "inline-flex items-center gap-1 ml-1 text-emerald-400",
-								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SquarePlus, { className: "w-3.5 h-3.5" })
-							})]
+							] }) })]
 						})]
-					})]
-				}),
-				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-					onClick: () => setShowIOSModal(false),
-					className: "w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer",
-					children: language === "bn" ? "বুঝতে পেরেছি" : "Got it"
-				})
-			]
-		})
-	})] });
-	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-		onClick: handleAction,
-		className: "w-full px-3 py-2 bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-500/30 text-emerald-300 hover:text-white rounded-xl text-xs font-bold transition flex items-center justify-between cursor-pointer shadow-sm group",
-		title: tagline,
-		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-			className: "flex items-center gap-2",
-			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Download, { className: "w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: label })]
-		}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-			className: "text-[10px] uppercase font-bold px-1.5 py-0.5 bg-emerald-500/20 border border-emerald-400/30 rounded text-emerald-300",
-			children: "PWA"
-		})]
-	}), showIOSModal && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-		className: "fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4",
-		children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-			className: "bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-5 shadow-2xl relative",
-			children: [
-				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-					onClick: () => setShowIOSModal(false),
-					className: "absolute top-3.5 right-3.5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer",
-					children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-4 h-4" })
-				}),
-				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-					className: "flex items-center gap-2.5 mb-3",
-					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-						className: "w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center",
-						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Smartphone, { className: "w-4 h-4 text-emerald-400" })
-					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", {
-						className: "text-sm font-bold text-white",
-						children: language === "bn" ? "আইফোনে ইনস্টল করার নিয়ম" : "Install on iPhone / iPad"
-					})]
-				}),
-				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-					className: "space-y-2.5 text-xs text-slate-300 mb-4 bg-slate-800/60 p-3 rounded-xl border border-slate-700/60",
-					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "flex items-start gap-2",
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						onClick: () => setShowDesktopGuide(false),
+						className: "w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow",
+						children: language === "bn" ? "ঠিক আছে" : "Got it"
+					})
+				]
+			})
+		}),
+		showIOSModal && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+			className: "fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4",
+			children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-5 shadow-2xl relative",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						onClick: () => setShowIOSModal(false),
+						className: "absolute top-3.5 right-3.5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer",
+						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-4 h-4" })
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "flex items-center gap-2.5 mb-3",
 						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-							className: "w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
-							children: "1"
+							className: "w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center",
+							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Smartphone, { className: "w-4 h-4 text-emerald-400" })
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", {
+							className: "text-sm font-bold text-white",
+							children: language === "bn" ? "আইফোনে ইনস্টল করার নিয়ম" : "Install on iPhone / iPad"
+						})]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "space-y-2.5 text-xs text-slate-300 mb-4 bg-slate-800/60 p-3 rounded-xl border border-slate-700/60",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex items-start gap-2",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
+								children: "1"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex-1",
+								children: [language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+									"সাফারি ব্রাউজারের নিচে ",
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "শেয়ার বোতামে (Share)" }),
+									" চাপ দিন।"
+								] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+									"Tap the ",
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Share" }),
+									" button in Safari toolbar."
+								] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+									className: "inline-flex items-center gap-1 ml-1 text-emerald-400",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Share2, { className: "w-3.5 h-3.5" })
+								})]
+							})]
 						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "flex-1",
-							children: [language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-								"সাফারি ব্রাউজারের নিচে ",
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "শেয়ার বোতামে (Share)" }),
-								" চাপ দিন।"
-							] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-								"Tap the ",
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Share" }),
-								" button in Safari toolbar."
-							] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-								className: "inline-flex items-center gap-1 ml-1 text-emerald-400",
-								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Share2, { className: "w-3.5 h-3.5" })
+							className: "flex items-start gap-2",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
+								children: "2"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex-1",
+								children: [language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+									"একটু নিচে স্ক্রল করে ",
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Add to Home Screen" }),
+									" চাপুন।"
+								] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+									"Scroll down and tap ",
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Add to Home Screen" }),
+									"."
+								] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+									className: "inline-flex items-center gap-1 ml-1 text-emerald-400",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SquarePlus, { className: "w-3.5 h-3.5" })
+								})]
 							})]
 						})]
-					}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "flex items-start gap-2",
-						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-							className: "w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5",
-							children: "2"
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "flex-1",
-							children: [language === "bn" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-								"একটু নিচে স্ক্রল করে ",
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Add to Home Screen" }),
-								" চাপুন।"
-							] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-								"Scroll down and tap ",
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "Add to Home Screen" }),
-								"."
-							] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-								className: "inline-flex items-center gap-1 ml-1 text-emerald-400",
-								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SquarePlus, { className: "w-3.5 h-3.5" })
-							})]
-						})]
-					})]
-				}),
-				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-					onClick: () => setShowIOSModal(false),
-					className: "w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer",
-					children: language === "bn" ? "বুঝতে পেরেছি" : "Got it"
-				})
-			]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						onClick: () => setShowIOSModal(false),
+						className: "w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer",
+						children: language === "bn" ? "বুঝতে পেরেছি" : "Got it"
+					})
+				]
+			})
 		})
-	})] });
+	] });
 };
 // src/components/ProfileModal.tsx
 function ProfileModal({ onClose, onOpenAdmin }) {
@@ -62364,7 +63063,6 @@ function ChatDashboard() {
 				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(WifiOff, { className: "w-3.5 h-3.5 shrink-0" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("offlineBanner") })]
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(AnnouncementBanner, {}),
-			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(PWAInstallButton, { variant: "banner" }),
 			ghostUser && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 				className: "bg-gradient-to-r from-sky-600 via-indigo-600 to-sky-700 text-white px-4 py-2.5 text-xs flex flex-wrap items-center justify-between gap-2.5 z-50 shadow-lg animate-in slide-in-from-top-2 border-b border-white/20",
 				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {

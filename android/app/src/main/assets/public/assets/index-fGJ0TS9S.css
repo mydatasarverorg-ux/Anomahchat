@@ -1920,6 +1920,16 @@
     }
   }
 
+  .bg-black\/70 {
+    background-color: #000000b3;
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .bg-black\/70 {
+      background-color: color-mix(in oklab, var(--color-black) 70%, transparent);
+    }
+  }
+
   .bg-black\/75 {
     background-color: #000000bf;
   }
@@ -2029,6 +2039,16 @@
   @supports (color: color-mix(in lab, red, red)) {
     .bg-emerald-500\/25 {
       background-color: color-mix(in oklab, var(--color-emerald-500) 25%, transparent);
+    }
+  }
+
+  .bg-emerald-500\/30 {
+    background-color: #00bb7f4d;
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .bg-emerald-500\/30 {
+      background-color: color-mix(in oklab, var(--color-emerald-500) 30%, transparent);
     }
   }
 
@@ -2744,17 +2764,17 @@
     --tw-gradient-stops: var(--tw-gradient-via-stops);
   }
 
-  .to-emerald-900\/80 {
-    --tw-gradient-to: #004e3bcc;
+  .to-emerald-900\/90 {
+    --tw-gradient-to: #004e3be6;
   }
 
   @supports (color: color-mix(in lab, red, red)) {
-    .to-emerald-900\/80 {
-      --tw-gradient-to: color-mix(in oklab, var(--color-emerald-900) 80%, transparent);
+    .to-emerald-900\/90 {
+      --tw-gradient-to: color-mix(in oklab, var(--color-emerald-900) 90%, transparent);
     }
   }
 
-  .to-emerald-900\/80 {
+  .to-emerald-900\/90 {
     --tw-gradient-stops: var(--tw-gradient-via-stops, var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-to) var(--tw-gradient-to-position));
   }
 
@@ -4397,6 +4417,25 @@
   --app-text: #f8fafc;
   --app-subtext: #94a3b8;
   --app-accent: #10b981;
+}
+
+html, body, #root {
+  color: #f8fafc;
+  width: 100%;
+  min-height: 100vh;
+  background-color: #0b1120 !important;
+}
+
+.bg-slate-950 {
+  background-color: #020617 !important;
+}
+
+.bg-slate-900 {
+  background-color: #0f172a !important;
+}
+
+.bg-slate-800 {
+  background-color: #1e293b !important;
 }
 
 .safe-area-inset-top {

@@ -1,24 +1,33 @@
 import { useEffect, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 }
 
+export const checkIsNativeApp = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  if (Capacitor.isNativePlatform()) return true;
+  if ((window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } })?.Capacitor?.isNativePlatform?.()) return true;
+  if (window.location.protocol === 'capacitor:' || window.location.protocol === 'ionic:') return true;
+  const ua = window.navigator.userAgent.toLowerCase();
+  if (ua.includes('capacitor') || ua.includes('wv')) return true;
+  return false;
+};
+
 export function usePWAInstall() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
-  const [isNativeApp, setIsNativeApp] = useState(false);
+  const [isNativeApp, setIsNativeApp] = useState(() => checkIsNativeApp());
 
   useEffect(() => {
-    // Detect Capacitor / Native Android environment
-    const isCapacitorNative =
-      typeof window !== 'undefined' &&
-      Boolean(
-        (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } })?.Capacitor?.isNativePlatform?.()
-      );
-    setIsNativeApp(isCapacitorNative);
+    // If running in native Android APK, do not setup any PWA install listeners
+    if (checkIsNativeApp()) {
+      setIsNativeApp(true);
+      return;
+    }
 
     // Detect standalone mode (already installed PWA)
     const isStandalone =
