@@ -271,13 +271,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (err: unknown) {
       console.warn('Popup attempt result, checking mobile redirect fallback:', err);
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
 
       if (
         msg.includes('popup-blocked') ||
         msg.includes('operation-not-supported') ||
         msg.includes('disallowed_useragent') ||
-        msg.includes('popup-closed') ||
         (typeof window !== 'undefined' && 'Capacitor' in window)
       ) {
         try {
@@ -285,10 +284,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         } catch (redirectErr) {
           console.error('Redirect sign in error:', redirectErr);
-          setAuthError('Unable to connect to Google account. Please check your internet connection.');
+          setAuthError(
+            'Unable to connect to Google account. Please check your internet connection.'
+          );
         }
+      } else if (msg.includes('unauthorized-domain')) {
+        setAuthError(
+          'This domain is not authorized in Firebase Console yet. Please ensure your domain is added under Authentication > Settings > Authorized domains.'
+        );
+      } else if (msg.includes('popup-closed-by-user') || msg.includes('cancelled')) {
+        setAuthError('Sign-in cancelled. Please tap "Continue with Google" to try again.');
       } else {
-        setAuthError('Sign-in cancelled. Please tap "Sign in with Google" to continue.');
+        setAuthError('Unable to sign in with Google. Please check connection and try again.');
       }
     } finally {
       setLoading(false);
