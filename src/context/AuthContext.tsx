@@ -12,7 +12,7 @@ import {
   updateProfile as updateFirebaseProfile,
   type User as FirebaseUser,
 } from 'firebase/auth';
-import { doc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, onSnapshot, deleteField } from 'firebase/firestore';
 import { auth, googleProvider, db } from '../firebase/config';
 import {
   syncUserProfile,
@@ -180,6 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     getRedirectResult(auth)
       .then(async (res) => {
         if (res?.user) {
+          localStorage.removeItem('anomah_active_pin_user');
           try {
             const profile = await syncUserProfile({
               uid: res.user.uid,
@@ -205,6 +206,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (current) => {
       setFirebaseUser(current);
       if (current) {
+        localStorage.removeItem('anomah_active_pin_user');
         try {
           const profile = await syncUserProfile({
             uid: current.uid,
@@ -257,9 +259,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInWithGoogle = async () => {
     setLoading(true);
     setAuthError(null);
+    localStorage.removeItem('anomah_active_pin_user');
     try {
       const res = await signInWithPopup(auth, googleProvider);
       if (res.user) {
+        localStorage.removeItem('anomah_active_pin_user');
         const profile = await syncUserProfile({
           uid: res.user.uid,
           displayName: res.user.displayName,
@@ -305,6 +309,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUpWithEmail = async (email: string, pass: string, name: string, username?: string) => {
     setLoading(true);
     setAuthError(null);
+    localStorage.removeItem('anomah_active_pin_user');
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim().slice(0, 100);
     const cleanUsername = username ? username.trim().toLowerCase().replace(/^@/, '') : undefined;
@@ -312,6 +317,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const res = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
       if (res.user) {
+        localStorage.removeItem('anomah_active_pin_user');
         await updateFirebaseProfile(res.user, { displayName: cleanName });
         const profile = await syncUserProfile({
           uid: res.user.uid,
@@ -347,11 +353,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInWithEmail = async (email: string, pass: string) => {
     setLoading(true);
     setAuthError(null);
+    localStorage.removeItem('anomah_active_pin_user');
     const cleanEmail = email.trim().toLowerCase();
 
     try {
       const res = await signInWithEmailAndPassword(auth, cleanEmail, pass);
       if (res.user) {
+        localStorage.removeItem('anomah_active_pin_user');
         const profile = await syncUserProfile({
           uid: res.user.uid,
           displayName: res.user.displayName,
@@ -480,18 +488,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   ) => {
     if (!user) return;
     const userRef = doc(db, 'users', user.userId);
-    const cleanUsername = username ? username.trim().toLowerCase().replace(/^@/, '') : user.username;
-    const cleanPin = secretPin ? secretPin.trim() : user.secretPin;
+    
+    // Determine username update
+    const resolvedUsername = username !== undefined
+      ? (username.trim() ? username.trim().toLowerCase().replace(/^@/, '') : deleteField())
+      : (user.username || undefined);
 
-    const updated: Partial<UserProfile> = {
+    // Determine secretPin update
+    // If explicitly provided: non-empty string sets new PIN, empty string deletes PIN
+    // If undefined: preserve existing user.secretPin
+    const resolvedPin = secretPin !== undefined
+      ? (secretPin.trim() ? secretPin.trim() : deleteField())
+      : (user.secretPin || undefined);
+
+    const docUpdates: Record<string, unknown> = {
       displayName: displayName.trim().slice(0, 100),
       about: about.trim().slice(0, 200),
       photoURL: photoURL.trim().slice(0, 1000),
-      username: cleanUsername,
-      secretPin: cleanPin,
     };
-    await updateDoc(userRef, updated);
-    const merged = { ...user, ...updated };
+    if (resolvedUsername !== undefined) {
+      docUpdates.username = resolvedUsername;
+    }
+    if (resolvedPin !== undefined) {
+      docUpdates.secretPin = resolvedPin;
+    }
+
+    await updateDoc(userRef, docUpdates);
+
+    const merged: UserProfile = {
+      ...user,
+      displayName: displayName.trim().slice(0, 100),
+      about: about.trim().slice(0, 200),
+      photoURL: photoURL.trim().slice(0, 1000),
+      username: typeof resolvedUsername === 'string' ? resolvedUsername : undefined,
+      secretPin: typeof resolvedPin === 'string' ? resolvedPin : undefined,
+    };
     setUser(merged);
     if (localStorage.getItem('anomah_active_pin_user')) {
       localStorage.setItem('anomah_active_pin_user', JSON.stringify(merged));

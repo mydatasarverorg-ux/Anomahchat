@@ -83,6 +83,20 @@ export function ProfileModal({
     'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
   ];
 
+  // Always sync internal form state whenever active user changes
+  useEffect(() => {
+    setDisplayName(user?.displayName || '');
+    setAbout(user?.about || 'Available | Using Anomah Chat');
+    setPhotoURL(user?.photoURL || '');
+    setUsername(user?.username || '');
+    setSecretPin(user?.secretPin || '');
+    setShowPin(false);
+    setNewPassword('');
+    setConfirmPassword('');
+    setErrorMessage(null);
+    setSuccessMessage(null);
+  }, [user?.userId, user?.secretPin, user?.username, user?.displayName, user?.about, user?.photoURL]);
+
   // Intercept mobile hardware / browser back button & Esc key
   useEffect(() => {
     window.history.pushState({ modal: 'profileModal' }, '');
@@ -130,7 +144,7 @@ export function ProfileModal({
 
     try {
       const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
-      if (cleanUsername && cleanUsername !== user?.username) {
+      if (cleanUsername && cleanUsername !== (user?.username || '')) {
         if (cleanUsername.length < 3) {
           throw new Error(t('usernameMinLength'));
         }
@@ -140,12 +154,19 @@ export function ProfileModal({
         }
       }
 
+      // If user typed a PIN: use it.
+      // If user had a PIN previously and emptied it: pass '' to remove PIN.
+      // If user never had a PIN and input is empty: pass undefined so it stays empty.
+      const resolvedPin = secretPin.trim()
+        ? secretPin.trim()
+        : (user?.secretPin ? '' : undefined);
+
       await updateProfile(
         displayName.trim(),
         about.trim(),
         photoURL,
-        cleanUsername || undefined,
-        secretPin ? secretPin.trim() : undefined
+        cleanUsername,
+        resolvedPin
       );
 
       setSuccessMessage(t('profileSavedSuccess'));

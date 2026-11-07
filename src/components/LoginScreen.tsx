@@ -483,7 +483,13 @@ export function LoginScreen() {
           {/* Google Sign-in Button */}
           <button
             type="button"
-            onClick={signInWithGoogle}
+            onClick={() => {
+              setPinIdentifier('');
+              setEnteredPin('');
+              setPassword('');
+              clearAuthError();
+              signInWithGoogle();
+            }}
             disabled={loading}
             className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700/80 rounded-xl text-xs font-medium flex items-center justify-center gap-2.5 transition cursor-pointer disabled:opacity-50 hover:border-slate-600"
           >

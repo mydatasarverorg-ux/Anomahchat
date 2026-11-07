@@ -318,6 +318,7 @@ function ChatDashboard() {
 
       {showProfile && (
         <ProfileModal
+          key={user.userId}
           onClose={() => setShowProfile(false)}
           onOpenAdmin={() => setShowAdmin(true)}
         />
