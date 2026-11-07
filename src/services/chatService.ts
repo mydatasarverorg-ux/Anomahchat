@@ -775,7 +775,7 @@ export async function isUsernameAvailable(username: string, currentUserId?: stri
     return false;
   } catch (err) {
     console.warn('Error checking username:', err);
-    return true;
+    return false;
   }
 }
 

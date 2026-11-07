@@ -21,6 +21,7 @@ import {
   scheduleAccountDeletion,
   restoreAccount,
   checkAccountDeletionStatus,
+  isUsernameAvailable,
 } from '../services/chatService';
 import { SUPER_ADMIN_EMAIL } from '../services/adminService';
 import type { UserProfile, ThemeMode } from '../types/chat';
@@ -315,6 +316,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const cleanUsername = username ? username.trim().toLowerCase().replace(/^@/, '') : undefined;
 
     try {
+      if (cleanUsername) {
+        if (cleanUsername.length < 3) {
+          const errText = 'Username must be at least 3 characters.';
+          setAuthError(errText);
+          throw new Error(errText);
+        }
+        const available = await isUsernameAvailable(cleanUsername);
+        if (!available) {
+          const errText = 'This username is already taken. Please choose another username.';
+          setAuthError(errText);
+          throw new Error(errText);
+        }
+      }
+
       const res = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
       if (res.user) {
         localStorage.removeItem('anomah_active_pin_user');
@@ -493,6 +508,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const resolvedUsername = username !== undefined
       ? (username.trim() ? username.trim().toLowerCase().replace(/^@/, '') : deleteField())
       : (user.username || undefined);
+
+    // If changing username, verify it is not already taken by another account
+    if (typeof resolvedUsername === 'string' && resolvedUsername !== user.username) {
+      if (resolvedUsername.length < 3) {
+        throw new Error('Username must be at least 3 characters.');
+      }
+      const isAvail = await isUsernameAvailable(resolvedUsername, user.userId);
+      if (!isAvail) {
+        throw new Error('This username is already taken. Please choose another username.');
+      }
+    }
 
     // Determine secretPin update
     // If explicitly provided: non-empty string sets new PIN, empty string deletes PIN
