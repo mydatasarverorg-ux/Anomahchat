@@ -150,6 +150,9 @@ export interface ChatRoom {
   id: string;
   type: 'direct' | 'group';
   name?: string;
+  creatorId?: string;
+  adminIds?: string[];
+  groupPhoto?: string;
   participantIds: string[];
   participantDetails?: Record<string, {
     displayName: string;

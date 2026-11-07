@@ -291,6 +291,8 @@ export async function createGroupChat(
     const newChat: Omit<ChatRoom, 'id'> = {
       type: 'group',
       name: groupName.trim().slice(0, 100),
+      creatorId: currentUser.userId,
+      adminIds: [currentUser.userId],
       participantIds,
       participantDetails,
       lastMessageText: `${currentUser.displayName} created group "${groupName}"`,
@@ -557,6 +559,205 @@ export async function deleteChatRoom(chatId: string, currentUserId: string) {
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+// Add new members to an existing group
+export async function addGroupMembers(
+  chatId: string,
+  newMembers: UserProfile[],
+  addedByName: string
+): Promise<void> {
+  const path = `chats/${chatId}`;
+  try {
+    const chatRef = doc(db, 'chats', chatId);
+    const snap = await getDoc(chatRef);
+    if (!snap.exists()) throw new Error('Group not found');
+    const data = snap.data() as ChatRoom;
+
+    const currentIds = new Set(data.participantIds || []);
+    const details = { ...(data.participantDetails || {}) };
+
+    newMembers.forEach((m) => {
+      currentIds.add(m.userId);
+      details[m.userId] = {
+        displayName: m.displayName,
+        photoURL: m.photoURL,
+        email: m.email,
+      };
+    });
+
+    const nowIso = new Date().toISOString();
+    const addedNames = newMembers.map((m) => m.displayName).join(', ');
+
+    await updateDoc(chatRef, {
+      participantIds: Array.from(currentIds),
+      participantDetails: details,
+      lastMessageText: `${addedByName} added ${addedNames}`,
+      lastMessageTime: nowIso,
+      updatedAt: nowIso,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+// Remove a member from a group (Admin only)
+export async function removeGroupMember(
+  chatId: string,
+  memberId: string,
+  removedByName?: string
+): Promise<void> {
+  const path = `chats/${chatId}`;
+  try {
+    const chatRef = doc(db, 'chats', chatId);
+    const snap = await getDoc(chatRef);
+    if (!snap.exists()) throw new Error('Group not found');
+    const data = snap.data() as ChatRoom;
+
+    if (data.creatorId === memberId) {
+      throw new Error('Group creator cannot be removed from the group.');
+    }
+
+    const remainingIds = (data.participantIds || []).filter((id) => id !== memberId);
+    const remainingAdmins = (data.adminIds || []).filter((id) => id !== memberId);
+    const memberName = data.participantDetails?.[memberId]?.displayName || 'Member';
+    const nowIso = new Date().toISOString();
+
+    await updateDoc(chatRef, {
+      participantIds: remainingIds,
+      adminIds: remainingAdmins,
+      lastMessageText: `${removedByName || 'Admin'} removed ${memberName}`,
+      lastMessageTime: nowIso,
+      updatedAt: nowIso,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+// Make a member an Admin (Co-Admin)
+export async function makeGroupAdmin(chatId: string, targetUserId: string): Promise<void> {
+  const path = `chats/${chatId}`;
+  try {
+    const chatRef = doc(db, 'chats', chatId);
+    const snap = await getDoc(chatRef);
+    if (!snap.exists()) throw new Error('Group not found');
+    const data = snap.data() as ChatRoom;
+
+    const currentAdmins = new Set(data.adminIds || (data.creatorId ? [data.creatorId] : []));
+    currentAdmins.add(targetUserId);
+
+    await updateDoc(chatRef, {
+      adminIds: Array.from(currentAdmins),
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+// Dismiss an Admin back to standard member
+export async function dismissGroupAdmin(chatId: string, targetUserId: string): Promise<void> {
+  const path = `chats/${chatId}`;
+  try {
+    const chatRef = doc(db, 'chats', chatId);
+    const snap = await getDoc(chatRef);
+    if (!snap.exists()) throw new Error('Group not found');
+    const data = snap.data() as ChatRoom;
+
+    if (data.creatorId === targetUserId) {
+      throw new Error('Group creator cannot be dismissed as admin.');
+    }
+
+    const currentAdmins = (data.adminIds || []).filter((id) => id !== targetUserId);
+
+    await updateDoc(chatRef, {
+      adminIds: currentAdmins,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+// Leave a group chat
+export async function leaveGroupChat(
+  chatId: string,
+  userId: string,
+  userName?: string
+): Promise<void> {
+  const path = `chats/${chatId}`;
+  try {
+    const chatRef = doc(db, 'chats', chatId);
+    const snap = await getDoc(chatRef);
+    if (!snap.exists()) return;
+    const data = snap.data() as ChatRoom;
+
+    const remainingIds = (data.participantIds || []).filter((id) => id !== userId);
+
+    if (remainingIds.length === 0) {
+      // Last person left: delete group permanently
+      await deleteGroupChatPermanently(chatId);
+      return;
+    }
+
+    let remainingAdmins = (data.adminIds || []).filter((id) => id !== userId);
+    // If no admin is left, automatically promote the first remaining participant
+    if (remainingAdmins.length === 0 && remainingIds.length > 0) {
+      remainingAdmins = [remainingIds[0]];
+    }
+
+    const nowIso = new Date().toISOString();
+    await updateDoc(chatRef, {
+      participantIds: remainingIds,
+      adminIds: remainingAdmins,
+      lastMessageText: `${userName || 'A member'} left the group`,
+      lastMessageTime: nowIso,
+      updatedAt: nowIso,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+// Delete group completely for everyone (Vanish group)
+export async function deleteGroupChatPermanently(chatId: string): Promise<void> {
+  const path = `chats/${chatId}`;
+  try {
+    // 1. Delete all messages in subcollection
+    const messagesRef = collection(db, 'chats', chatId, 'messages');
+    const msgsSnap = await getDocs(messagesRef);
+    const deletePromises = msgsSnap.docs.map((docItem) => deleteDoc(docItem.ref));
+    await Promise.all(deletePromises);
+
+    // 2. Delete the chat room document
+    const chatRef = doc(db, 'chats', chatId);
+    await deleteDoc(chatRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+    throw error;
+  }
+}
+
+// Update group title/name
+export async function updateGroupTitle(chatId: string, newTitle: string): Promise<void> {
+  const path = `chats/${chatId}`;
+  try {
+    const chatRef = doc(db, 'chats', chatId);
+    const nowIso = new Date().toISOString();
+    await updateDoc(chatRef, {
+      name: newTitle.trim().slice(0, 100),
+      updatedAt: nowIso,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
   }
 }
 
