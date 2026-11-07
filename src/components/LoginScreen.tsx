@@ -331,7 +331,7 @@ export function LoginScreen() {
                     <input
                       type="text"
                       required
-                      placeholder="e.g. mahimuhtasim or name@gmail.com"
+                      placeholder={t('loginPinIdentifierPlaceholder')}
                       value={pinIdentifier}
                       onChange={(e) => setPinIdentifier(e.target.value)}
                       className="w-full pl-10 pr-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
@@ -380,7 +380,7 @@ export function LoginScreen() {
                       <input
                         type="text"
                         required
-                        placeholder="e.g. Mahi Muhtasim"
+                        placeholder={language === 'bn' ? 'যেমন: আপনার নাম' : 'e.g. John Doe'}
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         className="w-full pl-10 pr-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
