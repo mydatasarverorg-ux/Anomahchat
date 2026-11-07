@@ -5,36 +5,211 @@
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
   --sar: env(safe-area-inset-right, 0px);
-  --app-bg: #0b1120;
-  --app-card: #0f172a;
-  --app-surface: #1e293b;
-  --app-border: #334155;
-  --app-text: #f8fafc;
-  --app-subtext: #94a3b8;
-  --app-accent: #10b981;
 }
 
+/* Base App Container & Smooth Transitions */
 html,
 body,
 #root {
-  background-color: #0b1120 !important;
-  color: #f8fafc;
   min-height: 100vh;
   width: 100%;
+  margin: 0;
+  padding: 0;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-.bg-slate-950 {
-  background-color: #020617 !important;
+/* ==========================================================================
+   THEME 1: Deep Slate (Default Midnight Soft Dark)
+   ========================================================================== */
+html:not([data-theme]),
+[data-theme="deep-slate"],
+[data-theme="deep-slate"] body,
+[data-theme="deep-slate"] #root {
+  background-color: #0b1120;
+  color: #f8fafc;
 }
 
-.bg-slate-900 {
-  background-color: #0f172a !important;
+[data-theme="deep-slate"] .bg-slate-950,
+html:not([data-theme]) .bg-slate-950 {
+  background-color: #020617;
 }
 
-.bg-slate-800 {
-  background-color: #1e293b !important;
+[data-theme="deep-slate"] .bg-slate-900,
+html:not([data-theme]) .bg-slate-900 {
+  background-color: #0f172a;
 }
 
+[data-theme="deep-slate"] .bg-slate-800,
+html:not([data-theme]) .bg-slate-800 {
+  background-color: #1e293b;
+}
+
+/* ==========================================================================
+   THEME 2: Minimal Light (Clean & Crisp, Apple & WhatsApp Light Mode)
+   ========================================================================== */
+[data-theme="minimal-light"],
+[data-theme="minimal-light"] body,
+[data-theme="minimal-light"] #root {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+/* Surfaces & Panels */
+[data-theme="minimal-light"] .bg-slate-950 {
+  background-color: #f1f5f9 !important;
+}
+[data-theme="minimal-light"] .bg-slate-950\/70,
+[data-theme="minimal-light"] .bg-slate-950\/80,
+[data-theme="minimal-light"] .bg-slate-950\/60,
+[data-theme="minimal-light"] .bg-slate-950\/50,
+[data-theme="minimal-light"] .bg-slate-950\/40 {
+  background-color: #f8fafc !important;
+}
+
+[data-theme="minimal-light"] .bg-slate-900 {
+  background-color: #ffffff !important;
+}
+[data-theme="minimal-light"] .bg-slate-900\/95,
+[data-theme="minimal-light"] .bg-slate-900\/90,
+[data-theme="minimal-light"] .bg-slate-900\/80,
+[data-theme="minimal-light"] .bg-slate-900\/70,
+[data-theme="minimal-light"] .bg-slate-900\/60 {
+  background-color: #ffffff !important;
+}
+
+[data-theme="minimal-light"] .bg-slate-800 {
+  background-color: #f1f5f9 !important;
+}
+[data-theme="minimal-light"] .bg-slate-800\/90,
+[data-theme="minimal-light"] .bg-slate-800\/80,
+[data-theme="minimal-light"] .bg-slate-800\/60,
+[data-theme="minimal-light"] .bg-slate-800\/50,
+[data-theme="minimal-light"] .bg-slate-800\/40 {
+  background-color: #f1f5f9 !important;
+}
+
+[data-theme="minimal-light"] .bg-slate-700 {
+  background-color: #e2e8f0 !important;
+}
+
+/* Borders */
+[data-theme="minimal-light"] .border-slate-800,
+[data-theme="minimal-light"] .border-slate-800\/80,
+[data-theme="minimal-light"] .border-slate-800\/60,
+[data-theme="minimal-light"] .border-slate-700,
+[data-theme="minimal-light"] .border-slate-700\/80,
+[data-theme="minimal-light"] .border-slate-700\/60,
+[data-theme="minimal-light"] .border-slate-700\/50 {
+  border-color: #e2e8f0 !important;
+}
+
+/* Typography */
+[data-theme="minimal-light"] .text-white {
+  color: #0f172a !important;
+}
+[data-theme="minimal-light"] .text-slate-100,
+[data-theme="minimal-light"] .text-slate-200 {
+  color: #1e293b !important;
+}
+[data-theme="minimal-light"] .text-slate-300 {
+  color: #334155 !important;
+}
+[data-theme="minimal-light"] .text-slate-400 {
+  color: #64748b !important;
+}
+[data-theme="minimal-light"] .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+/* Incoming Message Bubble in Light Mode */
+[data-theme="minimal-light"] .bg-slate-800\/90 {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06) !important;
+}
+
+/* Inputs & Modals in Light Mode */
+[data-theme="minimal-light"] input,
+[data-theme="minimal-light"] textarea {
+  color: #0f172a !important;
+}
+[data-theme="minimal-light"] input::placeholder,
+[data-theme="minimal-light"] textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Hover States in Light Mode */
+[data-theme="minimal-light"] .hover\:bg-slate-800:hover,
+[data-theme="minimal-light"] .hover\:bg-slate-900:hover {
+  background-color: #e2e8f0 !important;
+}
+
+/* ==========================================================================
+   THEME 3: Telegram Blue (Official Telegram Navy Dark Aesthetic)
+   ========================================================================== */
+[data-theme="telegram-blue"],
+[data-theme="telegram-blue"] body,
+[data-theme="telegram-blue"] #root {
+  background-color: #0e1621 !important;
+  color: #f5f5f5 !important;
+}
+
+/* Surfaces & Panels */
+[data-theme="telegram-blue"] .bg-slate-950 {
+  background-color: #0e1621 !important;
+}
+[data-theme="telegram-blue"] .bg-slate-950\/70,
+[data-theme="telegram-blue"] .bg-slate-950\/80,
+[data-theme="telegram-blue"] .bg-slate-950\/60,
+[data-theme="telegram-blue"] .bg-slate-950\/50,
+[data-theme="telegram-blue"] .bg-slate-950\/40 {
+  background-color: #0e1621 !important;
+}
+
+[data-theme="telegram-blue"] .bg-slate-900 {
+  background-color: #17212b !important;
+}
+[data-theme="telegram-blue"] .bg-slate-900\/95,
+[data-theme="telegram-blue"] .bg-slate-900\/90,
+[data-theme="telegram-blue"] .bg-slate-900\/80,
+[data-theme="telegram-blue"] .bg-slate-900\/70,
+[data-theme="telegram-blue"] .bg-slate-900\/60 {
+  background-color: #17212b !important;
+}
+
+[data-theme="telegram-blue"] .bg-slate-800 {
+  background-color: #242f3d !important;
+}
+[data-theme="telegram-blue"] .bg-slate-800\/90,
+[data-theme="telegram-blue"] .bg-slate-800\/80,
+[data-theme="telegram-blue"] .bg-slate-800\/60 {
+  background-color: #242f3d !important;
+}
+
+/* Borders */
+[data-theme="telegram-blue"] .border-slate-800,
+[data-theme="telegram-blue"] .border-slate-800\/80,
+[data-theme="telegram-blue"] .border-slate-700,
+[data-theme="telegram-blue"] .border-slate-700\/50 {
+  border-color: #2b394a !important;
+}
+
+/* Telegram Incoming & Sent Bubbles */
+[data-theme="telegram-blue"] .bg-slate-800\/90 {
+  background-color: #182533 !important;
+  border-color: #2b394a !important;
+  color: #f5f5f5 !important;
+}
+
+[data-theme="telegram-blue"] .bg-emerald-600 {
+  background-color: #2b5278 !important;
+  color: #ffffff !important;
+}
+
+/* ==========================================================================
+   Standard Safe-Area Utilities & Ergonomics
+   ========================================================================== */
 .safe-area-inset-top {
   padding-top: env(safe-area-inset-top, 0px);
 }
@@ -50,31 +225,11 @@ body,
   padding-right: env(safe-area-inset-right, 0px);
 }
 
-[data-theme="minimal-light"] {
-  --app-bg: #f8fafc;
-  --app-card: #ffffff;
-  --app-surface: #f1f5f9;
-  --app-border: #e2e8f0;
-  --app-text: #0f172a;
-  --app-subtext: #64748b;
-  --app-accent: #0284c7;
-}
-
-[data-theme="telegram-blue"] {
-  --app-bg: #0e1621;
-  --app-card: #17212b;
-  --app-surface: #242f3d;
-  --app-border: #2b394a;
-  --app-text: #f5f5f5;
-  --app-subtext: #8e9ca8;
-  --app-accent: #2b5278;
-}
-
-/* Telegram / iOS style smooth transitions and custom scrollbars */
 * {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Minimalist Clean Scrollbars */
 ::-webkit-scrollbar {
   width: 5px;
   height: 5px;

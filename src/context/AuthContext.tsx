@@ -70,10 +70,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setThemeState(newTheme);
     localStorage.setItem('anomah_chat_theme', newTheme);
     document.documentElement.setAttribute('data-theme', newTheme);
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) {
+      themeMeta.setAttribute(
+        'content',
+        newTheme === 'minimal-light' ? '#f8fafc' : newTheme === 'telegram-blue' ? '#0e1621' : '#0b1120'
+      );
+    }
   };
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) {
+      themeMeta.setAttribute(
+        'content',
+        theme === 'minimal-light' ? '#f8fafc' : theme === 'telegram-blue' ? '#0e1621' : '#0b1120'
+      );
+    }
   }, [theme]);
 
   // Presence & Heartbeat tracking
