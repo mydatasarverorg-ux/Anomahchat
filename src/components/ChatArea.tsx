@@ -41,6 +41,7 @@ import {
   MicOff,
   Info,
   Users,
+  UserX,
 } from 'lucide-react';
 import { isSuperAdmin } from '../services/adminService';
 import { ReportModal } from './ReportModal';
@@ -138,21 +139,34 @@ export function ChatArea({
     return () => unsubscribe();
   }, [partnerId]);
 
-  const partnerStatus = formatLastSeenStatus(partnerUser?.lastSeen, partnerUser?.isOnline);
+  const isPartnerDeleted =
+    chat.type === 'direct' &&
+    (Boolean(partnerUser?.status === 'scheduled_for_deletion' || partnerUser?.status === 'deleted') ||
+      Boolean(partnerDetails?.status === 'scheduled_for_deletion' || partnerDetails?.status === 'deleted'));
+
   const isPartnerSuspended =
+    !isPartnerDeleted &&
     chat.type === 'direct' &&
     (Boolean(chat.isSuspended) ||
       Boolean(partnerUser?.isBanned) ||
       Boolean(partnerDetails?.isBanned));
   const isCurrentUserSuspended = Boolean(effectiveUser?.isBanned);
 
+  const partnerStatus = isPartnerDeleted
+    ? { isOnline: false, statusText: t('deletedAccountStatus') }
+    : formatLastSeenStatus(partnerUser?.lastSeen, partnerUser?.isOnline);
+
   const title =
     chat.type === 'group'
       ? chat.name || t('filterGroup')
+      : isPartnerDeleted
+      ? t('deletedAccountName')
       : partnerUser?.displayName || partnerDetails?.displayName || (language === 'bn' ? 'ব্যবহারকারী' : 'User');
   const avatar =
     chat.type === 'group'
       ? 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=100&auto=format&fit=crop&q=80'
+      : isPartnerDeleted
+      ? 'https://api.dicebear.com/7.x/bottts/svg?seed=deleted_user'
       : partnerUser?.photoURL || partnerDetails?.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${partnerId}`;
 
   // Subscribe to messages in current chat
@@ -169,13 +183,17 @@ export function ChatArea({
       }
 
       // Mark unread messages as read (skip in Ghost Mode to preserve real user's unread state)
+      // Strictly verify that current user is an active participant of this chat
       if (user && !ghostUser) {
-        markChatMessagesAsRead(chat.id, user, msgs);
+        const isParticipant = Array.isArray(chat.participantIds) && chat.participantIds.includes(user.userId);
+        if (isParticipant) {
+          markChatMessagesAsRead(chat.id, user, msgs);
+        }
       }
     });
 
     return () => unsubscribe();
-  }, [chat.id, user, ghostUser]);
+  }, [chat.id, chat.participantIds, user, ghostUser]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -232,7 +250,7 @@ export function ChatArea({
   // Send text message
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!inputText.trim() || !user || isPartnerSuspended || isCurrentUserSuspended) return;
+    if (!inputText.trim() || !user || isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended) return;
 
     const text = inputText;
     setInputText('');
@@ -260,7 +278,7 @@ export function ChatArea({
   // Image upload
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !user || isPartnerSuspended || isCurrentUserSuspended) return;
+    if (!file || !user || isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended) return;
     e.target.value = '';
 
     try {
@@ -303,7 +321,7 @@ export function ChatArea({
 
   // Voice Notes - Production grade recording with exact duration and cross-platform MIME support
   const startRecording = async () => {
-    if (isPartnerSuspended || isCurrentUserSuspended || ghostUser) return;
+    if (isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended || ghostUser) return;
     setMicError(null);
 
     // Stop any existing stream / recorder
@@ -723,7 +741,9 @@ export function ChatArea({
               </div>
               <p
                 className={`text-[10px] truncate leading-none mt-0.5 ${
-                  isPartnerSuspended
+                    isPartnerDeleted
+                    ? 'text-rose-400 font-medium'
+                    : isPartnerSuspended
                     ? 'text-amber-400 font-semibold'
                     : partnerStatus.isOnline
                     ? 'text-emerald-400 font-medium'
@@ -734,6 +754,11 @@ export function ChatArea({
                   <span className="flex items-center gap-1 text-emerald-400/90 font-medium">
                     <Users className="w-3 h-3" />
                     <span>{t('membersLabel', { count: chat.participantIds.length })}</span>
+                  </span>
+                ) : isPartnerDeleted ? (
+                  <span className="text-rose-400 font-medium flex items-center gap-1">
+                    <UserX className="w-3 h-3 text-rose-400 shrink-0" />
+                    <span>{t('deletedAccountStatus')}</span>
                   </span>
                 ) : isPartnerSuspended ? (
                   <span className="text-amber-400 font-semibold flex items-center gap-1">
@@ -767,9 +792,9 @@ export function ChatArea({
           {!ghostUser && (
             <>
               <button
-                disabled={isPartnerSuspended || isCurrentUserSuspended}
+                disabled={isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended}
                 onClick={() => {
-                  if (isPartnerSuspended || isCurrentUserSuspended) return;
+                  if (isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended) return;
                   onStartCall({
                     active: true,
                     type: 'audio',
@@ -782,12 +807,14 @@ export function ChatArea({
                   });
                 }}
                 className={`p-2 rounded-xl transition ${
-                  isPartnerSuspended || isCurrentUserSuspended
+                  isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended
                     ? 'text-slate-600 opacity-40 cursor-not-allowed'
                     : 'text-slate-400 hover:text-emerald-400 hover:bg-slate-800 cursor-pointer'
                 }`}
                 title={
-                  isPartnerSuspended || isCurrentUserSuspended
+                  isPartnerDeleted
+                    ? t('deletedAccountCallDisabled')
+                    : isPartnerSuspended || isCurrentUserSuspended
                     ? t('callDisabledUserSuspended')
                     : t('audioCall')
                 }
@@ -796,9 +823,9 @@ export function ChatArea({
               </button>
 
               <button
-                disabled={isPartnerSuspended || isCurrentUserSuspended}
+                disabled={isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended}
                 onClick={() => {
-                  if (isPartnerSuspended || isCurrentUserSuspended) return;
+                  if (isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended) return;
                   onStartCall({
                     active: true,
                     type: 'video',
@@ -811,12 +838,14 @@ export function ChatArea({
                   });
                 }}
                 className={`p-2 rounded-xl transition ${
-                  isPartnerSuspended || isCurrentUserSuspended
+                  isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended
                     ? 'text-slate-600 opacity-40 cursor-not-allowed'
                     : 'text-slate-400 hover:text-emerald-400 hover:bg-slate-800 cursor-pointer'
                 }`}
                 title={
-                  isPartnerSuspended || isCurrentUserSuspended
+                  isPartnerDeleted
+                    ? t('deletedAccountCallDisabled')
+                    : isPartnerSuspended || isCurrentUserSuspended
                     ? t('callDisabledUserSuspended')
                     : t('videoCall')
                 }
@@ -1501,6 +1530,13 @@ export function ChatArea({
             {language === 'bn'
               ? 'আপনার অ্যাকাউন্টটি বর্তমানে অ্যাডমিন কর্তৃক স্থগিত করা হয়েছে। আপনি কোনো বার্তা পাঠাতে পারবেন না।'
               : 'Your account has been suspended by the administrator. You cannot send messages.'}
+          </span>
+        </div>
+      ) : isPartnerDeleted ? (
+        <div className="px-4 py-3.5 bg-slate-900 border-t border-slate-800 flex items-center justify-center gap-2.5 shrink-0 select-none">
+          <UserX className="w-4 h-4 text-rose-400 shrink-0" />
+          <span className="text-xs font-medium text-slate-300 text-center">
+            {t('deletedAccountNotice')}
           </span>
         </div>
       ) : isPartnerSuspended ? (

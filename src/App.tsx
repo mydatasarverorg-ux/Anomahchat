@@ -17,8 +17,11 @@ import { BannedScreen } from './components/BannedScreen';
 import { WarningNoticeModal } from './components/WarningNoticeModal';
 import { AnnouncementBanner } from './components/AnnouncementBanner';
 import { AdminModal } from './components/AdminModal';
+import { UpdateModal } from './components/UpdateModal';
 import { subscribeToUserChats } from './services/chatService';
 import { isSuperAdmin } from './services/adminService';
+import { subscribeToLatestRelease, type AppReleaseInfo } from './services/updateService';
+import { isUpdateAvailable, isNativeApkApp } from './utils/appVersion';
 import type { ChatRoom, CallSession, UserProfile } from './types/chat';
 import {
   MessageSquare,
@@ -31,8 +34,8 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 
-function ChatDashboard() {
-  const { user, loading, deletionNotice, recoverAccount, signOutUser } = useAuth();
+function ChatDashboard({ user }: { user: UserProfile }) {
+  const { deletionNotice, recoverAccount, signOutUser } = useAuth();
   const { t, language } = useLanguage();
   const [chats, setChats] = useState<ChatRoom[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
@@ -61,19 +64,14 @@ function ChatDashboard() {
 
   // Subscribe to all chats where current user (or ghost inspected user) is a participant
   useEffect(() => {
-    const targetUserId = ghostUser ? ghostUser.userId : user?.userId;
+    const targetUserId = ghostUser ? ghostUser.userId : user.userId;
     if (!targetUserId) return;
     const unsubscribe = subscribeToUserChats(targetUserId, (data) => {
       setChats(data);
-      // Auto select first chat if none selected on desktop
-      if (!activeChatId && !selectedChat && data.length > 0 && window.innerWidth >= 768) {
-        setActiveChatId(data[0].id);
-        setSelectedChat(data[0]);
-      }
     });
 
     return () => unsubscribe();
-  }, [user, ghostUser, activeChatId, selectedChat]);
+  }, [user.userId, ghostUser]);
 
   // Handle mobile hardware back and Escape key while in Ghost Mode
   useEffect(() => {
@@ -98,25 +96,11 @@ function ChatDashboard() {
     };
   }, [ghostUser]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-3" />
-        <span className="text-xs text-slate-400 tracking-wide">{t('connectingCloud')}</span>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <LoginScreen />;
-  }
-
-  // Active Suspension Enforcement
-  if (user.isBanned) {
-    return <BannedScreen />;
-  }
-
-  const activeChat = chats.find((c) => c.id === activeChatId) || selectedChat || null;
+  const activeChat =
+    (activeChatId ? chats.find((c) => c.id === activeChatId) : null) ||
+    (selectedChat && Array.isArray(selectedChat.participantIds) && selectedChat.participantIds.includes(user.userId)
+      ? selectedChat
+      : null);
 
   return (
     <div className="h-screen w-screen bg-slate-950 flex flex-col overflow-hidden font-sans relative safe-area-container">
@@ -230,6 +214,7 @@ function ChatDashboard() {
       <main className="flex-1 flex flex-col h-full overflow-hidden bg-slate-950">
         {activeChat ? (
           <ChatArea
+            key={activeChat.id}
             chat={activeChat}
             onBack={() => {
               setActiveChatId(null);
@@ -333,11 +318,88 @@ function ChatDashboard() {
   );
 }
 
+function MainContent() {
+  const { user, loading } = useAuth();
+  const { t } = useLanguage();
+  const [pendingRelease, setPendingRelease] = useState<AppReleaseInfo | null>(null);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+
+  // Subscribe to real-time app releases (Option 3 In-App Auto-Updater)
+  // CRITICAL: Only trigger APK update popup if running inside native Android APK!
+  // PWA / Web users update automatically through the browser and Service Worker without APK downloads.
+  useEffect(() => {
+    if (!isNativeApkApp()) {
+      return;
+    }
+
+    const unsubscribe = subscribeToLatestRelease((release) => {
+      if (release && isUpdateAvailable(release)) {
+        setPendingRelease(release);
+        const dismissed = sessionStorage.getItem(`dismissed_update_${release.versionCode}`);
+        if (!dismissed || release.forceUpdate) {
+          setShowUpdateModal(true);
+        }
+      } else {
+        setPendingRelease(null);
+        setShowUpdateModal(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Listen to manual update check events (e.g. from ProfileModal)
+  useEffect(() => {
+    const handleCheckEvent = (e: any) => {
+      if (e.detail?.release) {
+        setPendingRelease(e.detail.release);
+        setShowUpdateModal(true);
+      }
+    };
+    window.addEventListener('anomah_open_update_modal', handleCheckEvent);
+    return () => window.removeEventListener('anomah_open_update_modal', handleCheckEvent);
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-3" />
+        <span className="text-xs text-slate-400 tracking-wide">{t('connectingCloud')}</span>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {!user ? (
+        <LoginScreen />
+      ) : user.isBanned ? (
+        <BannedScreen />
+      ) : (
+        <ChatDashboard key={user.userId} user={user} />
+      )}
+
+      {/* In-App Auto Updater Modal (Option 3) */}
+      {showUpdateModal && pendingRelease && (
+        <UpdateModal
+          release={pendingRelease}
+          onClose={() => {
+            setShowUpdateModal(false);
+            if (!pendingRelease.forceUpdate) {
+              sessionStorage.setItem(`dismissed_update_${pendingRelease.versionCode}`, 'true');
+            }
+          }}
+        />
+      )}
+    </>
+  );
+}
+
 export default function App() {
   return (
     <LanguageProvider>
       <AuthProvider>
-        <ChatDashboard />
+        <MainContent />
       </AuthProvider>
     </LanguageProvider>
   );

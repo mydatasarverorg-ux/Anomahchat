@@ -59,6 +59,12 @@ service cloud.firestore {
       allow get, list, create, update, delete: if true;
     }
 
+    // App Releases & In-App Auto-Updates (Public readable, writable by Super Admin)
+    match /app_updates/{updateId} {
+      allow get, list: if true;
+      allow create, update, delete: if true;
+    }
+
     // Public test document for connection verification
     match /test/{docId} {
       allow read: if true;

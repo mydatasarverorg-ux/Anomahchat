@@ -167,7 +167,7 @@ export function formatLastSeenStatus(lastSeen?: string, isOnline?: boolean): {
   };
 }
 
-// Fetch all registered users
+// Fetch all registered users (excluding deleted or scheduled for deletion)
 export async function getAllUsers(currentUserId: string): Promise<UserProfile[]> {
   const path = 'users';
   try {
@@ -175,7 +175,11 @@ export async function getAllUsers(currentUserId: string): Promise<UserProfile[]>
     const list: UserProfile[] = [];
     snap.forEach((docItem) => {
       const u = docItem.data() as UserProfile;
-      if (u.userId !== currentUserId) {
+      if (
+        u.userId !== currentUserId &&
+        u.status !== 'scheduled_for_deletion' &&
+        u.status !== 'deleted'
+      ) {
         list.push(u);
       }
     });
@@ -376,8 +380,23 @@ export async function sendMessage(params: {
       }
       if (parentData.type === 'direct') {
         const partnerId = parentData.participantIds?.find((id) => id !== params.sender.userId);
-        if (partnerId && parentData.participantDetails?.[partnerId]?.isBanned) {
-          throw new Error('This user has been suspended. Messaging is disabled.');
+        if (partnerId) {
+          if (parentData.participantDetails?.[partnerId]?.isBanned) {
+            throw new Error('This user has been suspended. Messaging is disabled.');
+          }
+          if (
+            parentData.participantDetails?.[partnerId]?.status === 'scheduled_for_deletion' ||
+            parentData.participantDetails?.[partnerId]?.status === 'deleted'
+          ) {
+            throw new Error('This account has been deleted. You cannot send messages.');
+          }
+          const partnerDocSnap = await getDoc(doc(db, 'users', partnerId));
+          if (partnerDocSnap.exists()) {
+            const partnerProfile = partnerDocSnap.data() as UserProfile;
+            if (partnerProfile.status === 'scheduled_for_deletion' || partnerProfile.status === 'deleted') {
+              throw new Error('This account has been deleted. You cannot send messages.');
+            }
+          }
         }
       }
     }
@@ -449,25 +468,31 @@ export async function markChatMessagesAsRead(
   user: UserProfile,
   unreadMessages: ChatMessage[]
 ) {
+  if (!chatId || !user || !user.userId || !Array.isArray(unreadMessages) || unreadMessages.length === 0) {
+    return;
+  }
   const path = `chats/${chatId}/messages`;
   try {
+    const unreadForUser = unreadMessages.filter(
+      (msg) => msg.senderId !== user.userId && Array.isArray(msg.readBy) && !msg.readBy.includes(user.userId)
+    );
+    if (unreadForUser.length === 0) return;
+
     const nowIso = new Date().toISOString();
-    for (const msg of unreadMessages) {
-      if (!msg.readBy.includes(user.userId)) {
-        const msgRef = doc(db, 'chats', chatId, 'messages', msg.id);
-        const existingDetails = msg.seenByDetails || {};
-        await updateDoc(msgRef, {
-          readBy: [...msg.readBy, user.userId],
-          seenByDetails: {
-            ...existingDetails,
-            [user.userId]: {
-              displayName: user.displayName,
-              photoURL: user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.userId}`,
-              seenAt: nowIso,
-            },
+    for (const msg of unreadForUser) {
+      const msgRef = doc(db, 'chats', chatId, 'messages', msg.id);
+      const existingDetails = msg.seenByDetails || {};
+      await updateDoc(msgRef, {
+        readBy: [...(msg.readBy || []), user.userId],
+        seenByDetails: {
+          ...existingDetails,
+          [user.userId]: {
+            displayName: user.displayName || 'User',
+            photoURL: user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.userId}`,
+            seenAt: nowIso,
           },
-        });
-      }
+        },
+      });
     }
   } catch (error) {
     // Non-blocking for UI
@@ -780,31 +805,38 @@ export async function isUsernameAvailable(username: string, currentUserId?: stri
 }
 
 // Find user by Username, Email, or User ID (case-insensitive & whitespace trimmed)
-export async function findUserByIdentifier(identifier: string): Promise<UserProfile | null> {
+export async function findUserByIdentifier(identifier: string, allowDeleted = false): Promise<UserProfile | null> {
   const raw = identifier.trim().replace(/^@/, '');
   const clean = raw.toLowerCase();
   if (!clean) return null;
+
+  const validateUser = (u: UserProfile): UserProfile | null => {
+    if (!allowDeleted && (u.status === 'scheduled_for_deletion' || u.status === 'deleted')) {
+      return null;
+    }
+    return u;
+  };
 
   try {
     // 1. Try querying by username (exact lowercase)
     const qUsername = query(collection(db, 'users'), where('username', '==', clean));
     const snapUser = await getDocs(qUsername);
     if (!snapUser.empty) {
-      return snapUser.docs[0].data() as UserProfile;
+      return validateUser(snapUser.docs[0].data() as UserProfile);
     }
 
     // 2. Try querying by email (lowercase)
     const qEmail = query(collection(db, 'users'), where('email', '==', clean));
     const snapEmail = await getDocs(qEmail);
     if (!snapEmail.empty) {
-      return snapEmail.docs[0].data() as UserProfile;
+      return validateUser(snapEmail.docs[0].data() as UserProfile);
     }
 
     // 3. Try direct doc lookup by UID
     const userDocRef = doc(db, 'users', raw);
     const snapDoc = await getDoc(userDocRef);
     if (snapDoc.exists()) {
-      return snapDoc.data() as UserProfile;
+      return validateUser(snapDoc.data() as UserProfile);
     }
 
     // 4. In-memory scan fallback across users (handles legacy case discrepancies or spaces)
@@ -817,7 +849,7 @@ export async function findUserByIdentifier(identifier: string): Promise<UserProf
         u.userId === raw ||
         (u.displayName && u.displayName.toLowerCase() === clean)
       ) {
-        return u;
+        return validateUser(u);
       }
     }
 
@@ -833,7 +865,8 @@ export async function verifySecretPin(
   identifier: string,
   enteredPin: string
 ): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
-  const user = await findUserByIdentifier(identifier);
+  // Allow deleted user to be found for PIN login so the owner can recover their account within 15 days
+  const user = await findUserByIdentifier(identifier, true);
   if (!user) {
     return { success: false, error: 'No account found with this username, email or ID. Please check and try again.' };
   }

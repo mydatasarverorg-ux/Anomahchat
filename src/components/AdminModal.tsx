@@ -25,6 +25,12 @@ import {
   subscribeToChatMessagesForAdmin,
   SUPER_ADMIN_EMAIL,
 } from '../services/adminService';
+import {
+  publishAppRelease,
+  subscribeToLatestRelease,
+  type AppReleaseInfo,
+} from '../services/updateService';
+import { APP_VERSION } from '../utils/appVersion';
 import type {
   UserProfile,
   UserReport,
@@ -43,6 +49,8 @@ import {
   FileText,
   Search,
   CheckCircle2,
+  Download,
+  Rocket,
   XCircle,
   AlertTriangle,
   Lock,
@@ -80,8 +88,19 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   const { t, language } = useLanguage();
 
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'users' | 'chat_audit' | 'recovery' | 'reports' | 'announcements' | 'logs'
+    'overview' | 'users' | 'chat_audit' | 'recovery' | 'reports' | 'announcements' | 'logs' | 'updates'
   >('overview');
+
+  // APK In-App Release State
+  const [currentLiveRelease, setCurrentLiveRelease] = useState<AppReleaseInfo | null>(null);
+  const [releaseVersionName, setReleaseVersionName] = useState('1.1.0');
+  const [releaseVersionCode, setReleaseVersionCode] = useState('110');
+  const [releaseApkUrl, setReleaseApkUrl] = useState('');
+  const [releaseFileSizeText, setReleaseFileSizeText] = useState('18.5 MB');
+  const [releaseChangelogEn, setReleaseChangelogEn] = useState('• Faster messaging & bug fixes\n• Real-time cloud sync improvements');
+  const [releaseChangelogBn, setReleaseChangelogBn] = useState('• দ্রুতগতির চ্যাট ও বাগ ফিক্স\n• রিয়েল-টাইম পারফরম্যান্স উন্নত করা হয়েছে');
+  const [releaseForceUpdate, setReleaseForceUpdate] = useState(false);
+  const [publishingRelease, setPublishingRelease] = useState(false);
 
   // Mobile Hardware / Browser Back Navigation and Esc Key Interception
   useEffect(() => {
@@ -169,6 +188,7 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   const [isWarning, setIsWarning] = useState(false);
 
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
+  const [actionErrorMsg, setActionErrorMsg] = useState<string | null>(null);
 
   // Live Users Subscription
   useEffect(() => {
@@ -229,6 +249,55 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     const unsubscribe = subscribeToAdminLogs((data) => setLogs(data));
     return () => unsubscribe();
   }, []);
+
+  // Live APK Release Subscription
+  useEffect(() => {
+    const unsubscribe = subscribeToLatestRelease((rel) => {
+      setCurrentLiveRelease(rel);
+      if (rel) {
+        setReleaseVersionName(rel.versionName);
+        setReleaseVersionCode(String(rel.versionCode));
+        setReleaseApkUrl(rel.apkDownloadUrl || '');
+        setReleaseFileSizeText(rel.fileSizeText || '18.5 MB');
+        setReleaseChangelogEn(rel.changelogEn || '');
+        setReleaseChangelogBn(rel.changelogBn || '');
+        setReleaseForceUpdate(Boolean(rel.forceUpdate));
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handlePublishRelease = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!releaseVersionName.trim() || !releaseVersionCode || !releaseApkUrl.trim() || !user) return;
+    setPublishingRelease(true);
+    setActionErrorMsg(null);
+    try {
+      await publishAppRelease(
+        {
+          versionName: releaseVersionName.trim(),
+          versionCode: parseInt(releaseVersionCode, 10) || 102,
+          apkDownloadUrl: releaseApkUrl.trim(),
+          fileSizeText: releaseFileSizeText.trim() || undefined,
+          changelogEn: releaseChangelogEn.trim(),
+          changelogBn: releaseChangelogBn.trim(),
+          forceUpdate: releaseForceUpdate,
+          publishedBy: user.email || SUPER_ADMIN_EMAIL,
+        },
+        user.email || SUPER_ADMIN_EMAIL
+      );
+      showSuccessBanner(
+        language === 'bn'
+          ? `v${releaseVersionName.trim()} রিলিজ সফলভাবে ক্লাউডে পাবলিশ হয়েছে! সকল ডিভাইস আপডেট নোটিফিকেশন পাবে।`
+          : `Release v${releaseVersionName.trim()} published! All connected client devices will get update prompt.`
+      );
+    } catch (err) {
+      console.error('Failed to publish release:', err);
+      setActionErrorMsg(err instanceof Error ? err.message : 'Failed to publish release.');
+    } finally {
+      setPublishingRelease(false);
+    }
+  };
 
   const showSuccessBanner = (msg: string) => {
     setActionSuccessMsg(msg);
@@ -544,6 +613,7 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
             { id: 'recovery', label: t('adminTabRecovery'), icon: KeyRound, badge: pendingRecoveryCount, alert: pendingRecoveryCount > 0 },
             { id: 'reports', label: t('adminTabReports'), icon: Flag, badge: pendingReportsCount, alert: pendingReportsCount > 0 },
             { id: 'announcements', label: t('adminTabAnnouncements'), icon: Radio },
+            { id: 'updates', label: language === 'bn' ? 'APK রিলিজ' : 'APK Releases', icon: Rocket },
             { id: 'logs', label: t('adminTabLogs'), icon: FileText },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -1868,6 +1938,320 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* APK & App Releases Tab */}
+          {activeTab === 'updates' && (
+            <div className="space-y-6 max-w-4xl">
+              {/* Header Banner */}
+              <div className="bg-gradient-to-r from-emerald-950/60 via-slate-900 to-teal-950/40 border border-emerald-500/30 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-lg">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
+                    <Rocket className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                      {language === 'bn' ? 'APK অটো-আপডেট ও রিলিজ সেন্টার' : 'APK Auto-Updater & Release Center'}
+                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        {language === 'bn' ? 'সরাসরি ইন-অ্যাপ' : 'In-App Direct'}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {language === 'bn'
+                        ? 'এখানে নতুন APK সংস্করণ প্রকাশ করলে সকল অ্যান্ড্রয়েড ডিভাইসে স্বয়ংক্রিয়ভাবে ইন-অ্যাপ আপডেট ডায়ালগ চলে যাবে এবং ১ ক্লিকে ইনস্টল হবে।'
+                        : 'Publishing a new APK release here immediately pushes the in-app update banner to all active Android APK installations worldwide.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl px-3.5 py-2 shrink-0 text-right">
+                  <span className="text-[10px] text-slate-500 block uppercase font-mono font-bold">
+                    {language === 'bn' ? 'বর্তমান অ্যাপ বিল্ড' : 'Current App Build'}
+                  </span>
+                  <span className="text-xs font-mono font-bold text-emerald-400">
+                    v{APP_VERSION.versionName} ({APP_VERSION.versionCode})
+                  </span>
+                </div>
+              </div>
+
+              {/* Live Active Release Card */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                      {language === 'bn' ? 'লাইভ অ্যাক্টিভ রিলিজ (ক্লাউডে সেভ করা)' : 'Live Active Release (Cloud Synced)'}
+                    </h4>
+                  </div>
+                  {currentLiveRelease && (
+                    <span className="text-[11px] font-mono text-slate-400">
+                      {new Date(currentLiveRelease.publishedAt).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+
+                {currentLiveRelease ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs pt-1">
+                    <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                      <span className="text-[10px] text-slate-500 block font-semibold">
+                        {language === 'bn' ? 'সংস্করণ নাম' : 'Version Name'}
+                      </span>
+                      <span className="text-sm font-bold text-emerald-400 font-mono">
+                        v{currentLiveRelease.versionName}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                      <span className="text-[10px] text-slate-500 block font-semibold">
+                        {language === 'bn' ? 'বিল্ড কোড' : 'Build Code'}
+                      </span>
+                      <span className="text-sm font-bold text-sky-400 font-mono">
+                        {currentLiveRelease.versionCode}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                      <span className="text-[10px] text-slate-500 block font-semibold">
+                        {language === 'bn' ? 'ফাইল সাইজ' : 'File Size'}
+                      </span>
+                      <span className="text-sm font-bold text-slate-200">
+                        {currentLiveRelease.fileSizeText || 'N/A'}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                      <span className="text-[10px] text-slate-500 block font-semibold">
+                        {language === 'bn' ? 'বাধ্যতামূলক আপডেট?' : 'Mandatory Update?'}
+                      </span>
+                      <span
+                        className={`text-xs font-bold inline-block px-2 py-0.5 rounded-full mt-1 ${
+                          currentLiveRelease.forceUpdate
+                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                            : 'bg-slate-800 text-slate-400'
+                        }`}
+                      >
+                        {currentLiveRelease.forceUpdate
+                          ? (language === 'bn' ? 'হ্যাঁ (বাধ্যতামূলক)' : 'Yes (Required)')
+                          : (language === 'bn' ? 'না (ঐচ্ছিক)' : 'No (Optional)')}
+                      </span>
+                    </div>
+
+                    <div className="sm:col-span-2 lg:col-span-4 bg-slate-900/80 p-3 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-slate-500 block font-semibold">
+                          {language === 'bn' ? 'APK ডাউনলোড লিঙ্ক' : 'APK Download URL'}
+                        </span>
+                        <a
+                          href={currentLiveRelease.apkDownloadUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs text-sky-400 hover:text-sky-300 truncate block font-mono underline"
+                        >
+                          {currentLiveRelease.apkDownloadUrl}
+                        </a>
+                      </div>
+                      <a
+                        href={currentLiveRelease.apkDownloadUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold shrink-0 flex items-center gap-1.5 cursor-pointer self-start sm:self-auto border border-slate-700"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>{language === 'bn' ? 'ডাউনলোড চেক করুন' : 'Test Download'}</span>
+                      </a>
+                    </div>
+
+                    {(currentLiveRelease.changelogBn || currentLiveRelease.changelogEn) && (
+                      <div className="sm:col-span-2 lg:col-span-4 bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                        <span className="text-[10px] text-slate-500 block font-semibold mb-1">
+                          {language === 'bn' ? 'রিলিজ নোট ও পরিবর্তন' : 'Release Notes & Changelog'}
+                        </span>
+                        <p className="text-xs text-slate-300 whitespace-pre-wrap">
+                          {language === 'bn'
+                            ? currentLiveRelease.changelogBn || currentLiveRelease.changelogEn
+                            : currentLiveRelease.changelogEn || currentLiveRelease.changelogBn}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="py-6 text-center text-slate-500 text-xs">
+                    {language === 'bn'
+                      ? 'এখনো কোনো রিলিজ প্রকাশ করা হয়নি। নিচে তথ্য দিয়ে প্রথম রিলিজ প্রকাশ করুন।'
+                      : 'No release published yet. Fill in the form below to publish your first release.'}
+                  </div>
+                )}
+              </div>
+
+              {/* Publish New Release Form */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Rocket className="w-4 h-4 text-emerald-400" />
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                      {language === 'bn' ? 'নতুন APK রিলিজ প্রকাশ ফর্ম' : 'Publish New APK Release'}
+                    </h4>
+                  </div>
+                  <span className="text-[11px] text-slate-500 font-medium">
+                    {language === 'bn' ? 'শুধুমাত্র সুপার অ্যাডমিন' : 'Super Admin Only'}
+                  </span>
+                </div>
+
+                {/* Storage Auto-cleanup notice */}
+                <div className="bg-emerald-950/30 border border-emerald-500/20 rounded-xl p-3 flex items-start gap-2.5 text-xs text-slate-300">
+                  <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold text-emerald-300 block mb-0.5">
+                      {language === 'bn' ? 'স্টোরেজ নিরাপত্তা ও স্বয়ংক্রিয় ক্লিন-আপ' : 'Storage Safety & Automatic Cleanup'}
+                    </span>
+                    <p className="text-[11px] text-slate-400">
+                      {language === 'bn'
+                        ? 'ইউজারের ফোনে নতুন APK ডাউনলোড হওয়ার পর প্যাকেজ ম্যানেজার এটি ইনস্টল করে এবং ইন্সটলেশন শেষে অস্থায়ী ডাউনলোড ক্যাশ স্বয়ংক্রিয়ভাবে মুছে ফেলা হয়। ফলে ফোনের স্টোরেজে অপ্রয়োজনীয় ফাইল জমে থাকার কোনো সুযোগ নেই।'
+                        : 'When users download and install the new APK, the temporary APK installer is saved in cache/download memory and cleared upon installation, keeping user device storage clean and optimized.'}
+                    </p>
+                  </div>
+                </div>
+
+                <form onSubmit={handlePublishRelease} className="space-y-4 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-slate-300 font-semibold block">
+                        {language === 'bn' ? 'সংস্করণ নাম (Version Name)' : 'Version Name'} *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 1.0.2"
+                        value={releaseVersionName}
+                        onChange={(e) => setReleaseVersionName(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono focus:outline-none focus:border-emerald-500"
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-slate-300 font-semibold block">
+                        {language === 'bn' ? 'বিল্ড কোড (Version Code)' : 'Version Code'} *
+                      </label>
+                      <input
+                        type="number"
+                        placeholder="e.g. 102"
+                        value={releaseVersionCode}
+                        onChange={(e) => setReleaseVersionCode(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono focus:outline-none focus:border-emerald-500"
+                        required
+                      />
+                      <span className="text-[10px] text-slate-500">
+                        {language === 'bn' ? 'বর্তমান বিল্ড থেকে বড় হতে হবে' : 'Must be greater than current build'}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-slate-300 font-semibold block">
+                        {language === 'bn' ? 'ফাইল সাইজ (File Size)' : 'File Size'}
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 14.8 MB"
+                        value={releaseFileSizeText}
+                        onChange={(e) => setReleaseFileSizeText(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-slate-300 font-semibold block">
+                      {language === 'bn' ? 'সরাসরি APK ডাউনলোড লিঙ্ক (Direct APK URL)' : 'Direct APK Download URL'} *
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://github.com/.../releases/download/.../AnomahChat-v1.0.2.apk"
+                      value={releaseApkUrl}
+                      onChange={(e) => setReleaseApkUrl(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-xs focus:outline-none focus:border-emerald-500"
+                      required
+                    />
+                    <span className="text-[10px] text-slate-500">
+                      {language === 'bn'
+                        ? 'ইউজার যখন "আপডেট করুন" চাপবে তখন সরাসরি এই লিঙ্ক থেকে APK ডাউনলোড ও ইনস্টল প্রক্রিয়া শুরু হবে।'
+                        : 'Direct link where Android devices will download the updated APK binary.'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-slate-300 font-semibold block">
+                        {language === 'bn' ? 'পরিবর্তনসমূহ (বাংলা)' : 'Changelog (Bengali)'}
+                      </label>
+                      <textarea
+                        rows={3}
+                        placeholder="নতুন কি কি যোগ হয়েছে বা ফিক্স করা হয়েছে..."
+                        value={releaseChangelogBn}
+                        onChange={(e) => setReleaseChangelogBn(e.target.value)}
+                        className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none text-xs"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-slate-300 font-semibold block">
+                        {language === 'bn' ? 'পরিবর্তনসমূহ (English)' : 'Changelog (English)'}
+                      </label>
+                      <textarea
+                        rows={3}
+                        placeholder="What's new in this build..."
+                        value={releaseChangelogEn}
+                        onChange={(e) => setReleaseChangelogEn(e.target.value)}
+                        className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Force Update Toggle */}
+                  <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-white block">
+                        {language === 'bn' ? 'বাধ্যতামূলক আপডেট (Force Update)' : 'Force / Mandatory Update'}
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        {language === 'bn'
+                          ? 'অন করলে ইউজাররা আপডেট না করা পর্যন্ত পুরনো অ্যাপ ব্যবহার করতে পারবে না।'
+                          : 'If enabled, users must update to this release before they can proceed using the app.'}
+                      </span>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={releaseForceUpdate}
+                        onChange={(e) => setReleaseForceUpdate(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                    </label>
+                  </div>
+
+                  {/* Submit Button */}
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="submit"
+                      disabled={publishingRelease || !releaseVersionName.trim() || !releaseVersionCode || !releaseApkUrl.trim()}
+                      className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition shadow flex items-center gap-2 cursor-pointer"
+                    >
+                      {publishingRelease ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>{language === 'bn' ? 'রিলিজ প্রকাশিত হচ্ছে...' : 'Publishing Release...'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Rocket className="w-4 h-4" />
+                          <span>{language === 'bn' ? 'নতুন রিলিজ লাইভ করুন' : 'Publish Release Live'}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
           )}
         </div>

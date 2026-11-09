@@ -24,7 +24,12 @@ import {
   Languages,
   ExternalLink,
   ArrowLeft,
+  Rocket,
+  RefreshCw,
+  Loader2,
 } from 'lucide-react';
+import { APP_VERSION, isUpdateAvailable, isNativeApkApp } from '../utils/appVersion';
+import { getLatestRelease } from '../services/updateService';
 
 export function ProfileModal({
   onClose,
@@ -73,6 +78,57 @@ export function ProfileModal({
   const [saving, setSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateStatusMessage, setUpdateStatusMessage] = useState<string | null>(null);
+
+  const handleCheckForUpdates = async () => {
+    setCheckingUpdate(true);
+    setUpdateStatusMessage(null);
+    try {
+      // In PWA / Web Browser mode, updates happen automatically via browser / Service Worker
+      if (!isNativeApkApp()) {
+        if ('serviceWorker' in navigator) {
+          try {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            for (const r of regs) {
+              await r.update();
+            }
+          } catch {
+            // Ignore SW update error
+          }
+        }
+        setUpdateStatusMessage(
+          language === 'bn'
+            ? 'ওয়েব/পিডব্লিউএ: ব্রাউজারে অ্যাপ সর্বদা লাইভ আপ-টু-ডেট থাকে!'
+            : 'Web / PWA: Kept live and up-to-date automatically in browser!'
+        );
+        return;
+      }
+
+      // In Native Android APK mode, check for newer published APK release
+      const latest = await getLatestRelease();
+      if (latest && isUpdateAvailable(latest)) {
+        window.dispatchEvent(new CustomEvent('anomah_open_update_modal', { detail: { release: latest } }));
+        setUpdateStatusMessage(
+          language === 'bn'
+            ? `নতুন APK সংস্করণ পাওয়া গেছে (v${latest.versionName})!`
+            : `New APK version found (v${latest.versionName})!`
+        );
+      } else {
+        setUpdateStatusMessage(
+          language === 'bn'
+            ? `আপনার APK অ্যাপ আপ-টু-ডেট (v${APP_VERSION.versionName})`
+            : `Already on latest APK build (v${APP_VERSION.versionName})`
+        );
+      }
+    } catch {
+      setUpdateStatusMessage(
+        language === 'bn' ? 'আপডেট চেক করতে ব্যর্থ হয়েছে' : 'Failed to check updates'
+      );
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
 
   const presetAvatars = [
     `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.displayName || 'Avatar1'}`,
@@ -388,6 +444,43 @@ export function ProfileModal({
               {/* Install PWA Option */}
               <div className="mt-2">
                 <PWAInstallButton variant="sidebar" />
+              </div>
+
+              {/* In-App APK / Web Version & Auto-Update Check */}
+              <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-1.5">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">
+                    {language === 'bn' ? 'অ্যাপ সংস্করণ' : 'App Version'}
+                  </span>
+                  <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/20 px-1.5 py-0.5 rounded-md">
+                    v{APP_VERSION.versionName} ({isNativeApkApp() ? 'APK' : 'PWA'})
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleCheckForUpdates}
+                  disabled={checkingUpdate}
+                  className="w-full py-1.5 px-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-[11px] font-medium border border-slate-800 flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                >
+                  {checkingUpdate ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                      <span>{language === 'bn' ? 'যাচাই হচ্ছে...' : 'Checking...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>{language === 'bn' ? 'আপডেট চেক করুন' : 'Check for Updates'}</span>
+                    </>
+                  )}
+                </button>
+
+                {updateStatusMessage && (
+                  <p className="text-[10px] text-center text-slate-400 px-1 transition animate-in fade-in">
+                    {updateStatusMessage}
+                  </p>
+                )}
               </div>
             </div>
           </div>

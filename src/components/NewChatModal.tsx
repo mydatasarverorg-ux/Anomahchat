@@ -34,10 +34,12 @@ export function NewChatModal({ onClose, onSelectChat }: NewChatModalProps) {
   }, [user]);
 
   const filteredUsers = users.filter((u) => {
+    if (u.status === 'scheduled_for_deletion' || u.status === 'deleted') return false;
     const q = search.toLowerCase();
     return (
       u.displayName.toLowerCase().includes(q) ||
-      u.email.toLowerCase().includes(q)
+      u.email.toLowerCase().includes(q) ||
+      Boolean(u.username && u.username.toLowerCase().includes(q))
     );
   });
 

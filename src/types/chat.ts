@@ -159,6 +159,7 @@ export interface ChatRoom {
     photoURL?: string;
     email: string;
     isBanned?: boolean;
+    status?: 'active' | 'scheduled_for_deletion' | 'deleted';
   }>;
   isSuspended?: boolean;
   suspendedUserId?: string | null;

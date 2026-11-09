@@ -108,17 +108,34 @@ export function Sidebar({
       ? formatLastSeenStatus(liveProfile.lastSeen, liveProfile.isOnline)
       : { isOnline: false, statusText: t('offline') };
 
-    const isSuspended = Boolean(
+    const isDeleted = Boolean(
+      liveProfile?.status === 'scheduled_for_deletion' ||
+      liveProfile?.status === 'deleted' ||
+      details?.status === 'scheduled_for_deletion' ||
+      details?.status === 'deleted'
+    );
+
+    const isSuspended = !isDeleted && Boolean(
       chat.isSuspended ||
       liveProfile?.isBanned ||
       details?.isBanned
     );
+
+    const displayName = isDeleted
+      ? t('deletedAccountName')
+      : liveProfile?.displayName || details?.displayName || (language === 'bn' ? 'ব্যবহারকারী' : 'User');
+
+    const photoURL = isDeleted
+      ? 'https://api.dicebear.com/7.x/bottts/svg?seed=deleted_user'
+      : liveProfile?.photoURL || details?.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${partnerId}`;
+
     return {
-      name: liveProfile?.displayName || details?.displayName || (language === 'bn' ? 'ব্যবহারকারী' : 'User'),
-      photo: liveProfile?.photoURL || details?.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${partnerId}`,
-      isOnline: presence.isOnline && !isSuspended,
+      name: displayName,
+      photo: photoURL,
+      isOnline: presence.isOnline && !isSuspended && !isDeleted,
       isSuspended,
-      about: liveProfile?.email || details?.email || '',
+      isDeleted,
+      about: isDeleted ? t('deletedAccountStatus') : liveProfile?.email || details?.email || '',
     };
   };
 
@@ -405,11 +422,15 @@ export function Sidebar({
                       <span className="text-xs font-semibold text-white truncate max-w-[125px]">
                         {display.name}
                       </span>
-                      {display.isSuspended && (
+                      {display.isDeleted ? (
+                        <span className="px-1.5 py-0.2 rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[9px] font-bold shrink-0">
+                          {t('deletedAccountStatus')}
+                        </span>
+                      ) : display.isSuspended ? (
                         <span className="px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold shrink-0">
                           {t('userUnavailableBadge')}
                         </span>
-                      )}
+                      ) : null}
                     </div>
                     <span className="text-[10px] text-slate-400 shrink-0 font-medium">
                       {formatTime(chat.lastMessageTime || chat.updatedAt)}

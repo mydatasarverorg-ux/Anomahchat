@@ -483,6 +483,12 @@ export const translations = {
     userUnavailableBadge: 'Unavailable',
     callDisabledUserSuspended: 'User is suspended. Calling is unavailable.',
     userSuspendedCannotChat: 'This account is suspended and cannot participate in conversations.',
+
+    // Deleted Account Status
+    deletedAccountName: 'Deleted Account',
+    deletedAccountStatus: 'User not found',
+    deletedAccountNotice: 'This account has been deleted. You cannot send messages.',
+    deletedAccountCallDisabled: 'This account is deleted. Calling is unavailable.',
   },
   bn: {
     // General
@@ -966,6 +972,12 @@ export const translations = {
     userUnavailableBadge: 'অনুপলব্ধ',
     callDisabledUserSuspended: 'ইউজার স্থগিত থাকায় কল অনুপলব্ধ।',
     userSuspendedCannotChat: 'এই অ্যাকাউন্টটি স্থগিত রয়েছে এবং কোনো চ্যাটে অংশ নিতে পারবে না।',
+
+    // Deleted Account Status
+    deletedAccountName: 'মুছে ফেলা অ্যাকাউন্ট',
+    deletedAccountStatus: 'অ্যাকাউন্ট পাওয়া যায়নি',
+    deletedAccountNotice: 'এই অ্যাকাউন্টটি মুছে ফেলা হয়েছে। কোনো মেসেজ পাঠানো সম্ভব নয়।',
+    deletedAccountCallDisabled: 'অ্যাকাউন্ট মুছে ফেলা হয়েছে। কল করা সম্ভব নয়।',
   },
 } as const;
 

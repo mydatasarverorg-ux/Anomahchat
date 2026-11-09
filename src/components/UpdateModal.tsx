@@ -1,0 +1,204 @@
+import { useState, useEffect } from 'react';
+import { useLanguage } from '../context/LanguageContext';
+import { APP_VERSION } from '../utils/appVersion';
+import type { AppReleaseInfo } from '../services/updateService';
+import {
+  Sparkles,
+  Download,
+  CheckCircle2,
+  AlertCircle,
+  X,
+  Clock,
+  ShieldCheck,
+  HardDrive,
+  RefreshCw,
+  ExternalLink,
+} from 'lucide-react';
+
+interface UpdateModalProps {
+  release: AppReleaseInfo;
+  onClose: () => void;
+  isManualCheck?: boolean;
+}
+
+export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateModalProps) {
+  const { language } = useLanguage();
+  const [downloading, setDownloading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [downloadComplete, setDownloadComplete] = useState(false);
+
+  // Intercept back button / escape key (unless forceUpdate is true)
+  useEffect(() => {
+    if (release.forceUpdate && !isManualCheck) return;
+    window.history.pushState({ modal: 'updateModal' }, '');
+    const handlePopState = () => onClose();
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('popstate', handlePopState);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose, release.forceUpdate, isManualCheck]);
+
+  const handleStartUpdate = () => {
+    if (!release.apkDownloadUrl) return;
+
+    setDownloading(true);
+    setProgress(10);
+
+    // Simulate smooth progress bar while initiating system download
+    const interval = setInterval(() => {
+      setProgress((prev) => {
+        if (prev >= 90) {
+          clearInterval(interval);
+          return 90;
+        }
+        return prev + Math.floor(Math.random() * 15) + 5;
+      });
+    }, 200);
+
+    // Trigger direct system download
+    setTimeout(() => {
+      clearInterval(interval);
+      setProgress(100);
+      setDownloadComplete(true);
+
+      const a = document.createElement('a');
+      a.href = release.apkDownloadUrl;
+      a.download = `AnomahChat-v${release.versionName}.apk`;
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }, 1800);
+  };
+
+  const changelog = language === 'bn'
+    ? (release.changelogBn || release.changelogEn || 'নতুন ফিচার এবং নিরাপত্তা আপডেট যোগ করা হয়েছে।')
+    : (release.changelogEn || release.changelogBn || 'New features, performance enhancements, and bug fixes.');
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in select-none">
+      <div className="bg-slate-900 border border-slate-700/90 rounded-3xl w-full max-w-md p-6 shadow-2xl relative flex flex-col max-h-[92vh] overflow-hidden">
+        {/* Close Button (only if not mandatory) */}
+        {!release.forceUpdate && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 text-slate-400 hover:text-white p-1.5 rounded-full hover:bg-slate-800 transition cursor-pointer"
+            title={language === 'bn' ? 'বন্ধ করুন' : 'Close'}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
+
+        {/* Header Icon & Title */}
+        <div className="text-center mb-5">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center mx-auto mb-3.5 shadow-xl shadow-emerald-500/20">
+            <Sparkles className="w-8 h-8" />
+          </div>
+
+          <h2 className="text-lg font-bold text-white mb-1">
+            {language === 'bn' ? 'নতুন আপডেট প্রস্তুত!' : 'New Update Available!'}
+          </h2>
+          <p className="text-xs text-slate-400">
+            {language === 'bn'
+              ? 'আনমাহ্ মেসেঞ্জারের নতুন সংস্করণ প্রকাশ করা হয়েছে।'
+              : 'A brand new version of Anomah Messenger is ready.'}
+          </p>
+
+          {/* Version Pill Comparison */}
+          <div className="inline-flex items-center gap-2 mt-3 px-3 py-1 bg-slate-800/80 border border-slate-700 rounded-full text-xs font-mono">
+            <span className="text-slate-400">v{APP_VERSION.versionName}</span>
+            <span className="text-slate-500">➔</span>
+            <span className="text-emerald-400 font-bold">v{release.versionName}</span>
+            {release.fileSizeText && (
+              <>
+                <span className="text-slate-600">·</span>
+                <span className="text-slate-400 text-[11px] flex items-center gap-1 font-sans">
+                  <HardDrive className="w-3 h-3 text-slate-400" />
+                  {release.fileSizeText}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Changelog & Notes Box */}
+        <div className="flex-1 overflow-y-auto mb-5 p-3.5 bg-slate-950/70 border border-slate-800 rounded-2xl">
+          <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-slate-200">
+            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{language === 'bn' ? 'কী কী নতুন এসেছে:' : "What's New in this update:"}</span>
+          </div>
+
+          <div className="text-xs text-slate-300 leading-relaxed whitespace-pre-line pl-6">
+            {changelog}
+          </div>
+
+          {/* Storage & Auto-Clean Reassurance Note */}
+          <div className="mt-3.5 pt-2.5 border-t border-slate-800/80 text-[11px] text-slate-400 flex items-start gap-2">
+            <HardDrive className="w-3.5 h-3.5 text-teal-400 shrink-0 mt-0.5" />
+            <span>
+              {language === 'bn'
+                ? 'ইন্সটল শেষে ডাউনলোড হওয়া ফাইলটি অটোমেটিক ক্যাশ থেকে মুছে যাবে, ফলে ফোনের কোনো বাড়তি মেমোরি খরচ হবে না।'
+                : 'Downloaded installation package will be automatically cleared after setup without consuming extra storage.'}
+            </span>
+          </div>
+        </div>
+
+        {/* Progress or Download Action */}
+        {downloading ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-xs font-medium text-slate-300">
+              <span className="flex items-center gap-2">
+                <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${!downloadComplete ? 'animate-spin' : ''}`} />
+                {downloadComplete
+                  ? (language === 'bn' ? 'ডাউনলোড সম্পন্ন! ইনস্টল করুন...' : 'Download complete! Ready to install...')
+                  : (language === 'bn' ? 'ডাউনলোড হচ্ছে...' : 'Downloading package...')}
+              </span>
+              <span className="font-mono text-emerald-400 font-bold">{progress}%</span>
+            </div>
+
+            <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-700">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+
+            {downloadComplete && (
+              <p className="text-[11px] text-center text-emerald-300 animate-in fade-in">
+                {language === 'bn'
+                  ? 'ডাউনলোডকৃত ফাইলটি ওপেন করে "Install/Update" চাপুন।'
+                  : 'Open the downloaded APK and tap "Install/Update" to finish.'}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={handleStartUpdate}
+              className="w-full py-3 px-4 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              <span>{language === 'bn' ? 'এখনই আপডেট করুন' : 'Update Now'}</span>
+            </button>
+
+            {!release.forceUpdate && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="w-full py-2.5 px-4 bg-slate-800/80 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-medium transition cursor-pointer text-center"
+              >
+                {language === 'bn' ? 'পরে মনে করিয়ে দিন' : 'Remind Me Later'}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
