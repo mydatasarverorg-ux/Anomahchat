@@ -7,9 +7,13 @@ on:
       - master
   workflow_dispatch:
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   build-apk:
-    name: Build Android APK (Mahi A01)
+    name: Build Android APK (Anomah Chat)
     runs-on: ubuntu-latest
 
     steps:
@@ -27,6 +31,9 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Install Node Dependencies
         run: npm install --legacy-peer-deps --no-audit
 
@@ -36,18 +43,14 @@ jobs:
       - name: Sync Capacitor Android
         run: npx cap sync android
 
-      - name: Configure Android SDK 36 & Licenses
+      - name: Accept Android Licenses
         run: |
-          echo "sdk.dir=$ANDROID_HOME" > android/local.properties
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-36" "build-tools;36.0.0" || true
+          yes | sdkmanager --licenses || true
 
       - name: Make Gradle Executable
         run: chmod +x android/gradlew
 
       - name: Build Debug Android APK
-        env:
-          ANDROID_HOME: /usr/local/lib/android/sdk
         run: |
           cd android
           ./gradlew assembleDebug --no-daemon
@@ -55,11 +58,19 @@ jobs:
       - name: Prepare APK Output
         run: |
           mkdir -p build-output
-          cp android/app/build/outputs/apk/debug/app-debug.apk build-output/Anomah-Chat-vMahi-A01.apk
+          APK_PATH=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
+          if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
+            cp "$APK_PATH" build-output/AnomahChat-v1.0.1.apk
+            cp "$APK_PATH" build-output/Anomah-Chat-vMahi-A01.apk
+            echo "Successfully prepared APK from: $APK_PATH"
+          else
+            echo "::error::No APK file found in android/app/build/outputs/apk!"
+            exit 1
+          fi
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Anomah-Chat-vMahi-A01-APK
-          path: build-output/Anomah-Chat-vMahi-A01.apk
+          name: AnomahChat-v1.0.1-APK
+          path: build-output/*.apk
           retention-days: 30
