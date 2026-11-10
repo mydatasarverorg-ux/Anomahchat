@@ -74,3 +74,22 @@ jobs:
           name: AnomahChat-v1.0.1-APK
           path: build-output/*.apk
           retention-days: 30
+
+      - name: Publish Direct APK to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        with:
+          tag_name: v1.0.1
+          name: Anomah Chat v1.0.1 (APK Release)
+          body: |
+            ## Anomah Chat Android APK v1.0.1
+            Direct installation package for Android devices.
+            - In-App Auto-Update Support
+            - Realtime Voice & Video Calls
+            - High-Speed WebRTC & Messaging
+          draft: false
+          prerelease: false
+          files: |
+            build-output/AnomahChat-v1.0.1.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
