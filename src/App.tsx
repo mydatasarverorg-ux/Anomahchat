@@ -28,7 +28,7 @@ import {
   Lock,
   Globe,
   Loader2,
-  Sparkles,
+  MessageSquarePlus,
   WifiOff,
   Eye,
   ArrowLeft,
@@ -145,20 +145,21 @@ function ChatDashboard({ user }: { user: UserProfile }) {
 
       {/* Admin Ghost Mode Top Persistent Banner */}
       {ghostUser && (
-        <div className="bg-gradient-to-r from-sky-600 via-indigo-600 to-sky-700 text-white px-4 py-2.5 text-xs flex flex-wrap items-center justify-between gap-2.5 z-50 shadow-lg animate-in slide-in-from-top-2 border-b border-white/20">
+        <div className="bg-slate-900 text-white px-4 py-2.5 text-xs flex flex-wrap items-center justify-between gap-2.5 z-50 shadow-sm animate-in slide-in-from-top-2 border-b border-sky-500/30">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-8 h-8 rounded-xl bg-black/25 flex items-center justify-center shrink-0 border border-white/30 shadow-sm">
-              <Eye className="w-4 h-4 text-white" />
+            <div className="w-8 h-8 rounded-xl bg-sky-500/10 text-sky-400 flex items-center justify-center shrink-0 border border-sky-500/20 shadow-xs">
+              <Eye className="w-4 h-4 text-sky-400" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-extrabold bg-white/20 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider border border-white/30">
+                <span className="text-[11px] font-bold text-sky-400 tracking-wider">
                   {t('ghostModeBannerTitle')}
                 </span>
-                <span className="font-bold text-sm text-white truncate">{ghostUser.displayName}</span>
-                <span className="text-sky-100 text-xs truncate hidden sm:inline">({ghostUser.email})</span>
+                <span className="text-slate-600">·</span>
+                <span className="font-semibold text-xs text-white truncate">{ghostUser.displayName}</span>
+                <span className="text-slate-400 text-xs truncate hidden sm:inline">({ghostUser.email})</span>
               </div>
-              <p className="text-[11px] text-sky-100 truncate mt-0.5 hidden md:block">
+              <p className="text-[11px] text-slate-400 truncate mt-0.5 hidden md:block">
                 {t('ghostModeBannerDesc').replace('{name}', ghostUser.displayName).replace('{email}', ghostUser.email)}
               </p>
             </div>
@@ -172,7 +173,7 @@ function ChatDashboard({ user }: { user: UserProfile }) {
                 setSelectedChat(null);
                 setShowAdmin(true);
               }}
-              className="px-3.5 py-1.5 bg-white text-slate-900 hover:bg-slate-100 rounded-xl font-bold text-xs cursor-pointer shadow-md transition flex items-center gap-1.5 active:scale-95"
+              className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-medium text-xs cursor-pointer shadow-xs transition flex items-center gap-1.5 active:scale-[0.99]"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span>{t('exitGhostModeBtn')}</span>
@@ -245,9 +246,9 @@ function ChatDashboard({ user }: { user: UserProfile }) {
               <div className="flex gap-2.5">
                 <button
                   onClick={() => setShowNewChat(true)}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow transition cursor-pointer flex items-center gap-2"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-xs transition cursor-pointer flex items-center gap-2 active:scale-[0.99]"
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
+                  <MessageSquarePlus className="w-3.5 h-3.5" />
                   <span>{t('startNewChatBtn')}</span>
                 </button>
                 <button

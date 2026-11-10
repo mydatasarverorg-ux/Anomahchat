@@ -407,14 +407,14 @@ export function ProfileModal({
                     className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer shrink-0 sm:w-full text-left ${
                       isActive
                         ? isItemDanger
-                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                          ? 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
                           : isItemProtected
-                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 ring-1 ring-emerald-500/30'
-                          : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                          ? 'bg-slate-800 text-emerald-400 border border-emerald-500/30'
+                          : 'bg-slate-800 text-white border border-slate-700/80 shadow-xs'
                         : isItemDanger
                         ? 'text-rose-400 hover:bg-rose-500/10'
                         : isItemProtected
-                        ? 'text-emerald-400 hover:bg-emerald-500/10'
+                        ? 'text-emerald-400 hover:bg-slate-800/50'
                         : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
                     }`}
                   >
@@ -431,7 +431,7 @@ export function ProfileModal({
                     onClose();
                     onOpenAdmin();
                   }}
-                  className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-emerald-400 hover:bg-emerald-950/40 border border-emerald-500/20 transition cursor-pointer shrink-0 sm:w-full mt-2"
+                  className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-emerald-400 hover:bg-emerald-950/30 border border-emerald-500/20 transition cursor-pointer shrink-0 sm:w-full mt-2"
                 >
                   <div className="flex items-center gap-2.5">
                     <Shield className="w-4 h-4 text-emerald-400" />
@@ -452,7 +452,7 @@ export function ProfileModal({
                   <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">
                     {language === 'bn' ? 'অ্যাপ সংস্করণ' : 'App Version'}
                   </span>
-                  <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/20 px-1.5 py-0.5 rounded-md">
+                  <span className="text-xs font-mono font-medium text-slate-300">
                     v{APP_VERSION.versionName} ({isNativeApkApp() ? 'APK' : 'PWA'})
                   </span>
                 </div>

@@ -15,7 +15,7 @@ export function ShareLinkModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-emerald-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl relative">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-xl relative">
         <button
           onClick={onClose}
           className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
@@ -24,7 +24,7 @@ export function ShareLinkModal({ onClose }: { onClose: () => void }) {
         </button>
 
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-xl bg-slate-800 text-emerald-400 border border-slate-700/80 flex items-center justify-center">
             <Globe className="w-5 h-5" />
           </div>
           <div>
@@ -42,7 +42,7 @@ export function ShareLinkModal({ onClose }: { onClose: () => void }) {
             type="text"
             readOnly
             value={currentUrl}
-            className="flex-1 bg-transparent text-xs text-slate-200 outline-none select-all"
+            className="flex-1 bg-transparent text-xs text-slate-200 outline-none select-all font-mono"
           />
           <button
             onClick={copyToClipboard}
@@ -62,11 +62,11 @@ export function ShareLinkModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <div className="bg-emerald-950/40 border border-emerald-500/20 rounded-xl p-3 text-xs text-emerald-300 space-y-1">
-          <div className="font-semibold flex items-center gap-1.5">
-            <Users className="w-3.5 h-3.5" /> {t('shareTipTitle')}
+        <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs text-slate-300 space-y-1">
+          <div className="font-semibold text-slate-200 flex items-center gap-1.5">
+            <Users className="w-3.5 h-3.5 text-emerald-400" /> {t('shareTipTitle')}
           </div>
-          <p className="text-[11px] text-emerald-200/80">
+          <p className="text-[11px] text-slate-400">
             {t('shareTipBody')}
           </p>
         </div>

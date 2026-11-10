@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { subscribeToAnnouncements } from '../services/adminService';
 import type { SystemAnnouncement } from '../types/chat';
-import { Info, AlertTriangle, AlertOctagon, Sparkles, X } from 'lucide-react';
+import { Info, AlertTriangle, AlertOctagon, Bell, X } from 'lucide-react';
 
 export function AnnouncementBanner() {
   const [announcements, setAnnouncements] = useState<SystemAnnouncement[]>([]);
@@ -39,28 +39,24 @@ export function AnnouncementBanner() {
     switch (type) {
       case 'alert':
         return {
-          border: 'border-l-4 border-l-rose-500',
           icon: <AlertOctagon className="w-3.5 h-3.5 text-rose-400 shrink-0" />,
-          badge: 'bg-rose-500/20 text-rose-300 border border-rose-500/30',
+          labelColor: 'text-rose-400',
         };
       case 'warning':
         return {
-          border: 'border-l-4 border-l-amber-500',
           icon: <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />,
-          badge: 'bg-amber-500/20 text-amber-300 border border-amber-500/30',
+          labelColor: 'text-amber-400',
         };
       case 'update':
         return {
-          border: 'border-l-4 border-l-purple-500',
-          icon: <Sparkles className="w-3.5 h-3.5 text-purple-400 shrink-0" />,
-          badge: 'bg-purple-500/20 text-purple-300 border border-purple-500/30',
+          icon: <Bell className="w-3.5 h-3.5 text-sky-400 shrink-0" />,
+          labelColor: 'text-sky-400',
         };
       case 'info':
       default:
         return {
-          border: 'border-l-4 border-l-emerald-500',
           icon: <Info className="w-3.5 h-3.5 text-emerald-400 shrink-0" />,
-          badge: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
+          labelColor: 'text-emerald-400',
         };
     }
   };
@@ -69,15 +65,16 @@ export function AnnouncementBanner() {
 
   return (
     <div
-      className={`w-full px-4 py-2 bg-slate-900/95 border-b border-slate-800 text-xs flex items-center justify-between gap-3 shadow-sm z-30 transition animate-in slide-in-from-top-1 ${styles.border}`}
+      className="w-full px-4 py-2 bg-slate-900 border-b border-slate-800 text-xs flex items-center justify-between gap-3 shadow-xs z-30 transition animate-in slide-in-from-top-1"
     >
       <div className="flex items-center gap-2.5 overflow-hidden">
         {styles.icon}
         <div className="flex items-center gap-2 truncate">
-          <span className={`px-2 py-0.5 rounded-md text-[10px] uppercase font-bold tracking-wider shrink-0 ${styles.badge}`}>
+          <span className={`text-[11px] uppercase font-bold tracking-wider shrink-0 ${styles.labelColor}`}>
             {activeAnnouncement.type}
           </span>
-          <span className="font-semibold text-white truncate">{activeAnnouncement.title}:</span>
+          <span className="text-slate-600 shrink-0">·</span>
+          <span className="font-semibold text-slate-100 truncate">{activeAnnouncement.title}:</span>
           <span className="truncate text-slate-300 text-[11px]">{activeAnnouncement.content}</span>
         </div>
       </div>

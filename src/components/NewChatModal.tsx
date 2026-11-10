@@ -95,11 +95,11 @@ export function NewChatModal({ onClose, onSelectChat }: NewChatModalProps) {
           <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
             <UserPlus className="w-5 h-5 text-emerald-400" /> {t('newChatHeader')}
           </h3>
-          <div className="flex bg-slate-800 p-1 rounded-xl text-xs">
+          <div className="flex bg-slate-950/70 p-1 rounded-xl text-xs border border-slate-800">
             <button
               onClick={() => setMode('direct')}
               className={`flex-1 py-1.5 rounded-lg font-medium transition cursor-pointer flex items-center justify-center gap-1.5 ${
-                mode === 'direct' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                mode === 'direct' ? 'bg-slate-800 text-white font-semibold shadow-xs' : 'text-slate-400 hover:text-white'
               }`}
             >
               <MessageSquare className="w-3.5 h-3.5" /> {t('directChatTab')}
@@ -107,7 +107,7 @@ export function NewChatModal({ onClose, onSelectChat }: NewChatModalProps) {
             <button
               onClick={() => setMode('group')}
               className={`flex-1 py-1.5 rounded-lg font-medium transition cursor-pointer flex items-center justify-center gap-1.5 ${
-                mode === 'group' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                mode === 'group' ? 'bg-slate-800 text-white font-semibold shadow-xs' : 'text-slate-400 hover:text-white'
               }`}
             >
               <Users className="w-3.5 h-3.5" /> {t('newGroupTab')}

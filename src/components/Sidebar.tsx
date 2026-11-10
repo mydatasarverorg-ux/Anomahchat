@@ -397,15 +397,15 @@ export function Sidebar({
                 onClick={() => onSelectChat(chat.id)}
                 className={`group flex items-center gap-3 px-3.5 py-2.5 transition cursor-pointer ${
                   isActive
-                    ? 'bg-slate-800/90 border-l-3 border-emerald-500'
-                    : 'hover:bg-slate-800/40'
+                    ? 'bg-slate-800 text-white shadow-xs'
+                    : 'hover:bg-slate-800/50'
                 }`}
               >
                 <div className="relative shrink-0">
                   <img
                     src={display.photo}
                     alt={display.name}
-                    className="w-10 h-10 rounded-full object-cover bg-slate-800 border border-slate-700/60 shadow-sm"
+                    className="w-10 h-10 rounded-full object-cover bg-slate-800 border border-slate-700/60 shadow-xs"
                   />
                   {chat.type === 'group' ? (
                     <span className="absolute -bottom-0.5 -right-0.5 p-0.5 bg-emerald-700 rounded-full text-white">
@@ -419,16 +419,16 @@ export function Sidebar({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-0.5">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-xs font-semibold text-white truncate max-w-[125px]">
+                      <span className="text-xs font-semibold text-white truncate max-w-[130px]">
                         {display.name}
                       </span>
                       {display.isDeleted ? (
-                        <span className="px-1.5 py-0.2 rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[9px] font-bold shrink-0">
-                          {t('deletedAccountStatus')}
+                        <span className="text-[10px] text-rose-400 font-medium shrink-0">
+                          · {t('deletedAccountStatus')}
                         </span>
                       ) : display.isSuspended ? (
-                        <span className="px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold shrink-0">
-                          {t('userUnavailableBadge')}
+                        <span className="text-[10px] text-amber-400 font-medium shrink-0">
+                          · {t('userUnavailableBadge')}
                         </span>
                       ) : null}
                     </div>

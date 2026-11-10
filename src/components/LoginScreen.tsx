@@ -131,16 +131,16 @@ export function LoginScreen() {
   const activeError = localError || authError;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-950 via-slate-900 to-slate-950 text-slate-100 flex flex-col items-center justify-center p-3 md:p-6 relative safe-area-container">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-3 md:p-6 relative safe-area-container">
       {/* Top Bar Quick Language Switcher */}
       <div className="w-full max-w-4xl flex justify-end mb-2.5 px-2">
-        <div className="inline-flex items-center gap-1 bg-slate-900/80 border border-slate-750 p-1 rounded-xl shadow-lg backdrop-blur-md">
+        <div className="inline-flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl shadow-xs">
           <Languages className="w-3.5 h-3.5 text-emerald-400 ml-1.5" />
           <button
             onClick={() => setLanguage('en')}
             className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
               language === 'en'
-                ? 'bg-emerald-600 text-white shadow-sm'
+                ? 'bg-slate-800 text-white shadow-xs'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
@@ -150,7 +150,7 @@ export function LoginScreen() {
             onClick={() => setLanguage('bn')}
             className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
               language === 'bn'
-                ? 'bg-emerald-600 text-white shadow-sm'
+                ? 'bg-emerald-600 text-white shadow-xs'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
@@ -159,24 +159,23 @@ export function LoginScreen() {
         </div>
       </div>
 
-      <div className="w-full max-w-4xl bg-slate-900/95 border border-emerald-500/30 rounded-3xl shadow-2xl backdrop-blur-xl overflow-hidden grid grid-cols-1 md:grid-cols-2">
+      <div className="w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl shadow-xl overflow-hidden grid grid-cols-1 md:grid-cols-2">
         
         {/* Left Branding Showcase */}
-        <div className="p-6 md:p-10 bg-gradient-to-br from-emerald-600/20 to-teal-800/30 flex flex-col justify-between border-b md:border-b-0 md:border-r border-emerald-500/20">
+        <div className="p-6 md:p-10 bg-slate-950/60 flex flex-col justify-between border-b md:border-b-0 md:border-r border-slate-800">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs font-semibold mb-5">
-              <Sparkles className="w-3.5 h-3.5 animate-pulse text-emerald-400" />
-              <span>{t('loginHeroBadge')}</span>
-            </div>
+            <span className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider block mb-4">
+              {t('loginHeroBadge')}
+            </span>
 
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/30 shrink-0">
-                <MessageSquare className="w-6 h-6 text-slate-950 fill-slate-950" />
+              <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-xs shrink-0">
+                <MessageSquare className="w-6 h-6 text-white" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-2xl font-bold tracking-tight text-white">{t('appName')}</h1>
-                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-mono font-bold">
+                  <span className="text-xs text-slate-400 font-mono font-medium">
                     {t('versionBadge')}
                   </span>
                 </div>
@@ -204,12 +203,12 @@ export function LoginScreen() {
             </div>
           </div>
 
-          <div className="mt-6 pt-5 border-t border-emerald-500/20 flex items-center justify-between text-xs text-slate-400">
+          <div className="mt-6 pt-5 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
             <span className="flex items-center gap-1.5">
-              <Globe className="w-3.5 h-3.5 text-emerald-400" /> By Mahi Muhtasim
+              <Globe className="w-3.5 h-3.5 text-slate-400" /> By Mahi Muhtasim
             </span>
             <span className="flex items-center gap-1.5">
-              <Shield className="w-3.5 h-3.5 text-teal-400" /> {t('versionBadge')}
+              <Shield className="w-3.5 h-3.5 text-emerald-400" /> {t('versionBadge')}
             </span>
           </div>
         </div>

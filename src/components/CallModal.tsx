@@ -75,17 +75,14 @@ export function CallModal({ session, onEndCall }: CallModalProps) {
         {/* Center Video/Avatar Stage */}
         <div className="relative my-8 flex items-center justify-center">
           {session.type === 'video' && !isVideoOff ? (
-            <div className="w-64 h-64 md:w-80 md:h-60 rounded-2xl bg-slate-800 border-2 border-emerald-500/40 overflow-hidden relative shadow-inner flex items-center justify-center">
+            <div className="w-64 h-64 md:w-80 md:h-60 rounded-2xl bg-slate-800 border border-slate-700 overflow-hidden relative shadow-md flex items-center justify-center">
               <div className="text-center p-4">
                 <img
                   src={session.recipientPhoto || 'https://api.dicebear.com/7.x/bottts/svg?seed=partner'}
                   alt={session.recipientName}
-                  className="w-20 h-20 rounded-full mx-auto mb-2 border-2 border-emerald-400"
+                  className="w-20 h-20 rounded-full mx-auto mb-2 border border-slate-600"
                 />
                 <span className="text-xs text-slate-300">{t('liveCameraStream')}</span>
-              </div>
-              <div className="absolute top-3 right-3 px-2 py-0.5 rounded bg-black/60 text-[10px] text-emerald-400 font-mono">
-                HD 1080p
               </div>
             </div>
           ) : (

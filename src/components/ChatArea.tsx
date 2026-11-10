@@ -1068,7 +1068,7 @@ export function ChatArea({
                         const elem = document.getElementById(`msg-${msg.replyToId}`);
                         elem?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                       }}
-                      className={`mb-2 p-2 rounded-xl text-xs border-l-4 transition cursor-pointer ${
+                      className={`mb-2 p-2 rounded-r-lg text-xs border-l-2 transition cursor-pointer ${
                         isMine
                           ? 'bg-emerald-800/40 border-emerald-300 text-emerald-100'
                           : 'bg-slate-900/60 border-emerald-500 text-slate-200'
@@ -1422,7 +1422,7 @@ export function ChatArea({
       {/* Floating Quoted Message Bar */}
       {replyingTo && !ghostUser && (
         <div className="px-4 py-2 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs animate-in slide-in-from-bottom-2">
-          <div className="border-l-4 border-emerald-500 pl-3 min-w-0">
+          <div className="border-l-2 border-emerald-500 pl-2.5 min-w-0">
             <span className="font-bold text-emerald-400 block text-[11px]">
               {t('replyingToPrefix')}{replyingTo.senderName}
             </span>
@@ -1606,7 +1606,7 @@ export function ChatArea({
           {inputText.trim() ? (
             <button
               type="submit"
-              className="p-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl shadow-lg shadow-emerald-600/30 transition cursor-pointer flex items-center justify-center shrink-0"
+              className="p-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-xs transition cursor-pointer flex items-center justify-center shrink-0 active:scale-[0.98]"
               title={t('sendTooltip')}
             >
               <Send className="w-4 h-4" />
@@ -1616,10 +1616,10 @@ export function ChatArea({
               type="button"
               disabled={isSendingVoice}
               onClick={isRecording ? () => stopRecording(false) : startRecording}
-              className={`p-2.5 rounded-2xl transition cursor-pointer flex items-center justify-center shrink-0 ${
+              className={`p-2.5 rounded-xl transition cursor-pointer flex items-center justify-center shrink-0 active:scale-[0.98] ${
                 isRecording
-                  ? 'bg-red-600 text-white animate-bounce shadow-lg shadow-red-600/30'
-                  : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                  ? 'bg-red-600 text-white shadow-xs'
+                  : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-750'
               } ${isSendingVoice ? 'opacity-60 cursor-wait' : ''}`}
               title={isSendingVoice ? 'Sending voice note...' : t('recordVoiceTooltip')}
             >

@@ -62,6 +62,7 @@ jobs:
           APK_PATH=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
           if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
             cp "$APK_PATH" build-output/AnomahChat-v1.0.1.apk
+            cp "$APK_PATH" build-output/AnomahChat.apk
             cp "$APK_PATH" build-output/Anomah-Chat-vMahi-A01.apk
             echo "Successfully prepared APK from: $APK_PATH"
           else
@@ -92,5 +93,6 @@ jobs:
           prerelease: false
           files: |
             build-output/AnomahChat-v1.0.1.apk
+            build-output/AnomahChat.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

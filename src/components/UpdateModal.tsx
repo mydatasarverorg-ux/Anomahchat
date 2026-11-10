@@ -3,7 +3,6 @@ import { useLanguage } from '../context/LanguageContext';
 import { APP_VERSION } from '../utils/appVersion';
 import type { AppReleaseInfo } from '../services/updateService';
 import {
-  Sparkles,
   Download,
   CheckCircle2,
   AlertCircle,
@@ -14,6 +13,7 @@ import {
   PackageCheck,
   RotateCcw,
   ExternalLink,
+  ArrowDownToLine,
 } from 'lucide-react';
 
 interface UpdateModalProps {
@@ -95,8 +95,8 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
     : (release.changelogEn || release.changelogBn || 'New features, performance enhancements, and bug fixes.');
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in select-none">
-      <div className="bg-slate-900 border border-slate-700/90 rounded-3xl w-full max-w-md p-5 sm:p-6 shadow-2xl relative flex flex-col max-h-[92vh] overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in select-none">
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 shadow-2xl relative flex flex-col max-h-[92vh] overflow-hidden">
         {/* Close Button (only if not mandatory) */}
         {!release.forceUpdate && (
           <button
@@ -110,31 +110,28 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
 
         {/* Header Icon & Title */}
         <div className="text-center mb-4">
-          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center mx-auto mb-3 shadow-xl shadow-emerald-500/20">
-            <Sparkles className="w-7 h-7 sm:w-8 sm:h-8" />
+          <div className="w-13 h-13 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center mx-auto mb-3">
+            <ArrowDownToLine className="w-6 h-6" />
           </div>
 
-          <h2 className="text-base sm:text-lg font-bold text-white mb-0.5">
+          <h2 className="text-base sm:text-lg font-bold text-white mb-1">
             {language === 'bn' ? 'নতুন সংস্করণ প্রস্তুত!' : 'New Update Available!'}
           </h2>
           <p className="text-xs text-slate-400">
             {language === 'bn'
-              ? 'আনমাহ্ মেসেঞ্জারের নতুন সংস্করণ প্রকাশ করা হয়েছে।'
-              : 'A brand new version of Anomah Messenger is ready.'}
+              ? 'আনমাহ্ মেসেঞ্জারের নতুন আপডেট প্রকাশ করা হয়েছে।'
+              : 'A new version of Anomah Messenger is ready to install.'}
           </p>
 
-          {/* Version Pill Comparison */}
-          <div className="inline-flex items-center gap-2 mt-2.5 px-3 py-1 bg-slate-800/80 border border-slate-700 rounded-full text-xs font-mono">
-            <span className="text-slate-400">v{APP_VERSION.versionName}</span>
-            <span className="text-slate-500">➔</span>
-            <span className="text-emerald-400 font-bold">v{release.versionName}</span>
+          {/* Clean Unboxed Version Metadata */}
+          <div className="flex items-center justify-center gap-2 mt-2 text-xs text-slate-400 font-mono">
+            <span>v{APP_VERSION.versionName}</span>
+            <span className="text-slate-600">→</span>
+            <span className="text-emerald-400 font-semibold">v{release.versionName}</span>
             {release.fileSizeText && (
               <>
                 <span className="text-slate-600">·</span>
-                <span className="text-slate-400 text-[11px] flex items-center gap-1 font-sans">
-                  <HardDrive className="w-3 h-3 text-slate-400" />
-                  {release.fileSizeText}
-                </span>
+                <span className="text-slate-400 font-sans">{release.fileSizeText}</span>
               </>
             )}
           </div>
@@ -183,17 +180,17 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
               <button
                 type="button"
                 onClick={handleInstallNow}
-                className="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-500 hover:from-emerald-500 hover:to-teal-400 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 shadow-xl shadow-emerald-600/30 transition cursor-pointer active:scale-95"
+                className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 shadow-sm transition cursor-pointer active:scale-[0.99]"
               >
                 <PackageCheck className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span>{language === 'bn' ? '📦 এখনই ইনস্টল করুন (Install Now)' : '📦 Install Update Now'}</span>
+                <span>{language === 'bn' ? 'এখনই ইনস্টল করুন (Install Now)' : 'Install Update Now'}</span>
               </button>
 
               <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={handleStartUpdate}
-                  className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-[11px] font-medium transition cursor-pointer flex items-center justify-center gap-1.5 border border-slate-700"
+                  className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl text-[11px] font-medium transition cursor-pointer flex items-center justify-center gap-1.5 border border-slate-700/80"
                 >
                   <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
                   <span>{language === 'bn' ? 'আবার ডাউনলোড' : 'Re-download'}</span>
@@ -203,7 +200,7 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
                   <button
                     type="button"
                     onClick={onClose}
-                    className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-[11px] font-medium transition cursor-pointer text-center border border-slate-700"
+                    className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl text-[11px] font-medium transition cursor-pointer text-center border border-slate-700/80"
                   >
                     {language === 'bn' ? 'পরে করব' : 'Later'}
                   </button>
@@ -221,9 +218,9 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
               <span className="font-mono text-emerald-400 font-bold">{progress}%</span>
             </div>
 
-            <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-700">
+            <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700/80">
               <div
-                className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-300"
+                className="h-full bg-emerald-500 rounded-full transition-all duration-300"
                 style={{ width: `${progress}%` }}
               />
             </div>
@@ -239,7 +236,7 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
             <button
               type="button"
               onClick={handleStartUpdate}
-              className="w-full py-3 px-4 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition cursor-pointer"
+              className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition cursor-pointer active:scale-[0.99]"
             >
               <Download className="w-4 h-4" />
               <span>{language === 'bn' ? 'এখনই আপডেট করুন' : 'Update Now'}</span>
@@ -249,7 +246,7 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
               <button
                 type="button"
                 onClick={onClose}
-                className="w-full py-2.5 px-4 bg-slate-800/80 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-medium transition cursor-pointer text-center"
+                className="w-full py-2 px-4 bg-slate-800/80 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-medium transition cursor-pointer text-center"
               >
                 {language === 'bn' ? 'পরে মনে করিয়ে দিন' : 'Remind Me Later'}
               </button>
