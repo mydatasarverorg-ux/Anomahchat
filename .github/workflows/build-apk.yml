@@ -31,9 +31,6 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Node Dependencies
         run: npm install --legacy-peer-deps --no-audit
 
@@ -43,9 +40,13 @@ jobs:
       - name: Sync Capacitor Android
         run: npx cap sync android
 
-      - name: Accept Android Licenses
+      - name: Configure Android SDK & Licenses
         run: |
-          yes | sdkmanager --licenses || true
+          echo "sdk.dir=/usr/local/lib/android/sdk" > android/local.properties
+          mkdir -p /usr/local/lib/android/sdk/licenses || true
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > /usr/local/lib/android/sdk/licenses/android-sdk-license || true
+          echo "84831b9409646a918e30573bab4c9c91346d8abd" > /usr/local/lib/android/sdk/licenses/android-sdk-preview-license || true
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Make Gradle Executable
         run: chmod +x android/gradlew
