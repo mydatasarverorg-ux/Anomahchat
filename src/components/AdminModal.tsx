@@ -273,10 +273,14 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     setPublishingRelease(true);
     setActionErrorMsg(null);
     try {
+      let parsedCode = parseInt(releaseVersionCode, 10) || 102;
+      if (parsedCode < 10) {
+        parsedCode = parsedCode * 100 + (parsedCode === 2 ? 2 : 0);
+      }
       await publishAppRelease(
         {
           versionName: releaseVersionName.trim(),
-          versionCode: parseInt(releaseVersionCode, 10) || 102,
+          versionCode: parsedCode,
           apkDownloadUrl: releaseApkUrl.trim(),
           fileSizeText: releaseFileSizeText.trim() || undefined,
           changelogEn: releaseChangelogEn.trim(),

@@ -90,15 +90,15 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
     "revision": "66efa698a9d092c55363fd6d952f6ddb"
   }, {
     "url": "index.html",
-    "revision": "2a94c7607a43d4ccbb2eddd17581ef26"
+    "revision": "924ae16e3d41de7a501feb0c25c95388"
   }, {
     "url": "apple-touch-icon.png",
     "revision": "5921a23c38236851ae5e7dd4f11bf1d5"
   }, {
-    "url": "assets/index-CW5T_eiI.css",
+    "url": "assets/index-CnIWPcs3.js",
     "revision": null
   }, {
-    "url": "assets/index-BfuAPC5v.js",
+    "url": "assets/index-CW5T_eiI.css",
     "revision": null
   }, {
     "url": "assets/aistudio/image_f56bd69d.png",
