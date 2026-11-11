@@ -21,6 +21,7 @@ export function isUpdateAvailable(remote: number | { versionCode: number }): boo
 export function isNativeApkApp(): boolean {
   if (typeof window === 'undefined') return false;
   try {
+    if ((window as unknown as { AndroidUpdater?: unknown })?.AndroidUpdater) return true;
     if (Capacitor.isNativePlatform()) return true;
     if ((window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } })?.Capacitor?.isNativePlatform?.()) return true;
     if (window.location.protocol === 'capacitor:' || window.location.protocol === 'ionic:') return true;

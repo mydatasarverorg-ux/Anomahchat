@@ -80,9 +80,70 @@ public class MainActivity extends BridgeActivity {
                         });
                     }
                 });
+
+                // Handle WebView APK downloads via system browser/DownloadManager
+                webView.setDownloadListener(new android.webkit.DownloadListener() {
+                    @Override
+                    public void onDownloadStart(String url, String userAgent, String contentDisposition, String mimetype, long contentLength) {
+                        try {
+                            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url));
+                            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                            startActivity(intent);
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    }
+                });
+
+                // Native Javascript Interface for reliable in-app update downloading
+                webView.addJavascriptInterface(new AndroidUpdaterInterface(), "AndroidUpdater");
             }
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    public class AndroidUpdaterInterface {
+        @android.webkit.JavascriptInterface
+        public void openSystemDownload(String url) {
+            try {
+                android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url));
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(intent);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
+        @android.webkit.JavascriptInterface
+        public void downloadWithManager(final String url) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        android.net.Uri uri = android.net.Uri.parse(url);
+                        android.app.DownloadManager.Request request = new android.app.DownloadManager.Request(uri);
+                        request.setTitle("Anomah Chat Update");
+                        request.setDescription("Downloading latest update...");
+                        request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                        request.setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, "AnomahChat.apk");
+                        request.setMimeType("application/vnd.android.package-archive");
+                        android.app.DownloadManager manager = (android.app.DownloadManager) getSystemService(android.content.Context.DOWNLOAD_SERVICE);
+                        if (manager != null) {
+                            manager.enqueue(request);
+                            android.widget.Toast.makeText(MainActivity.this, "APK ডাউনলোড শুরু হয়েছে! নোটিফিকেশন বার চেক করুন।", android.widget.Toast.LENGTH_LONG).show();
+                        }
+                    } catch (Exception e) {
+                        try {
+                            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url));
+                            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                            startActivity(intent);
+                        } catch (Exception ex) {
+                            ex.printStackTrace();
+                        }
+                    }
+                }
+            });
         }
     }
 }

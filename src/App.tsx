@@ -349,9 +349,10 @@ function MainContent() {
     return () => unsubscribe();
   }, []);
 
-  // Listen to manual update check events (e.g. from ProfileModal)
+  // Listen to manual update check events (Strictly for Native APK)
   useEffect(() => {
     const handleCheckEvent = (e: any) => {
+      if (!isNativeApkApp()) return;
       if (e.detail?.release) {
         setPendingRelease(e.detail.release);
         setShowUpdateModal(true);
@@ -380,8 +381,8 @@ function MainContent() {
         <ChatDashboard key={user.userId} user={user} />
       )}
 
-      {/* In-App Auto Updater Modal (Option 3) */}
-      {showUpdateModal && pendingRelease && (
+      {/* In-App Auto Updater Modal (Strictly for Native Mobile APK) */}
+      {showUpdateModal && pendingRelease && isNativeApkApp() && (
         <UpdateModal
           release={pendingRelease}
           onClose={() => {

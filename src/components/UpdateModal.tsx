@@ -9,11 +9,12 @@ import {
   X,
   ShieldCheck,
   HardDrive,
-  RefreshCw,
   PackageCheck,
   RotateCcw,
   ExternalLink,
   ArrowDownToLine,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 interface UpdateModalProps {
@@ -24,9 +25,8 @@ interface UpdateModalProps {
 
 export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateModalProps) {
   const { language } = useLanguage();
-  const [downloading, setDownloading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [downloadComplete, setDownloadComplete] = useState(false);
+  const [downloadStarted, setDownloadStarted] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   // Intercept back button / escape key (unless forceUpdate is true)
   useEffect(() => {
@@ -46,48 +46,74 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
 
   const triggerApkDownload = () => {
     if (!release.apkDownloadUrl) return;
+    const url = release.apkDownloadUrl;
+
+    setDownloadStarted(true);
+
+    // 1. Try Native Android Interface bridge if running in APK
+    const win = window as any;
+    if (win.AndroidUpdater) {
+      try {
+        win.AndroidUpdater.downloadWithManager(url);
+        return;
+      } catch (e) {
+        console.warn('AndroidUpdater downloadWithManager failed, trying openSystemDownload:', e);
+        try {
+          win.AndroidUpdater.openSystemDownload(url);
+          return;
+        } catch (ex) {
+          console.warn('AndroidUpdater openSystemDownload failed:', ex);
+        }
+      }
+    }
+
+    // 2. Open via Capacitor / Android system browser intent
+    try {
+      const opened = window.open(url, '_system');
+      if (opened) return;
+    } catch {
+      // ignore
+    }
+
+    // 3. Standard fallback: browser link click & navigation
     try {
       const a = document.createElement('a');
-      a.href = release.apkDownloadUrl;
+      a.href = url;
       a.download = `AnomahChat-v${release.versionName}.apk`;
       a.target = '_blank';
+      a.rel = 'noopener noreferrer';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
     } catch {
-      window.open(release.apkDownloadUrl, '_blank');
+      window.location.href = url;
     }
   };
 
-  const handleStartUpdate = () => {
+  const handleOpenInBrowser = () => {
     if (!release.apkDownloadUrl) return;
-
-    setDownloading(true);
-    setDownloadComplete(false);
-    setProgress(15);
-
-    // Smooth visual progress indicator
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 90) {
-          clearInterval(interval);
-          return 90;
-        }
-        return prev + Math.floor(Math.random() * 15) + 5;
-      });
-    }, 200);
-
-    // Trigger system download and show completion screen with Install Button
-    setTimeout(() => {
-      clearInterval(interval);
-      setProgress(100);
-      setDownloadComplete(true);
-      triggerApkDownload();
-    }, 1800);
+    const url = release.apkDownloadUrl;
+    const win = window as any;
+    if (win.AndroidUpdater) {
+      try {
+        win.AndroidUpdater.openSystemDownload(url);
+        return;
+      } catch {
+        // ignore
+      }
+    }
+    try {
+      window.open(url, '_system');
+    } catch {
+      window.location.href = url;
+    }
   };
 
-  const handleInstallNow = () => {
-    triggerApkDownload();
+  const handleCopyLink = () => {
+    if (!release.apkDownloadUrl) return;
+    navigator.clipboard.writeText(release.apkDownloadUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
   };
 
   const changelog = language === 'bn'
@@ -159,87 +185,91 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
           </div>
         </div>
 
-        {/* Action Area: Download Complete -> Install Button, In-Progress -> Progress Bar, Initial -> Download Button */}
-        {downloadComplete ? (
+        {/* Action Area: Real working download flow with direct fail-safes */}
+        {downloadStarted ? (
           <div className="space-y-3 animate-in fade-in zoom-in-95">
-            <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-2xl p-3.5 text-center space-y-1.5 shadow-md">
-              <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center mx-auto shadow-sm">
+            <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-2xl p-3.5 text-center space-y-1.5 shadow-xs">
+              <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto shadow-xs">
                 <CheckCircle2 className="w-6 h-6 text-emerald-400" />
               </div>
               <h3 className="text-xs sm:text-sm font-bold text-white">
-                {language === 'bn' ? 'APK ডাউনলোড সম্পন্ন হয়েছে!' : 'APK Download Complete!'}
+                {language === 'bn' ? 'APK ডাউনলোড শুরু হয়েছে!' : 'APK Download Started!'}
               </h3>
-              <p className="text-[11px] text-slate-300 leading-normal">
+              <p className="text-[11px] text-slate-300 leading-relaxed">
                 {language === 'bn'
-                  ? 'নিচের বাটনে অথবা আপনার ফোনের নোটিফিকেশন বার থেকে ফাইলটিতে ক্লিক করে "Update" চাপুন।'
-                  : 'Tap the button below or open the file from your notification bar, then tap "Update".'}
+                  ? 'আপনার ফোনের নোটিফিকেশন বার অথবা ডাউনলোড ফোল্ডারে ফাইলটি ডাউনলোড হচ্ছে। ডাউনলোড শেষ হলে ফাইলে ট্যাপ করে "Update" চাপুন।'
+                  : 'The APK is downloading in your notification bar or Downloads folder. Once downloaded, tap it and select "Update".'}
               </p>
             </div>
 
             <div className="space-y-2">
               <button
                 type="button"
-                onClick={handleInstallNow}
-                className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 shadow-sm transition cursor-pointer active:scale-[0.99]"
+                onClick={handleOpenInBrowser}
+                className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 shadow-xs transition cursor-pointer active:scale-[0.99]"
               >
-                <PackageCheck className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span>{language === 'bn' ? 'এখনই ইনস্টল করুন (Install Now)' : 'Install Update Now'}</span>
+                <ExternalLink className="w-4 h-4" />
+                <span>{language === 'bn' ? 'ব্রাউজারে সরাসরি ডাউনলোড করুন' : 'Download via System Browser'}</span>
               </button>
 
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={handleStartUpdate}
+                  onClick={triggerApkDownload}
                   className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl text-[11px] font-medium transition cursor-pointer flex items-center justify-center gap-1.5 border border-slate-700/80"
                 >
                   <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
-                  <span>{language === 'bn' ? 'আবার ডাউনলোড' : 'Re-download'}</span>
+                  <span>{language === 'bn' ? 'আবার পাঠান' : 'Re-download'}</span>
                 </button>
 
-                {!release.forceUpdate && (
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl text-[11px] font-medium transition cursor-pointer text-center border border-slate-700/80"
-                  >
-                    {language === 'bn' ? 'পরে করব' : 'Later'}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={handleCopyLink}
+                  className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl text-[11px] font-medium transition cursor-pointer flex items-center justify-center gap-1.5 border border-slate-700/80"
+                >
+                  {copiedLink ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>{language === 'bn' ? 'কপি হয়েছে' : 'Copied'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-slate-400" />
+                      <span>{language === 'bn' ? 'লিংক কপি' : 'Copy Link'}</span>
+                    </>
+                  )}
+                </button>
               </div>
-            </div>
-          </div>
-        ) : downloading ? (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs font-medium text-slate-300">
-              <span className="flex items-center gap-2">
-                <RefreshCw className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
-                <span>{language === 'bn' ? 'প্যাকেজ ডাউনলোড হচ্ছে...' : 'Downloading package...'}</span>
-              </span>
-              <span className="font-mono text-emerald-400 font-bold">{progress}%</span>
-            </div>
 
-            <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700/80">
-              <div
-                className="h-full bg-emerald-500 rounded-full transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              />
+              {!release.forceUpdate && (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="w-full py-2 px-4 bg-slate-800/80 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-medium transition cursor-pointer text-center"
+                >
+                  {language === 'bn' ? 'পরে করব' : 'Close'}
+                </button>
+              )}
             </div>
-
-            <p className="text-[11px] text-center text-slate-400">
-              {language === 'bn'
-                ? 'ডাউনলোড শেষ হলে সরাসরি ইনস্টল বোতাম ভেসে উঠবে...'
-                : 'Install button will appear once download completes...'}
-            </p>
           </div>
         ) : (
           <div className="flex flex-col gap-2">
             <button
               type="button"
-              onClick={handleStartUpdate}
-              className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition cursor-pointer active:scale-[0.99]"
+              onClick={triggerApkDownload}
+              className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 shadow-xs transition cursor-pointer active:scale-[0.99]"
             >
               <Download className="w-4 h-4" />
-              <span>{language === 'bn' ? 'এখনই আপডেট করুন' : 'Update Now'}</span>
+              <span>{language === 'bn' ? 'এখনই আপডেট ডাউনলোড করুন' : 'Download Update Now'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleOpenInBrowser}
+              className="w-full py-2 px-4 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl text-xs font-medium transition cursor-pointer flex items-center justify-center gap-1.5 border border-slate-700/80"
+            >
+              <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+              <span>{language === 'bn' ? 'ব্রাউজার থেকে সরাসরি ডাউনলোড' : 'Download via Browser'}</span>
             </button>
 
             {!release.forceUpdate && (

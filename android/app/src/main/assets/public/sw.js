@@ -1,1 +1,143 @@
-if(!self.define){let e,s={};const n=(n,i)=>(n=new URL(n+".js",i).href,s[n]||new Promise(s=>{if("document"in self){const e=document.createElement("script");e.src=n,e.onload=s,document.head.appendChild(e)}else e=n,importScripts(n),s()}).then(()=>{let e=s[n];if(!e)throw new Error(`Module ${n} didn’t register its module`);return e}));self.define=(i,a)=>{const r=e||("document"in self?document.currentScript.src:"")||location.href;if(s[r])return;let c={};const t=e=>n(e,r),o={module:{uri:r},exports:c,require:t};s[r]=Promise.all(i.map(e=>o[e]||t(e))).then(e=>(a(...e),c))}}define(["./workbox-835c8c05"],function(e){"use strict";self.skipWaiting(),e.clientsClaim(),e.precacheAndRoute([{url:"registerSW.js",revision:"402b66900e731ca748771b6fc5e7a068"},{url:"pwa-maskable-512x512.png",revision:"491be7656831ff162413c689a3de979e"},{url:"pwa-512x512.png",revision:"4593b03cf32e55198f2fdcb67ffae706"},{url:"pwa-192x192.png",revision:"66efa698a9d092c55363fd6d952f6ddb"},{url:"index.html",revision:"0aabee8b2a4978ff83370cb55b98231b"},{url:"apple-touch-icon.png",revision:"5921a23c38236851ae5e7dd4f11bf1d5"},{url:"assets/index-fGJ0TS9S.css",revision:null},{url:"assets/index-Bkzf1yk4.js",revision:null},{url:"apple-touch-icon.png",revision:"5921a23c38236851ae5e7dd4f11bf1d5"},{url:"pwa-192x192.png",revision:"66efa698a9d092c55363fd6d952f6ddb"},{url:"pwa-512x512.png",revision:"4593b03cf32e55198f2fdcb67ffae706"},{url:"pwa-maskable-512x512.png",revision:"491be7656831ff162413c689a3de979e"},{url:"manifest.webmanifest",revision:"19a29f454b695e460add8438367e920d"}],{}),e.cleanupOutdatedCaches(),e.registerRoute(new e.NavigationRoute(e.createHandlerBoundToURL("index.html"))),e.registerRoute(/^https:\/\/images\.unsplash\.com\/.*/i,new e.CacheFirst({cacheName:"unsplash-images-cache",plugins:[new e.ExpirationPlugin({maxEntries:50,maxAgeSeconds:2592e3}),new e.CacheableResponsePlugin({statuses:[0,200]})]}),"GET"),e.registerRoute(/^https:\/\/api\.dicebear\.com\/.*/i,new e.CacheFirst({cacheName:"dicebear-avatars-cache",plugins:[new e.ExpirationPlugin({maxEntries:100,maxAgeSeconds:2592e3}),new e.CacheableResponsePlugin({statuses:[0,200]})]}),"GET")});
+/**
+ * Copyright 2018 Google Inc. All Rights Reserved.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// If the loader is already loaded, just stop.
+if (!self.define) {
+  let registry = {};
+
+  // Used for `eval` and `importScripts` where we can't get script URL by other means.
+  // In both cases, it's safe to use a global var because those functions are synchronous.
+  let nextDefineUri;
+
+  const singleRequire = (uri, parentUri) => {
+    uri = new URL(uri + ".js", parentUri).href;
+    return registry[uri] || (
+      
+        new Promise(resolve => {
+          if ("document" in self) {
+            const script = document.createElement("script");
+            script.src = uri;
+            script.onload = resolve;
+            document.head.appendChild(script);
+          } else {
+            nextDefineUri = uri;
+            importScripts(uri);
+            resolve();
+          }
+        })
+      
+      .then(() => {
+        let promise = registry[uri];
+        if (!promise) {
+          throw new Error(`Module ${uri} didn’t register its module`);
+        }
+        return promise;
+      })
+    );
+  };
+
+  self.define = (depsNames, factory) => {
+    const uri = nextDefineUri || ("document" in self ? document.currentScript.src : "") || location.href;
+    if (registry[uri]) {
+      // Module is already loading or loaded.
+      return;
+    }
+    let exports = {};
+    const require = depUri => singleRequire(depUri, uri);
+    const specialDeps = {
+      module: { uri },
+      exports,
+      require
+    };
+    registry[uri] = Promise.all(depsNames.map(
+      depName => specialDeps[depName] || require(depName)
+    )).then(deps => {
+      factory(...deps);
+      return exports;
+    });
+  };
+}
+define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
+
+  self.skipWaiting();
+  workbox.clientsClaim();
+  /**
+   * The precacheAndRoute() method efficiently caches and responds to
+   * requests for URLs in the manifest.
+   * See https://goo.gl/S9QRab
+   */
+  workbox.precacheAndRoute([{
+    "url": "registerSW.js",
+    "revision": "402b66900e731ca748771b6fc5e7a068"
+  }, {
+    "url": "pwa-maskable-512x512.png",
+    "revision": "491be7656831ff162413c689a3de979e"
+  }, {
+    "url": "pwa-512x512.png",
+    "revision": "4593b03cf32e55198f2fdcb67ffae706"
+  }, {
+    "url": "pwa-192x192.png",
+    "revision": "66efa698a9d092c55363fd6d952f6ddb"
+  }, {
+    "url": "index.html",
+    "revision": "9af2605f29249e09ad444808e86bcf9a"
+  }, {
+    "url": "apple-touch-icon.png",
+    "revision": "5921a23c38236851ae5e7dd4f11bf1d5"
+  }, {
+    "url": "assets/index-ojEfQZWn.js",
+    "revision": null
+  }, {
+    "url": "assets/index-CW5T_eiI.css",
+    "revision": null
+  }, {
+    "url": "assets/aistudio/image_f56bd69d.png",
+    "revision": null
+  }, {
+    "url": "apple-touch-icon.png",
+    "revision": "5921a23c38236851ae5e7dd4f11bf1d5"
+  }, {
+    "url": "pwa-192x192.png",
+    "revision": "66efa698a9d092c55363fd6d952f6ddb"
+  }, {
+    "url": "pwa-512x512.png",
+    "revision": "4593b03cf32e55198f2fdcb67ffae706"
+  }, {
+    "url": "pwa-maskable-512x512.png",
+    "revision": "491be7656831ff162413c689a3de979e"
+  }, {
+    "url": "manifest.webmanifest",
+    "revision": "19a29f454b695e460add8438367e920d"
+  }], {});
+  workbox.cleanupOutdatedCaches();
+  workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("index.html")));
+  workbox.registerRoute(/^https:\/\/images\.unsplash\.com\/.*/i, new workbox.CacheFirst({
+    "cacheName": "unsplash-images-cache",
+    plugins: [new workbox.ExpirationPlugin({
+      maxEntries: 50,
+      maxAgeSeconds: 2592000
+    }), new workbox.CacheableResponsePlugin({
+      statuses: [0, 200]
+    })]
+  }), 'GET');
+  workbox.registerRoute(/^https:\/\/api\.dicebear\.com\/.*/i, new workbox.CacheFirst({
+    "cacheName": "dicebear-avatars-cache",
+    plugins: [new workbox.ExpirationPlugin({
+      maxEntries: 100,
+      maxAgeSeconds: 2592000
+    }), new workbox.CacheableResponsePlugin({
+      statuses: [0, 200]
+    })]
+  }), 'GET');
+
+}));

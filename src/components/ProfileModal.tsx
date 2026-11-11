@@ -446,42 +446,44 @@ export function ProfileModal({
                 <PWAInstallButton variant="sidebar" />
               </div>
 
-              {/* In-App APK / Web Version & Auto-Update Check */}
-              <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-1.5">
-                <div className="flex items-center justify-between px-1">
-                  <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">
-                    {language === 'bn' ? 'অ্যাপ সংস্করণ' : 'App Version'}
-                  </span>
-                  <span className="text-xs font-mono font-medium text-slate-300">
-                    v{APP_VERSION.versionName} ({isNativeApkApp() ? 'APK' : 'PWA'})
-                  </span>
-                </div>
+              {/* In-App APK Version & Auto-Update Check (Strictly for installed Mobile APK, hidden on Web) */}
+              {isNativeApkApp() && (
+                <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-1.5">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">
+                      {language === 'bn' ? 'অ্যাপ সংস্করণ' : 'App Version'}
+                    </span>
+                    <span className="text-xs font-mono font-medium text-slate-300">
+                      v{APP_VERSION.versionName} (APK)
+                    </span>
+                  </div>
 
-                <button
-                  type="button"
-                  onClick={handleCheckForUpdates}
-                  disabled={checkingUpdate}
-                  className="w-full py-1.5 px-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-[11px] font-medium border border-slate-800 flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
-                >
-                  {checkingUpdate ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-                      <span>{language === 'bn' ? 'যাচাই হচ্ছে...' : 'Checking...'}</span>
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>{language === 'bn' ? 'আপডেট চেক করুন' : 'Check for Updates'}</span>
-                    </>
+                  <button
+                    type="button"
+                    onClick={handleCheckForUpdates}
+                    disabled={checkingUpdate}
+                    className="w-full py-1.5 px-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-[11px] font-medium border border-slate-800 flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                  >
+                    {checkingUpdate ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                        <span>{language === 'bn' ? 'যাচাই হচ্ছে...' : 'Checking...'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>{language === 'bn' ? 'আপডেট চেক করুন' : 'Check for Updates'}</span>
+                      </>
+                    )}
+                  </button>
+
+                  {updateStatusMessage && (
+                    <p className="text-[10px] text-center text-slate-400 px-1 transition animate-in fade-in">
+                      {updateStatusMessage}
+                    </p>
                   )}
-                </button>
-
-                {updateStatusMessage && (
-                  <p className="text-[10px] text-center text-slate-400 px-1 transition animate-in fade-in">
-                    {updateStatusMessage}
-                  </p>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </div>
 
