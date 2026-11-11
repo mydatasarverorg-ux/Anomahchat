@@ -61,9 +61,9 @@ jobs:
           mkdir -p build-output
           APK_PATH=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
           if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
-            cp "$APK_PATH" build-output/AnomahChat-v1.0.2.apk
+            cp "$APK_PATH" build-output/AnomahChat-v1.0.3.apk
             cp "$APK_PATH" build-output/AnomahChat.apk
-            cp "$APK_PATH" build-output/Anomah-Chat-vMahi-A02.apk
+            cp "$APK_PATH" build-output/Anomah-Chat-vMahi-A03.apk
             echo "Successfully prepared APK from: $APK_PATH"
           else
             echo "::error::No APK file found in android/app/build/outputs/apk!"
@@ -73,7 +73,7 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AnomahChat-v1.0.2-APK
+          name: AnomahChat-v1.0.3-APK
           path: build-output/*.apk
           retention-days: 30
 
@@ -81,18 +81,19 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         with:
-          tag_name: v1.0.2
-          name: Anomah Chat v1.0.2 (Mahi A02 Release)
+          tag_name: v1.0.3
+          name: Anomah Chat v1.0.3 (Mahi A03 Release)
           body: |
-            ## Anomah Chat Android APK v1.0.2 (Mahi A02)
+            ## Anomah Chat Android APK v1.0.3 (Mahi A03)
             Direct installation package for Android devices.
-            - In-App Auto-Update & Upgrade Support
+            - In-App Auto-Update & Auto-Install Support
+            - Post-Install Automatic Cache Cleanup
             - Realtime Voice & Video Calls
             - High-Speed WebRTC & Messaging
           draft: false
           prerelease: false
           files: |
-            build-output/AnomahChat-v1.0.2.apk
+            build-output/AnomahChat-v1.0.3.apk
             build-output/AnomahChat.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

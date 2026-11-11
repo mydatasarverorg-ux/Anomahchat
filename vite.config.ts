@@ -23,7 +23,7 @@ export default defineConfig(() => {
           name: 'Anomah Chat - Global Messenger',
           short_name: 'Anomah',
           description:
-            'Anomah Chat: A global real-time messaging app built by Mahi Muhtasim. Version: Mahi A02.',
+            'Anomah Chat: A global real-time messaging app built by Mahi Muhtasim. Version: Mahi A03.',
           theme_color: '#0b1120',
           background_color: '#0b1120',
           display: 'standalone',
