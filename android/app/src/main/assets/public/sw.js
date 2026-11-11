@@ -90,15 +90,15 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
     "revision": "66efa698a9d092c55363fd6d952f6ddb"
   }, {
     "url": "index.html",
-    "revision": "9af2605f29249e09ad444808e86bcf9a"
+    "revision": "2a94c7607a43d4ccbb2eddd17581ef26"
   }, {
     "url": "apple-touch-icon.png",
     "revision": "5921a23c38236851ae5e7dd4f11bf1d5"
   }, {
-    "url": "assets/index-ojEfQZWn.js",
+    "url": "assets/index-CW5T_eiI.css",
     "revision": null
   }, {
-    "url": "assets/index-CW5T_eiI.css",
+    "url": "assets/index-BfuAPC5v.js",
     "revision": null
   }, {
     "url": "assets/aistudio/image_f56bd69d.png",
@@ -117,7 +117,7 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
     "revision": "491be7656831ff162413c689a3de979e"
   }, {
     "url": "manifest.webmanifest",
-    "revision": "19a29f454b695e460add8438367e920d"
+    "revision": "284e999f7b9d1bdc3f6465fa1b2fc2de"
   }], {});
   workbox.cleanupOutdatedCaches();
   workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("index.html")));

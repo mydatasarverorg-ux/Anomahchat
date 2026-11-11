@@ -1,10 +1,10 @@
 import { Capacitor } from '@capacitor/core';
 
 export const APP_VERSION = {
-  versionName: '1.0.1',
-  versionCode: 101,
+  versionName: '1.0.2',
+  versionCode: 102,
   channel: 'Stable',
-  buildDate: '2026-11-09',
+  buildDate: '2026-11-11',
 };
 
 /**

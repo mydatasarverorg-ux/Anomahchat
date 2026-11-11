@@ -93,12 +93,12 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
 
   // APK In-App Release State
   const [currentLiveRelease, setCurrentLiveRelease] = useState<AppReleaseInfo | null>(null);
-  const [releaseVersionName, setReleaseVersionName] = useState('1.1.0');
-  const [releaseVersionCode, setReleaseVersionCode] = useState('110');
-  const [releaseApkUrl, setReleaseApkUrl] = useState('');
-  const [releaseFileSizeText, setReleaseFileSizeText] = useState('18.5 MB');
-  const [releaseChangelogEn, setReleaseChangelogEn] = useState('• Faster messaging & bug fixes\n• Real-time cloud sync improvements');
-  const [releaseChangelogBn, setReleaseChangelogBn] = useState('• দ্রুতগতির চ্যাট ও বাগ ফিক্স\n• রিয়েল-টাইম পারফরম্যান্স উন্নত করা হয়েছে');
+  const [releaseVersionName, setReleaseVersionName] = useState('1.0.2');
+  const [releaseVersionCode, setReleaseVersionCode] = useState('102');
+  const [releaseApkUrl, setReleaseApkUrl] = useState('https://github.com/mydatasarverorg-ux/Anomahchat/releases/latest/download/AnomahChat.apk');
+  const [releaseFileSizeText, setReleaseFileSizeText] = useState('9.6 MB');
+  const [releaseChangelogEn, setReleaseChangelogEn] = useState('• Faster messaging & bug fixes\n• Real-time cloud sync improvements\n• Version Mahi A02 release');
+  const [releaseChangelogBn, setReleaseChangelogBn] = useState('• দ্রুতগতির চ্যাট ও বাগ ফিক্স\n• রিয়েল-টাইম পারফরম্যান্স উন্নত করা হয়েছে\n• সংস্করণ মাহি A02 রিলিজ');
   const [releaseForceUpdate, setReleaseForceUpdate] = useState(false);
   const [publishingRelease, setPublishingRelease] = useState(false);
 
