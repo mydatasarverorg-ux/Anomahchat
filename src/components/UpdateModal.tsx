@@ -67,10 +67,9 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
     setDownloadStarted(true);
     setDownloadComplete(false);
 
-    // Save installed release code to localStorage so subsequent checks know this build is installed
+    // Clean any legacy install locks so user is never blocked from updating
     try {
-      localStorage.setItem('anomah_last_installed_code', String(release.versionCode));
-      localStorage.setItem('anomah_last_installed_name', release.versionName);
+      localStorage.removeItem('anomah_last_installed_code');
     } catch {
       // ignore
     }

@@ -154,6 +154,10 @@ public class MainActivity extends BridgeActivity {
 
     private void cleanOldUpdateFiles() {
         try {
+            File pubFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "AnomahChat-Update.apk");
+            if (pubFile.exists()) {
+                pubFile.delete();
+            }
             File targetDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
             if (targetDir != null) {
                 File apkFile = new File(targetDir, "AnomahUpdate.apk");
@@ -161,12 +165,23 @@ public class MainActivity extends BridgeActivity {
                     apkFile.delete();
                 }
             }
-            File cacheApk = new File(getExternalCacheDir(), "AnomahUpdate.apk");
-            if (cacheApk.exists()) {
-                cacheApk.delete();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void promptInstallFromUri(Uri uri) {
+        try {
+            if (uri != null) {
+                Intent intent = new Intent(Intent.ACTION_VIEW);
+                intent.setDataAndType(uri, "application/vnd.android.package-archive");
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(intent);
             }
         } catch (Exception e) {
             e.printStackTrace();
+            Toast.makeText(MainActivity.this, "স্বয়ংক্রিয় ইনস্টলার চালুর সমস্যা: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
@@ -178,17 +193,13 @@ public class MainActivity extends BridgeActivity {
                         getPackageName() + ".fileprovider",
                         apkFile
                 );
-                Intent intent = new Intent(Intent.ACTION_VIEW);
-                intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
-                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(intent);
+                promptInstallFromUri(apkUri);
             } else {
                 Toast.makeText(MainActivity.this, "আপডেট ফাইল পাওয়া যায়নি, অনুগ্রহ করে পুনরায় ডাউনলোড করুন।", Toast.LENGTH_LONG).show();
             }
         } catch (Exception e) {
             e.printStackTrace();
-            Toast.makeText(MainActivity.this, "স্বয়ংক্রিয় ইনস্টলার চালুর সমস্যা: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(MainActivity.this, "ইনস্টলার ওপেন করতে সমস্যা: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
@@ -238,11 +249,20 @@ public class MainActivity extends BridgeActivity {
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    File targetDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
-                    if (targetDir != null) {
-                        File apkFile = new File(targetDir, "AnomahUpdate.apk");
-                        promptInstallApk(apkFile);
+                    try {
+                        android.app.DownloadManager manager = (android.app.DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+                        if (manager != null && activeDownloadId != -1) {
+                            Uri downloadedUri = manager.getUriForDownloadedFile(activeDownloadId);
+                            if (downloadedUri != null) {
+                                promptInstallFromUri(downloadedUri);
+                                return;
+                            }
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
                     }
+                    File pubFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "AnomahChat-Update.apk");
+                    promptInstallApk(pubFile);
                 }
             });
         }
@@ -255,18 +275,12 @@ public class MainActivity extends BridgeActivity {
                     try {
                         cleanOldUpdateFiles();
 
-                        File targetDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
-                        if (targetDir == null) {
-                            targetDir = getFilesDir();
-                        }
-                        final File targetFile = new File(targetDir, "AnomahUpdate.apk");
-
                         Uri uri = Uri.parse(url);
                         android.app.DownloadManager.Request request = new android.app.DownloadManager.Request(uri);
                         request.setTitle("Anomah Chat Update v" + (versionName != null ? versionName : ""));
                         request.setDescription("Downloading latest in-app update...");
-                        request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE);
-                        request.setDestinationUri(Uri.fromFile(targetFile));
+                        request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                        request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "AnomahChat-Update.apk");
                         request.setMimeType("application/vnd.android.package-archive");
 
                         final android.app.DownloadManager manager = (android.app.DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
@@ -288,7 +302,13 @@ public class MainActivity extends BridgeActivity {
                                     long id = intent.getLongExtra(android.app.DownloadManager.EXTRA_DOWNLOAD_ID, -1);
                                     if (id == activeDownloadId) {
                                         notifyWebViewDownloadFinished();
-                                        promptInstallApk(targetFile);
+                                        Uri downloadedUri = manager.getUriForDownloadedFile(activeDownloadId);
+                                        if (downloadedUri != null) {
+                                            promptInstallFromUri(downloadedUri);
+                                        } else {
+                                            File pubFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "AnomahChat-Update.apk");
+                                            promptInstallApk(pubFile);
+                                        }
                                     }
                                 }
                             };

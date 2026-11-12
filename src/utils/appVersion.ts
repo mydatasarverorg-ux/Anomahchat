@@ -1,8 +1,8 @@
 import { Capacitor } from '@capacitor/core';
 
 export const APP_VERSION = {
-  versionName: '1.0.4',
-  versionCode: 104,
+  versionName: '1.0.5',
+  versionCode: 105,
   channel: 'Stable',
   buildDate: '2026-11-12',
 };
@@ -24,18 +24,6 @@ export function isUpdateAvailable(
   } else if (typeof remote === 'object') {
     remoteCode = typeof remote.versionCode === 'number' ? remote.versionCode : Number(remote.versionCode);
     remoteName = typeof remote.versionName === 'string' ? remote.versionName : undefined;
-  }
-
-  // Check if localStorage records that this version was already installed
-  try {
-    const lastInstalledCode = localStorage.getItem('anomah_last_installed_code');
-    if (lastInstalledCode && remoteCode !== undefined) {
-      if (parseInt(lastInstalledCode, 10) >= remoteCode) {
-        return false;
-      }
-    }
-  } catch {
-    // ignore
   }
 
   // If remoteCode is single digit e.g. 2 while client has 101/102, normalize to 102
