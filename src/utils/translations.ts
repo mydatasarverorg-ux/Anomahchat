@@ -6,7 +6,7 @@ export const translations = {
     appName: 'Anomah Messenger',
     tagline: 'Worldwide Cloud Messenger',
     ownedBy: 'Built & Owned by Mahi Muhtasim',
-    versionBadge: 'Mahi A03',
+    versionBadge: 'Mahi A04',
     loading: 'Loading...',
     connectingCloud: 'Connecting to Anomah Chat Cloud...',
     cancel: 'Cancel',
@@ -39,7 +39,7 @@ export const translations = {
     emptyChatSubtitle: 'Select a conversation from the left sidebar or start a new chat to begin messaging.',
     startNewChatBtn: 'Start New Chat',
     shareLinkBtn: 'Share Link',
-    securityFooter: 'Cloud Database End-to-End Secure · Mahi A01',
+    securityFooter: 'Cloud Database End-to-End Secure · Mahi A04',
 
     // Sidebar
     searchPlaceholder: 'Search chats...',
@@ -212,7 +212,7 @@ export const translations = {
     // Share Link Modal
     shareTitle: 'Chat with Anyone Worldwide',
     shareSubtitle: 'Share this URL to connect across devices & countries',
-    shareBody: 'Anyone who opens this link can log in to Anomah Chat from their phone, tablet, or PC anywhere in the world and chat with you in real time. Created by Mahi Muhtasim (vMahi A01).',
+    shareBody: 'Anyone who opens this link can log in to Anomah Chat from their phone, tablet, or PC anywhere in the world and chat with you in real time. Created by Mahi Muhtasim (vMahi A04).',
     shareTipTitle: 'Quick Testing Tip:',
     shareTipBody: 'Open this URL in an Incognito window or on your mobile phone to see real-time two-way chatting, delivery blue ticks, and voice notes live in action!',
 
@@ -495,7 +495,7 @@ export const translations = {
     appName: 'আনমাহ্ মেসেঞ্জার',
     tagline: 'ওয়ার্ল্ডওয়াইড ক্লাউড মেসেঞ্জার',
     ownedBy: 'মাহি মুহতাসিম কর্তৃক তৈরিকৃত ও পরিচালিত',
-    versionBadge: 'Mahi A03',
+    versionBadge: 'Mahi A04',
     loading: 'লোড হচ্ছে...',
     connectingCloud: 'আনমাহ্ ক্লাউড ডাটাবেজে যুক্ত হওয়া হচ্ছে...',
     cancel: 'বাতিল',
@@ -528,7 +528,7 @@ export const translations = {
     emptyChatSubtitle: 'কথোপকথন শুরু করতে বামপাশের তালিকা থেকে কোনো চ্যাট নির্বাচন করুন অথবা নতুন মেসেজ পাঠান।',
     startNewChatBtn: 'নতুন চ্যাট শুরু করুন',
     shareLinkBtn: 'লিংক শেয়ার',
-    securityFooter: 'ক্লাউড ডাটাবেজ সিকিউরিটি সুরক্ষিত · Mahi A01',
+    securityFooter: 'ক্লাউড ডাটাবেজ সিকিউরিটি সুরক্ষিত · Mahi A04',
 
     // Sidebar
     searchPlaceholder: 'চ্যাট খুঁজুন...',
@@ -701,7 +701,7 @@ export const translations = {
     // Share Link Modal
     shareTitle: 'সবার সাথে যেকোনো জায়গায় চ্যাট করুন',
     shareSubtitle: 'অন্যান্য ডিভাইস ও বন্ধুদের সাথে যুক্ত হতে এই লিংক শেয়ার করুন',
-    shareBody: 'যেকোনো ব্যক্তি এই লিংক খুলে স্মার্টফোন, ট্যাব বা পিসি থেকে আনমাহ্ চ্যাটে প্রবেশ করে আপনার সাথে রিয়েল টাইমে চ্যাট করতে পারবেন। স্রষ্টা: মাহি মুহতাসিম (vMahi A01)।',
+    shareBody: 'যেকোনো ব্যক্তি এই লিংক খুলে স্মার্টফোন, ট্যাব বা পিসি থেকে আনমাহ্ চ্যাটে প্রবেশ করে আপনার সাথে রিয়েল টাইমে চ্যাট করতে পারবেন। স্রষ্টা: মাহি মুহতাসিম (vMahi A04)।',
     shareTipTitle: 'দ্রুত টেস্ট করার উপায়:',
     shareTipBody: 'একটি ইনকগনিটো উইন্ডো বা আপনার মোবাইলে এই লিংকটি খুলে দুই প্রান্তে মেসেজ আদান-প্রদান ও ব্লু টিক সাথে সাথে দেখে নিন!',
 

@@ -93,12 +93,12 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
 
   // APK In-App Release State
   const [currentLiveRelease, setCurrentLiveRelease] = useState<AppReleaseInfo | null>(null);
-  const [releaseVersionName, setReleaseVersionName] = useState('1.0.3');
-  const [releaseVersionCode, setReleaseVersionCode] = useState('103');
+  const [releaseVersionName, setReleaseVersionName] = useState('1.0.4');
+  const [releaseVersionCode, setReleaseVersionCode] = useState('104');
   const [releaseApkUrl, setReleaseApkUrl] = useState('https://github.com/mydatasarverorg-ux/Anomahchat/releases/latest/download/AnomahChat.apk');
   const [releaseFileSizeText, setReleaseFileSizeText] = useState('9.6 MB');
-  const [releaseChangelogEn, setReleaseChangelogEn] = useState('• In-app auto-installer and cache cleanup\n• Real-time cloud sync improvements\n• Version Mahi A03 release');
-  const [releaseChangelogBn, setReleaseChangelogBn] = useState('• অটো-ইনস্টলার ও ক্যাশ অটো-ক্লিনআপ ফিচার\n• রিয়েল-টাইম পারফরম্যান্স উন্নত করা হয়েছে\n• সংস্করণ মাহি A03 রিলিজ');
+  const [releaseChangelogEn, setReleaseChangelogEn] = useState('• Direct Google Sign-In In-App Dialog Support\n• In-app auto-installer and cache cleanup\n• Version Mahi A04 release');
+  const [releaseChangelogBn, setReleaseChangelogBn] = useState('• গুগল ডিরেক্ট সাইন-ইন ইন-অ্যাপ ডায়ালগ ফিক্স\n• অটো-ইনস্টলার ও ক্যাশ অটো-ক্লিনআপ ফিচার\n• সংস্করণ মাহি A04 রিলিজ');
   const [releaseForceUpdate, setReleaseForceUpdate] = useState(false);
   const [publishingRelease, setPublishingRelease] = useState(false);
 

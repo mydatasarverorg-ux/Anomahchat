@@ -77,13 +77,11 @@ public class MainActivity extends BridgeActivity {
                 settings.setJavaScriptCanOpenWindowsAutomatically(true);
                 settings.setMediaPlaybackRequiresUserGesture(false);
 
-                // Remove "; wv" from User-Agent string so Google OAuth doesn't block Android WebView
-                String originalUserAgent = settings.getUserAgentString();
-                if (originalUserAgent != null && originalUserAgent.contains("; wv")) {
-                    settings.setUserAgentString(originalUserAgent.replace("; wv", ""));
-                }
+                // Clean modern Chrome Mobile User-Agent to bypass Google OAuth disallowed_useragent restriction
+                String standardChromeUA = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
+                settings.setUserAgentString(standardChromeUA);
 
-                // Grant WebRTC audio & media permissions requested by the web app
+                // Grant WebRTC audio/media permissions and handle Google OAuth popups
                 webView.setWebChromeClient(new WebChromeClient() {
                     @Override
                     public void onPermissionRequest(final PermissionRequest request) {
@@ -93,6 +91,42 @@ public class MainActivity extends BridgeActivity {
                                 request.grant(request.getResources());
                             }
                         });
+                    }
+
+                    @Override
+                    public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, android.os.Message resultMsg) {
+                        final android.app.Dialog authDialog = new android.app.Dialog(MainActivity.this, android.R.style.Theme_DeviceDefault_Light_NoActionBar_Fullscreen);
+                        WebView authWebView = new WebView(MainActivity.this);
+                        WebSettings authSettings = authWebView.getSettings();
+                        authSettings.setJavaScriptEnabled(true);
+                        authSettings.setDomStorageEnabled(true);
+                        authSettings.setSupportMultipleWindows(true);
+                        authSettings.setJavaScriptCanOpenWindowsAutomatically(true);
+                        authSettings.setUserAgentString(standardChromeUA);
+
+                        authWebView.setWebChromeClient(new WebChromeClient() {
+                            @Override
+                            public void onCloseWindow(WebView window) {
+                                if (authDialog != null && authDialog.isShowing()) {
+                                    authDialog.dismiss();
+                                }
+                            }
+                        });
+
+                        authWebView.setWebViewClient(new android.webkit.WebViewClient() {
+                            @Override
+                            public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest request) {
+                                return false;
+                            }
+                        });
+
+                        authDialog.setContentView(authWebView);
+                        authDialog.show();
+
+                        WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                        transport.setWebView(authWebView);
+                        resultMsg.sendToTarget();
+                        return true;
                     }
                 });
 

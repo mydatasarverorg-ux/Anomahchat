@@ -275,32 +275,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setPresence(res.user.uid, true);
       }
     } catch (err: unknown) {
-      console.warn('Popup attempt result, checking mobile redirect fallback:', err);
+      console.warn('Google sign-in attempt notice:', err);
       const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
 
-      if (
-        msg.includes('popup-blocked') ||
-        msg.includes('operation-not-supported') ||
-        msg.includes('disallowed_useragent') ||
-        (typeof window !== 'undefined' && 'Capacitor' in window)
-      ) {
-        try {
-          await signInWithRedirect(auth, googleProvider);
-          return;
-        } catch (redirectErr) {
-          console.error('Redirect sign in error:', redirectErr);
-          setAuthError(
-            'Unable to connect to Google account. Please check your internet connection.'
-          );
-        }
+      if (msg.includes('popup-closed-by-user') || msg.includes('cancelled')) {
+        setAuthError('Google sign-in was cancelled. Please tap "Continue with Google" to try again.');
       } else if (msg.includes('unauthorized-domain')) {
         setAuthError(
           'This domain is not authorized in Firebase Console yet. Please ensure your domain is added under Authentication > Settings > Authorized domains.'
         );
-      } else if (msg.includes('popup-closed-by-user') || msg.includes('cancelled')) {
-        setAuthError('Sign-in cancelled. Please tap "Continue with Google" to try again.');
       } else {
-        setAuthError('Unable to sign in with Google. Please check connection and try again.');
+        setAuthError(
+          err instanceof Error
+            ? err.message
+            : 'Unable to complete Google sign-in. Please try again or use PIN/Email login.'
+        );
       }
     } finally {
       setLoading(false);
