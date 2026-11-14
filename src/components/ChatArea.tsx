@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import {
@@ -9,10 +9,10 @@ import {
   deleteChatMessage,
   editChatMessage,
   deleteChatRoom,
-  subscribeToUserProfile,
+  subscribeToDirectoryUser,
   formatLastSeenStatus,
 } from '../services/chatService';
-import type { ChatRoom, ChatMessage, CallSession, UserProfile } from '../types/chat';
+import type { ChatRoom, ChatMessage, CallSession, UserProfile, DirectoryUser } from '../types/chat';
 import { sounds } from '../utils/audioEffects';
 import { compressImageForChat } from '../utils/imageCompressor';
 import {
@@ -22,19 +22,12 @@ import {
   Mic,
   Smile,
   Paperclip,
-  CheckCheck,
   MoreVertical,
-  Reply,
   Trash2,
-  Pencil,
-  Copy,
   AlertTriangle,
-  Play,
-  Pause,
   ArrowLeft,
   X,
   Search,
-  Image as ImageIcon,
   Flag,
   ShieldAlert,
   Loader2,
@@ -43,10 +36,12 @@ import {
   Users,
   UserX,
 } from 'lucide-react';
-import { isSuperAdmin } from '../services/adminService';
 import { ReportModal } from './ReportModal';
 import { GroupInfoModal } from './GroupInfoModal';
 import { MessageInfoModal } from './MessageInfoModal';
+import { MessageBubble } from './chat/MessageBubble';
+import { MessageContextMenu } from './chat/MessageContextMenu';
+import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 
 interface ChatAreaProps {
   chat: ChatRoom;
@@ -70,28 +65,12 @@ export function ChatArea({
   const [inputText, setInputText] = useState('');
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordDuration, setRecordDuration] = useState(0);
-  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
-  const [audioProgress, setAudioProgress] = useState<Record<string, number>>({});
-  const [micError, setMicError] = useState<string | null>(null);
-  const [showMicPermissionModal, setShowMicPermissionModal] = useState(false);
-  const [isSendingVoice, setIsSendingVoice] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showGroupInfoModal, setShowGroupInfoModal] = useState(false);
   const [messageInfoTarget, setMessageInfoTarget] = useState<ChatMessage | null>(null);
 
-  // Audio recording refs & resources
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const recordingStartTimeRef = useRef<number>(0);
-  const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const activeAudioRef = useRef<{ id: string; audio: HTMLAudioElement } | null>(null);
-
-  // Reporting State
   const [reportTarget, setReportTarget] = useState<{
     targetUserId: string;
     targetUserName: string;
@@ -101,39 +80,35 @@ export function ChatArea({
     messageText?: string;
   } | null>(null);
 
-  // Real-time recipient profile & presence tracking
-  const [partnerUser, setPartnerUser] = useState<UserProfile | null>(null);
+  const [partnerUser, setPartnerUser] = useState<DirectoryUser | null>(null);
 
-  // Edit message & delete conversation states
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
   const [editText, setEditText] = useState('');
   const [showDeleteChatConfirm, setShowDeleteChatConfirm] = useState(false);
   const [messageToDelete, setMessageToDelete] = useState<ChatMessage | null>(null);
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
 
-  // Long-press Context Menu & Floating Reactions (Messenger/WhatsApp style)
   const [activeMenuMessage, setActiveMenuMessage] = useState<ChatMessage | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
-  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTapRef = useRef<{ id: string; time: number } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Partner ID for 1-to-1 direct chat
   const partnerId =
     chat.type === 'direct'
       ? chat.participantIds.find((id) => id !== effectiveUser?.userId) || chat.participantIds[0]
       : null;
   const partnerDetails = partnerId ? chat.participantDetails?.[partnerId] : null;
 
-  // Real-time subscription to partner's presence
+  // Real-time subscription to partner's non-PII directory presence
   useEffect(() => {
     if (!partnerId) {
       setPartnerUser(null);
       return;
     }
-    const unsubscribe = subscribeToUserProfile(partnerId, (profile) => {
+    const unsubscribe = subscribeToDirectoryUser(partnerId, (profile) => {
       setPartnerUser(profile);
     });
     return () => unsubscribe();
@@ -152,6 +127,14 @@ export function ChatArea({
       Boolean(partnerDetails?.isBanned));
   const isCurrentUserSuspended = Boolean(effectiveUser?.isBanned);
 
+  const voice = useVoiceRecorder({
+    chatId: chat.id,
+    user,
+    disabled: isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended || Boolean(ghostUser),
+    language,
+    t,
+  });
+
   const partnerStatus = isPartnerDeleted
     ? { isOnline: false, statusText: t('deletedAccountStatus') }
     : formatLastSeenStatus(partnerUser?.lastSeen, partnerUser?.isOnline);
@@ -169,7 +152,6 @@ export function ChatArea({
       ? 'https://api.dicebear.com/7.x/bottts/svg?seed=deleted_user'
       : partnerUser?.photoURL || partnerDetails?.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${partnerId}`;
 
-  // Subscribe to messages in current chat
   useEffect(() => {
     if (!chat.id) return;
     const unsubscribe = subscribeToChatMessages(chat.id, (msgs) => {
@@ -182,8 +164,6 @@ export function ChatArea({
         }
       }
 
-      // Mark unread messages as read (skip in Ghost Mode to preserve real user's unread state)
-      // Strictly verify that current user is an active participant of this chat
       if (user && !ghostUser) {
         const isParticipant = Array.isArray(chat.participantIds) && chat.participantIds.includes(user.userId);
         if (isParticipant) {
@@ -195,17 +175,14 @@ export function ChatArea({
     return () => unsubscribe();
   }, [chat.id, chat.participantIds, user, ghostUser]);
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
 
-  // Double tap to quick-react (❤️)
   const handleMessageTap = (msg: ChatMessage) => {
-    if (ghostUser) return; // Strict read-only: no reactions in ghost mode
+    if (ghostUser) return;
     const now = Date.now();
     if (lastTapRef.current && lastTapRef.current.id === msg.id && now - lastTapRef.current.time < 350) {
-      // Double tap detected
       if (user) {
         toggleMessageReaction(chat.id, msg.id, user.userId, '❤️');
       }
@@ -215,9 +192,8 @@ export function ChatArea({
     }
   };
 
-  // Long press detection for mobile & desktop
   const handleTouchStart = (msg: ChatMessage, e: React.TouchEvent | React.MouseEvent) => {
-    if (ghostUser && msg.type !== 'text') return; // Read-only: no menu needed for media in ghost mode
+    if (ghostUser && msg.type !== 'text') return;
     const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
 
@@ -247,7 +223,6 @@ export function ChatArea({
     });
   };
 
-  // Send text message
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!inputText.trim() || !user || isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended) return;
@@ -275,7 +250,6 @@ export function ChatArea({
     });
   };
 
-  // Image upload
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user || isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended) return;
@@ -294,340 +268,6 @@ export function ChatArea({
     } catch (err) {
       console.error('Failed to process and send image:', err);
     }
-  };
-
-  // Audio MIME type detector with fallbacks for iOS, Safari, Android WebView, and desktop
-  const getSupportedMimeType = (): string => {
-    if (typeof window === 'undefined' || typeof MediaRecorder === 'undefined') return '';
-    const candidateTypes = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/mp4',
-      'audio/aac',
-      'audio/ogg;codecs=opus',
-      'audio/ogg',
-    ];
-    for (const candidate of candidateTypes) {
-      try {
-        if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(candidate)) {
-          return candidate;
-        }
-      } catch {
-        // Continue checking next candidate
-      }
-    }
-    return '';
-  };
-
-  // Voice Notes - Production grade recording with exact duration and cross-platform MIME support
-  const startRecording = async () => {
-    if (isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended || ghostUser) return;
-    setMicError(null);
-
-    // Stop any existing stream / recorder
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch {}
-    }
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-      mediaStreamRef.current = null;
-    }
-
-    try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setMicError(t('micNotSupported'));
-        setShowMicPermissionModal(true);
-        return;
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-
-      mediaStreamRef.current = stream;
-      audioChunksRef.current = [];
-
-      const preferredMime = getSupportedMimeType();
-      let recorder: MediaRecorder;
-      try {
-        if (preferredMime) {
-          recorder = new MediaRecorder(stream, {
-            mimeType: preferredMime,
-            audioBitsPerSecond: 24000,
-          });
-        } else {
-          recorder = new MediaRecorder(stream);
-        }
-      } catch {
-        recorder = new MediaRecorder(stream);
-      }
-
-      const chosenMime = recorder.mimeType || preferredMime || 'audio/webm';
-
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          audioChunksRef.current.push(e.data);
-        }
-      };
-
-      recorder.onstop = async () => {
-        if (durationIntervalRef.current) {
-          clearInterval(durationIntervalRef.current);
-          durationIntervalRef.current = null;
-        }
-
-        // Release hardware mic tracks immediately
-        if (mediaStreamRef.current) {
-          mediaStreamRef.current.getTracks().forEach((track) => {
-            try {
-              track.stop();
-            } catch {}
-          });
-          mediaStreamRef.current = null;
-        }
-
-        const chunks = [...audioChunksRef.current];
-        audioChunksRef.current = [];
-        const elapsedSeconds = Math.max(
-          1,
-          Math.round((Date.now() - recordingStartTimeRef.current) / 1000)
-        );
-
-        if (chunks.length === 0) {
-          setIsSendingVoice(false);
-          setIsRecording(false);
-          return;
-        }
-
-        const audioBlob = new Blob(chunks, { type: chosenMime });
-        if (audioBlob.size === 0) {
-          setIsSendingVoice(false);
-          setIsRecording(false);
-          return;
-        }
-
-        setIsSendingVoice(true);
-        const reader = new FileReader();
-        reader.onload = async () => {
-          const base64Audio = reader.result as string;
-          if (user && base64Audio) {
-            // Guard against exceeding Firestore 1MB document limit
-            if (base64Audio.length > 850000) {
-              setMicError(
-                language === 'bn'
-                  ? 'অডিও ফাইলের আকার অনেক বড় হয়ে গেছে। অনুগ্রহ করে ছোট ভয়েস নোট রেকর্ড করুন।'
-                  : 'Audio file size is too large. Please record a shorter voice note.'
-              );
-              setIsSendingVoice(false);
-              return;
-            }
-
-            try {
-              sounds.playMessageSent();
-              await sendMessage({
-                chatId: chat.id,
-                sender: user,
-                text: t('voiceNoteLabel'),
-                type: 'audio',
-                mediaUrl: base64Audio,
-                audioDuration: elapsedSeconds,
-              });
-            } catch (err) {
-              console.warn('Voice message delivery notice:', err);
-            } finally {
-              setIsSendingVoice(false);
-            }
-          } else {
-            setIsSendingVoice(false);
-          }
-        };
-        reader.onerror = () => {
-          setIsSendingVoice(false);
-        };
-        reader.readAsDataURL(audioBlob);
-      };
-
-      // Emit chunks continuously
-      recorder.start(250);
-      mediaRecorderRef.current = recorder;
-      recordingStartTimeRef.current = Date.now();
-      setRecordDuration(0);
-      setIsRecording(true);
-
-      if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
-      durationIntervalRef.current = setInterval(() => {
-        const secs = Math.round((Date.now() - recordingStartTimeRef.current) / 1000);
-        setRecordDuration(secs);
-        // Auto-stop at 90 seconds to stay safely within Firestore 1MB limits
-        if (secs >= 90) {
-          stopRecording(false);
-        }
-      }, 500);
-    } catch (err: any) {
-      console.warn('Microphone permission or device access notice:', err?.name || err?.message || err);
-      const isDenied =
-        err?.name === 'NotAllowedError' ||
-        err?.name === 'PermissionDeniedError' ||
-        err?.name === 'SecurityError' ||
-        String(err?.message || '').toLowerCase().includes('permission') ||
-        String(err?.message || '').toLowerCase().includes('denied');
-
-      if (isDenied) {
-        setShowMicPermissionModal(true);
-        setMicError(t('micPermissionError'));
-      } else if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setMicError(t('micNotSupported'));
-      } else {
-        setMicError(t('micPermissionError'));
-      }
-      setIsRecording(false);
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-        mediaStreamRef.current = null;
-      }
-    }
-  };
-
-  const stopRecording = (cancel = false) => {
-    if (durationIntervalRef.current) {
-      clearInterval(durationIntervalRef.current);
-      durationIntervalRef.current = null;
-    }
-
-    const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state === 'inactive') {
-      setIsRecording(false);
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-        mediaStreamRef.current = null;
-      }
-      return;
-    }
-
-    if (cancel) {
-      recorder.ondataavailable = null;
-      recorder.onstop = null;
-      try {
-        recorder.stop();
-      } catch {}
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-        mediaStreamRef.current = null;
-      }
-      audioChunksRef.current = [];
-      setIsRecording(false);
-      setRecordDuration(0);
-    } else {
-      setIsRecording(false);
-      try {
-        recorder.stop();
-      } catch (err) {
-        console.warn('Notice stopping recorder:', err);
-      }
-    }
-  };
-
-  // Safe playback engine for voice notes
-  const playVoiceNote = (messageId: string, url?: string) => {
-    if (playingAudioId === messageId && activeAudioRef.current) {
-      activeAudioRef.current.audio.pause();
-      setPlayingAudioId(null);
-      return;
-    }
-
-    if (activeAudioRef.current) {
-      try {
-        activeAudioRef.current.audio.pause();
-        activeAudioRef.current.audio.currentTime = 0;
-      } catch {}
-      activeAudioRef.current = null;
-    }
-
-    if (!url) {
-      sounds.playBeep();
-      setPlayingAudioId(messageId);
-      setTimeout(() => {
-        setPlayingAudioId((curr) => (curr === messageId ? null : curr));
-      }, 2000);
-      return;
-    }
-
-    try {
-      const audio = new Audio(url);
-      audio.preload = 'auto';
-
-      audio.ontimeupdate = () => {
-        if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
-          const progress = Math.min(100, Math.max(0, (audio.currentTime / audio.duration) * 100));
-          setAudioProgress((prev) => ({ ...prev, [messageId]: progress }));
-        }
-      };
-
-      audio.onended = () => {
-        setPlayingAudioId((curr) => (curr === messageId ? null : curr));
-        setAudioProgress((prev) => ({ ...prev, [messageId]: 0 }));
-        activeAudioRef.current = null;
-      };
-
-      audio.onerror = (e) => {
-        console.warn('Voice note playback error:', e);
-        setPlayingAudioId(null);
-        setAudioProgress((prev) => ({ ...prev, [messageId]: 0 }));
-        activeAudioRef.current = null;
-        sounds.playBeep();
-      };
-
-      activeAudioRef.current = { id: messageId, audio };
-      setPlayingAudioId(messageId);
-
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise.catch((err) => {
-          console.warn('Playback play() promise error:', err);
-          setPlayingAudioId(null);
-          activeAudioRef.current = null;
-        });
-      }
-    } catch (err) {
-      console.error('Voice note audio error:', err);
-      setPlayingAudioId(null);
-    }
-  };
-
-  // Clean up any playing audio or active recording streams on chat change or unmount
-  useEffect(() => {
-    return () => {
-      if (durationIntervalRef.current) {
-        clearInterval(durationIntervalRef.current);
-      }
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        try {
-          mediaRecorderRef.current.stop();
-        } catch {}
-      }
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-      }
-      if (activeAudioRef.current) {
-        try {
-          activeAudioRef.current.audio.pause();
-          activeAudioRef.current.audio.src = '';
-        } catch {}
-        activeAudioRef.current = null;
-      }
-    };
-  }, [chat.id]);
-
-  const formatAudioTime = (seconds = 0) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
   const handleCopyText = (text: string) => {
@@ -661,7 +301,6 @@ export function ChatArea({
     onBack();
   };
 
-  // Strictly sorted messages by chronological timestamp and ID fallback
   const filteredMessages = useMemo(() => {
     const list = searchQuery.trim()
       ? messages.filter((m) => m.text?.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -674,22 +313,6 @@ export function ChatArea({
     });
   }, [messages, searchQuery]);
 
-  // Distinct color per sender in group chat
-  const getSenderColor = (senderId: string) => {
-    const colors = [
-      'text-emerald-400',
-      'text-sky-400',
-      'text-indigo-400',
-      'text-amber-400',
-      'text-teal-400',
-      'text-rose-400',
-      'text-purple-400',
-    ];
-    let hash = 0;
-    for (let i = 0; i < senderId.length; i++) hash += senderId.charCodeAt(i);
-    return colors[Math.abs(hash) % colors.length];
-  };
-
   return (
     <div
       onClick={() => {
@@ -698,7 +321,7 @@ export function ChatArea({
       }}
       className="flex-1 flex flex-col h-full bg-slate-950 overflow-hidden relative select-none"
     >
-      {/* Normalized Top Chat Header (56px standard) */}
+      {/* Top Chat Header */}
       <div className="h-14 px-3.5 bg-slate-900 border-b border-slate-800/80 flex items-center justify-between shrink-0 z-20">
         <div className="flex items-center gap-2.5">
           <button
@@ -741,7 +364,7 @@ export function ChatArea({
               </div>
               <p
                 className={`text-[10px] truncate leading-none mt-0.5 ${
-                    isPartnerDeleted
+                  isPartnerDeleted
                     ? 'text-rose-400 font-medium'
                     : isPartnerSuspended
                     ? 'text-amber-400 font-semibold'
@@ -777,7 +400,6 @@ export function ChatArea({
           </div>
         </div>
 
-        {/* Action icons */}
         <div className="flex items-center gap-0.5">
           <button
             onClick={() => setShowSearch(!showSearch)}
@@ -855,7 +477,6 @@ export function ChatArea({
             </>
           )}
 
-          {/* More options menu */}
           <div className="relative">
             <button
               onClick={(e) => {
@@ -920,7 +541,7 @@ export function ChatArea({
                           setReportTarget({
                             targetUserId: partnerId,
                             targetUserName: title,
-                            targetUserEmail: partnerUser?.email || partnerDetails?.email,
+                            targetUserEmail: partnerDetails?.email,
                             chatId: chat.id,
                           });
                         }}
@@ -949,7 +570,6 @@ export function ChatArea({
         </div>
       </div>
 
-      {/* In-Chat Search Bar */}
       {showSearch && (
         <div className="px-4 py-2 bg-slate-900/95 border-b border-slate-800 flex items-center gap-2 animate-in slide-in-from-top-2">
           <Search className="w-4 h-4 text-slate-400 shrink-0" />
@@ -969,7 +589,7 @@ export function ChatArea({
         </div>
       )}
 
-      {/* Messages List Area */}
+      {/* Messages List */}
       <div className="flex-1 overflow-y-auto p-4">
         {filteredMessages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center text-slate-400 p-6">
@@ -977,449 +597,84 @@ export function ChatArea({
               <Smile className="w-8 h-8 stroke-1" />
             </div>
             <p className="text-xs font-semibold text-slate-300 mb-1">{t('noMessagesInChat')}</p>
-            <p className="text-[11px] text-slate-500 max-w-xs">
-              {t('noMessagesInChatHelp')}
-            </p>
+            <p className="text-[11px] text-slate-500 max-w-xs">{t('noMessagesInChatHelp')}</p>
           </div>
         ) : (
           filteredMessages.map((msg, idx) => {
             const isMine = msg.senderId === effectiveUser?.userId;
-            const isLastMessage = idx === filteredMessages.length - 1;
             const prevMsg = idx > 0 ? filteredMessages[idx - 1] : null;
-            const isSameSenderAsPrev = prevMsg && prevMsg.senderId === msg.senderId;
-
-            // Date separator calculation
+            const isSameSenderAsPrev = Boolean(prevMsg && prevMsg.senderId === msg.senderId);
             const msgDateStr = new Date(msg.createdAt).toDateString();
             const prevDateStr = prevMsg ? new Date(prevMsg.createdAt).toDateString() : null;
             const isNewDay = !prevMsg || msgDateStr !== prevDateStr;
 
-            // Seen list (avatars of people who saw this message)
-            const seenList = Object.entries(msg.seenByDetails || {}).filter(
-              ([uid]) => uid !== msg.senderId
-            );
-
             return (
-              <div key={msg.id} className="w-full">
-                {isNewDay && (
-                  <div className="flex items-center justify-center my-3">
-                    <span className="px-3 py-1 rounded-full text-[10px] font-semibold bg-slate-900/90 text-slate-400 border border-slate-800 shadow-sm select-none">
-                      {(() => {
-                        const d = new Date(msg.createdAt);
-                        const today = new Date();
-                        if (d.toDateString() === today.toDateString()) {
-                          return language === 'bn' ? 'আজ' : 'Today';
-                        }
-                        const yest = new Date();
-                        yest.setDate(today.getDate() - 1);
-                        if (d.toDateString() === yest.toDateString()) {
-                          return language === 'bn' ? 'গতকাল' : 'Yesterday';
-                        }
-                        return d.toLocaleDateString(language === 'bn' ? 'bn-BD' : 'en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                        });
-                      })()}
-                    </span>
-                  </div>
-                )}
-                <div
-                  id={`msg-${msg.id}`}
-                  className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} group relative ${
-                    isSameSenderAsPrev ? 'mt-1' : 'mt-3.5'
-                  }`}
-                >
-                {/* Group chat: Sender Name & Avatar above incoming bubble */}
-                {!isMine && chat.type === 'group' && (
-                  <div className="flex items-center gap-1.5 mb-1 ml-1">
-                    <img
-                      src={msg.senderPhoto || `https://api.dicebear.com/7.x/bottts/svg?seed=${msg.senderId}`}
-                      alt={msg.senderName}
-                      className="w-4 h-4 rounded-full object-cover bg-slate-800"
-                    />
-                    <span className={`text-[11px] font-bold ${getSenderColor(msg.senderId)}`}>
-                      {msg.senderName}
-                    </span>
-                    {Boolean(chat.participantDetails?.[msg.senderId]?.isBanned) && (
-                      <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold">
-                        {language === 'bn' ? 'স্থগিত' : 'Suspended'}
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {/* Message Bubble Container */}
-                <div
-                  onClick={() => handleMessageTap(msg)}
-                  onTouchStart={(e) => handleTouchStart(msg, e)}
-                  onTouchEnd={handleTouchEnd}
-                  onTouchMove={handleTouchEnd}
-                  onContextMenu={(e) => handleContextMenu(e, msg)}
-                  className={`max-w-[85%] sm:max-w-md px-3.5 py-2 transition-all cursor-pointer shadow-sm relative select-text ${
-                    isMine
-                      ? 'bg-emerald-600 text-white rounded-2xl rounded-tr-sm shadow-emerald-950/20'
-                      : 'bg-slate-800/90 text-slate-100 rounded-2xl rounded-tl-sm border border-slate-700/50'
-                  }`}
-                >
-                  {/* Quoted Reply Preview inside bubble */}
-                  {msg.replyToId && (
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const elem = document.getElementById(`msg-${msg.replyToId}`);
-                        elem?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                      }}
-                      className={`mb-2 p-2 rounded-r-lg text-xs border-l-2 transition cursor-pointer ${
-                        isMine
-                          ? 'bg-emerald-800/40 border-emerald-300 text-emerald-100'
-                          : 'bg-slate-900/60 border-emerald-500 text-slate-200'
-                      }`}
-                    >
-                      <span className="font-bold text-[10px] block opacity-90">
-                        {msg.replyToSender}
-                      </span>
-                      <span className="truncate block opacity-80 text-[11px]">{msg.replyToText}</span>
-                    </div>
-                  )}
-
-                  {/* Photo Content */}
-                  {msg.type === 'image' && msg.mediaUrl && (
-                    <div className="mb-2 rounded-xl overflow-hidden cursor-pointer">
-                      <img
-                        src={msg.mediaUrl}
-                        alt="Shared media"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPreviewImage(msg.mediaUrl || null);
-                        }}
-                        className="max-h-64 w-full object-cover hover:opacity-95 transition rounded-xl"
-                      />
-                    </div>
-                  )}
-
-                  {/* Audio / Voice Note Content */}
-                  {msg.type === 'audio' && (
-                    <div className="flex items-center gap-3 py-1.5 min-w-[210px] sm:min-w-[240px]">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          playVoiceNote(msg.id, msg.mediaUrl);
-                        }}
-                        className={`w-9 h-9 rounded-full flex items-center justify-center transition cursor-pointer shadow shrink-0 ${
-                          isMine
-                            ? 'bg-emerald-500 text-slate-950 hover:bg-emerald-400 active:scale-95'
-                            : 'bg-emerald-600 text-white hover:bg-emerald-500 active:scale-95'
-                        }`}
-                        title={playingAudioId === msg.id ? 'Pause' : 'Play'}
-                      >
-                        {playingAudioId === msg.id ? (
-                          <Pause className="w-4 h-4 fill-current" />
-                        ) : (
-                          <Play className="w-4 h-4 fill-current ml-0.5" />
-                        )}
-                      </button>
-
-                      {/* Waveform with live playback progress */}
-                      <div
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          playVoiceNote(msg.id, msg.mediaUrl);
-                        }}
-                        className="flex-1 flex items-center gap-1 h-6 cursor-pointer"
-                      >
-                        {[25, 60, 35, 80, 50, 95, 70, 30, 85, 45, 60, 75, 40, 90, 50, 35].map(
-                          (height, bIdx) => {
-                            const barProgress = (bIdx / 16) * 100;
-                            const currentProgress = audioProgress[msg.id] || 0;
-                            const isPassed = playingAudioId === msg.id && currentProgress >= barProgress;
-                            return (
-                              <div
-                                key={bIdx}
-                                style={{ height: `${height}%` }}
-                                className={`w-1 rounded-full transition-all duration-150 ${
-                                  isPassed
-                                    ? isMine
-                                      ? 'bg-white'
-                                      : 'bg-emerald-300'
-                                    : playingAudioId === msg.id
-                                    ? isMine
-                                      ? 'bg-emerald-200/90'
-                                      : 'bg-emerald-500/80'
-                                    : isMine
-                                    ? 'bg-emerald-300/60'
-                                    : 'bg-slate-500'
-                                }`}
-                              />
-                            );
-                          }
-                        )}
-                      </div>
-
-                      <span className="text-[10px] font-mono opacity-85 shrink-0">
-                        {formatAudioTime(msg.audioDuration)}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Text Content with Inline Edit */}
-                  {msg.type === 'text' &&
-                    (editingMessage?.id === msg.id ? (
-                      <div className="space-y-2 min-w-[200px] max-w-full" onClick={(e) => e.stopPropagation()}>
-                        <textarea
-                          value={editText}
-                          onChange={(e) => setEditText(e.target.value)}
-                          className="w-full p-2 bg-slate-900 border border-emerald-400 rounded-xl text-xs text-white focus:outline-none resize-none"
-                          rows={2}
-                          autoFocus
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                              e.preventDefault();
-                              handleSaveEdit();
-                            }
-                            if (e.key === 'Escape') setEditingMessage(null);
-                          }}
-                        />
-                        <div className="flex gap-1.5 justify-end text-[10px]">
-                          <button
-                            type="button"
-                            onClick={() => setEditingMessage(null)}
-                            className="px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer"
-                          >
-                            {t('cancel')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleSaveEdit}
-                            className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold cursor-pointer"
-                          >
-                            {t('save')}
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="whitespace-pre-wrap break-words leading-relaxed text-xs sm:text-sm select-text">
-                        {msg.text}
-                      </p>
-                    ))}
-
-                  {/* Timestamp & Status */}
-                  <div
-                    className={`flex items-center justify-end gap-1 mt-1 text-[10px] ${
-                      isMine ? 'text-emerald-100/75' : 'text-slate-400'
-                    }`}
-                  >
-                    {msg.isEdited && <span className="italic text-[9px] mr-0.5">{t('editedTag')}</span>}
-                    <span>
-                      {new Date(msg.createdAt).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </span>
-                    {isMine && (
-                      <span>
-                        <CheckCheck
-                          className={`w-3.5 h-3.5 ${
-                            msg.readBy.length > 1 ? 'text-sky-300' : 'text-emerald-200'
-                          }`}
-                        />
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Emoji Reactions Pills under bubble */}
-                  {msg.reactions && Object.keys(msg.reactions).length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1.5 -mb-0.5">
-                      {Object.entries(msg.reactions).map(([emoji, uids]) => (
-                        <button
-                          key={emoji}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (user && !ghostUser) toggleMessageReaction(chat.id, msg.id, user.userId, emoji);
-                          }}
-                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium border transition ${
-                            ghostUser ? 'cursor-default opacity-85' : 'cursor-pointer'
-                          } ${
-                            user && !ghostUser && uids.includes(user.userId)
-                              ? 'bg-emerald-500/25 border-emerald-400/60 text-white'
-                              : 'bg-slate-900/70 border-slate-700/60 text-slate-300'
-                          }`}
-                        >
-                          <span>{emoji}</span>
-                          <span>{uids.length}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Seen Avatars & Read Count (Messenger & WhatsApp Style) */}
-                {isMine && seenList.length > 0 && (
-                  <div
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setMessageInfoTarget(msg);
-                    }}
-                    className="flex items-center gap-1.5 mt-1 mr-1 cursor-pointer hover:opacity-90 group/seen"
-                    title={language === 'bn' ? 'কে কে দেখেছে দেখতে ক্লিক করুন' : 'Click to see message info'}
-                  >
-                    <div className="flex items-center -space-x-1">
-                      {seenList.slice(0, 4).map(([uid, details]) => (
-                        <img
-                          key={uid}
-                          src={details.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
-                          alt={details.displayName}
-                          title={`Seen by ${details.displayName}`}
-                          className="w-4 h-4 rounded-full object-cover border border-slate-900 shadow group-hover/seen:scale-110 transition-transform"
-                        />
-                      ))}
-                    </div>
-                    {seenList.length > 4 && (
-                      <span className="text-[9px] text-slate-400 font-mono">
-                        +{seenList.length - 4}
-                      </span>
-                    )}
-                    {chat.type === 'group' && (
-                      <span className="text-[10px] text-sky-300 font-mono font-semibold bg-sky-950/40 border border-sky-500/30 px-1.5 py-0.2 rounded-full">
-                        {seenList.length}/{Math.max(1, chat.participantIds.length - 1)}
-                      </span>
-                    )}
-                  </div>
-                )}
-                </div>
-              </div>
+              <MessageBubble
+                key={msg.id}
+                msg={msg}
+                chat={chat}
+                isMine={isMine}
+                isSameSenderAsPrev={isSameSenderAsPrev}
+                isNewDay={isNewDay}
+                language={language}
+                t={t}
+                user={user}
+                ghostUser={ghostUser}
+                editingMessage={editingMessage}
+                editText={editText}
+                setEditText={setEditText}
+                setEditingMessage={setEditingMessage}
+                handleSaveEdit={handleSaveEdit}
+                playingAudioId={voice.playingAudioId}
+                audioProgress={voice.audioProgress}
+                playVoiceNote={voice.playVoiceNote}
+                formatAudioTime={voice.formatAudioTime}
+                onPreviewImage={(url) => setPreviewImage(url)}
+                onMessageTap={handleMessageTap}
+                onTouchStart={handleTouchStart}
+                onTouchEnd={handleTouchEnd}
+                onContextMenu={handleContextMenu}
+                onToggleReaction={(msgId, emoji) => {
+                  if (user && !ghostUser) toggleMessageReaction(chat.id, msgId, user.userId, emoji);
+                }}
+                onOpenMessageInfo={(target) => setMessageInfoTarget(target)}
+              />
             );
           })
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Floating Long-Press Context Menu (Messenger/WhatsApp Popover) */}
       {activeMenuMessage && menuPosition && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          style={{ top: `${menuPosition.y}px`, left: `${menuPosition.x}px` }}
-          className="fixed z-50 flex flex-col gap-1.5 animate-in zoom-in-95 duration-150"
-        >
-          {/* Reaction Bar - Strictly hidden in Ghost Mode */}
-          {!ghostUser && (
-            <div className="flex items-center gap-2 p-1.5 bg-slate-900/95 border border-slate-700 rounded-full shadow-2xl backdrop-blur-md">
-              {['👍', '❤️', '😂', '😮', '😢', '🙏'].map((emoji) => (
-                <button
-                  key={emoji}
-                  onClick={() => {
-                    if (user) toggleMessageReaction(chat.id, activeMenuMessage.id, user.userId, emoji);
-                    setActiveMenuMessage(null);
-                  }}
-                  className="w-8 h-8 rounded-full hover:bg-slate-800 flex items-center justify-center text-lg hover:scale-125 transition cursor-pointer"
-                >
-                  {emoji}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Action List */}
-          <div className="bg-slate-900/95 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden py-1 min-w-[170px] backdrop-blur-md">
-            {ghostUser ? (
-              /* Ghost Mode Context Actions: Copy Text Only */
-              <>
-                <div className="px-3.5 py-1.5 border-b border-slate-800 text-[10px] text-sky-400 font-semibold flex items-center gap-1.5">
-                  <ShieldAlert className="w-3 h-3" />
-                  <span>{language === 'bn' ? 'রিড-অনলি গোস্ট অডিট' : 'Read-Only Ghost Audit'}</span>
-                </div>
-                {activeMenuMessage.type === 'text' && (
-                  <button
-                    onClick={() => handleCopyText(activeMenuMessage.text)}
-                    className="w-full px-3.5 py-2 text-left text-xs text-white hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer transition font-medium"
-                  >
-                    <Copy className="w-3.5 h-3.5 text-sky-400" />
-                    <span>{t('copyTextAction')}</span>
-                  </button>
-                )}
-              </>
-            ) : (
-              /* Normal User Actions */
-              <>
-                <button
-                  onClick={() => {
-                    setReplyingTo(activeMenuMessage);
-                    setActiveMenuMessage(null);
-                  }}
-                  className="w-full px-3.5 py-2 text-left text-xs text-white hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer transition font-medium"
-                >
-                  <Reply className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>{t('replyAction')}</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setMessageInfoTarget(activeMenuMessage);
-                    setActiveMenuMessage(null);
-                  }}
-                  className="w-full px-3.5 py-2 text-left text-xs text-sky-300 hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer transition font-medium"
-                >
-                  <Info className="w-3.5 h-3.5 text-sky-400" />
-                  <span>{t('messageInfoTitle')}</span>
-                </button>
-
-                {activeMenuMessage.type === 'text' && (
-                  <button
-                    onClick={() => handleCopyText(activeMenuMessage.text)}
-                    className="w-full px-3.5 py-2 text-left text-xs text-white hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer transition font-medium"
-                  >
-                    <Copy className="w-3.5 h-3.5 text-sky-400" />
-                    <span>{t('copyTextAction')}</span>
-                  </button>
-                )}
-
-                {activeMenuMessage.senderId === user?.userId && activeMenuMessage.type === 'text' && (
-                  <button
-                    onClick={() => handleStartEditFromMenu(activeMenuMessage)}
-                    className="w-full px-3.5 py-2 text-left text-xs text-amber-300 hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer transition font-medium"
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                    <span>{t('editAction')}</span>
-                  </button>
-                )}
-
-                {activeMenuMessage.senderId !== user?.userId && (
-                  <button
-                    onClick={() => {
-                      setReportTarget({
-                        targetUserId: activeMenuMessage.senderId,
-                        targetUserName: activeMenuMessage.senderName,
-                        chatId: chat.id,
-                        messageId: activeMenuMessage.id,
-                        messageText: activeMenuMessage.text,
-                      });
-                      setActiveMenuMessage(null);
-                    }}
-                    className="w-full px-3.5 py-2 text-left text-xs text-amber-300 hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer transition font-medium"
-                  >
-                    <Flag className="w-3.5 h-3.5" />
-                    <span>{t('reportMessageAction')}</span>
-                  </button>
-                )}
-
-                {activeMenuMessage.senderId === user?.userId && (
-                  <button
-                    onClick={() => {
-                      setMessageToDelete(activeMenuMessage);
-                      setActiveMenuMessage(null);
-                    }}
-                    className="w-full px-3.5 py-2 text-left text-xs text-red-400 hover:bg-red-500/15 flex items-center gap-2.5 cursor-pointer transition font-medium border-t border-slate-800"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>{t('deleteForEveryoneAction')}</span>
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        </div>
+        <MessageContextMenu
+          message={activeMenuMessage}
+          position={menuPosition}
+          chatId={chat.id}
+          user={user}
+          ghostUser={ghostUser}
+          language={language}
+          t={t}
+          onReact={(msgId, emoji) => {
+            if (user) toggleMessageReaction(chat.id, msgId, user.userId, emoji);
+          }}
+          onReply={(m) => setReplyingTo(m)}
+          onInfo={(m) => setMessageInfoTarget(m)}
+          onCopy={handleCopyText}
+          onEdit={handleStartEditFromMenu}
+          onReport={(m) =>
+            setReportTarget({
+              targetUserId: m.senderId,
+              targetUserName: m.senderName,
+              chatId: chat.id,
+              messageId: m.id,
+              messageText: m.text,
+            })
+          }
+          onDelete={(m) => setMessageToDelete(m)}
+          onClose={() => setActiveMenuMessage(null)}
+        />
       )}
 
-      {/* Floating Quoted Message Bar */}
       {replyingTo && !ghostUser && (
         <div className="px-4 py-2 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs animate-in slide-in-from-bottom-2">
           <div className="border-l-2 border-emerald-500 pl-2.5 min-w-0">
@@ -1439,24 +694,23 @@ export function ChatArea({
         </div>
       )}
 
-      {/* Microphone Permission / Hardware Alert Banner */}
-      {micError && (
+      {voice.micError && (
         <div className="px-4 py-2 bg-amber-500/20 border-t border-amber-500/40 text-amber-200 text-xs flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-            <span className="truncate">{micError}</span>
+            <span className="truncate">{voice.micError}</span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              onClick={() => setShowMicPermissionModal(true)}
+              onClick={() => voice.setShowMicPermissionModal(true)}
               className="text-amber-300 hover:text-white font-medium underline text-xs cursor-pointer"
             >
               {language === 'bn' ? 'কীভাবে চালু করবেন?' : 'How to enable?'}
             </button>
             <button
               type="button"
-              onClick={() => setMicError(null)}
+              onClick={() => voice.setMicError(null)}
               className="text-amber-300 hover:text-white text-xs px-1.5 py-0.5 rounded cursor-pointer"
             >
               ✕
@@ -1465,24 +719,23 @@ export function ChatArea({
         </div>
       )}
 
-      {/* Recording Voice Status Bar */}
-      {isRecording && (
+      {voice.isRecording && (
         <div className="px-4 py-2 bg-red-950/80 border-t border-red-500/40 flex items-center justify-between text-xs animate-pulse">
           <div className="flex items-center gap-2 text-red-400 font-medium">
             <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
-            <span>{t('recordingVoice', { duration: formatAudioTime(recordDuration) })}</span>
+            <span>{t('recordingVoice', { duration: voice.formatAudioTime(voice.recordDuration) })}</span>
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => stopRecording(true)}
+              onClick={() => voice.stopRecording(true)}
               className="px-2.5 py-1 text-slate-400 hover:text-white rounded-lg text-xs cursor-pointer"
             >
               {t('cancelRecording')}
             </button>
             <button
               type="button"
-              onClick={() => stopRecording(false)}
+              onClick={() => voice.stopRecording(false)}
               className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-bold cursor-pointer flex items-center gap-1.5 shadow"
             >
               <Send className="w-3 h-3" />
@@ -1492,7 +745,6 @@ export function ChatArea({
         </div>
       )}
 
-      {/* Bottom Message Input Bar OR Ghost Mode Admin Monitor Bar */}
       {ghostUser ? (
         <div className="p-3 bg-slate-900 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0 shadow-lg">
           <div className="flex items-center gap-2.5 text-sky-400 min-w-0">
@@ -1583,7 +835,6 @@ export function ChatArea({
               <Smile className="w-4 h-4" />
             </button>
 
-            {/* Quick emoji popover */}
             {showEmojiPicker && (
               <div className="absolute right-0 bottom-11 z-30 p-2 bg-slate-900 border border-slate-700 rounded-xl shadow-xl flex gap-1 animate-in fade-in">
                 {['😀', '😂', '😍', '❤️', '👍', '🔥', '🎉', '👏', '🙏'].map((emoji) => (
@@ -1614,16 +865,16 @@ export function ChatArea({
           ) : (
             <button
               type="button"
-              disabled={isSendingVoice}
-              onClick={isRecording ? () => stopRecording(false) : startRecording}
+              disabled={voice.isSendingVoice}
+              onClick={voice.isRecording ? () => voice.stopRecording(false) : voice.startRecording}
               className={`p-2.5 rounded-xl transition cursor-pointer flex items-center justify-center shrink-0 active:scale-[0.98] ${
-                isRecording
+                voice.isRecording
                   ? 'bg-red-600 text-white shadow-xs'
                   : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-750'
-              } ${isSendingVoice ? 'opacity-60 cursor-wait' : ''}`}
-              title={isSendingVoice ? 'Sending voice note...' : t('recordVoiceTooltip')}
+              } ${voice.isSendingVoice ? 'opacity-60 cursor-wait' : ''}`}
+              title={voice.isSendingVoice ? 'Sending voice note...' : t('recordVoiceTooltip')}
             >
-              {isSendingVoice ? (
+              {voice.isSendingVoice ? (
                 <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
               ) : (
                 <Mic className="w-4 h-4" />
@@ -1633,7 +884,6 @@ export function ChatArea({
         </form>
       )}
 
-      {/* Fullscreen Image Preview Modal */}
       {previewImage && (
         <div
           onClick={() => setPreviewImage(null)}
@@ -1647,7 +897,6 @@ export function ChatArea({
         </div>
       )}
 
-      {/* Delete Message Confirmation Modal */}
       {messageToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
           <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-4">
@@ -1678,7 +927,6 @@ export function ChatArea({
         </div>
       )}
 
-      {/* Delete Conversation Confirmation Modal */}
       {showDeleteChatConfirm && !ghostUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
           <div className="w-full max-w-sm bg-slate-900 border border-red-500/30 rounded-2xl p-5 shadow-2xl space-y-4">
@@ -1687,9 +935,7 @@ export function ChatArea({
             </div>
             <div className="text-center">
               <h3 className="text-sm font-bold text-white mb-1">{t('deleteConversationTitle')}</h3>
-              <p className="text-xs text-slate-400">
-                {t('deleteConversationNotice')}
-              </p>
+              <p className="text-xs text-slate-400">{t('deleteConversationNotice')}</p>
             </div>
             <div className="flex gap-2">
               <button
@@ -1711,7 +957,6 @@ export function ChatArea({
         </div>
       )}
 
-      {/* User / Message Report Modal */}
       {reportTarget && (
         <ReportModal
           targetUserId={reportTarget.targetUserId}
@@ -1724,8 +969,7 @@ export function ChatArea({
         />
       )}
 
-      {/* Microphone Permission Help & Recovery Dialog */}
-      {showMicPermissionModal && (
+      {voice.showMicPermissionModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
           <div className="w-full max-w-sm bg-slate-900 border border-slate-700/80 rounded-3xl p-6 shadow-2xl space-y-4">
             <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
@@ -1761,7 +1005,7 @@ export function ChatArea({
             <div className="flex gap-2 pt-1">
               <button
                 type="button"
-                onClick={() => setShowMicPermissionModal(false)}
+                onClick={() => voice.setShowMicPermissionModal(false)}
                 className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer transition"
               >
                 {t('micDismissBtn')}
@@ -1769,8 +1013,8 @@ export function ChatArea({
               <button
                 type="button"
                 onClick={() => {
-                  setShowMicPermissionModal(false);
-                  startRecording();
+                  voice.setShowMicPermissionModal(false);
+                  voice.startRecording();
                 }}
                 className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold cursor-pointer transition shadow flex items-center justify-center gap-1.5"
               >
@@ -1782,7 +1026,6 @@ export function ChatArea({
         </div>
       )}
 
-      {/* Group Info & Management Modal */}
       {showGroupInfoModal && chat.type === 'group' && user && (
         <GroupInfoModal
           isOpen={showGroupInfoModal}
@@ -1794,7 +1037,6 @@ export function ChatArea({
         />
       )}
 
-      {/* Message Info / Read Receipts Modal */}
       {messageInfoTarget && (
         <MessageInfoModal
           isOpen={Boolean(messageInfoTarget)}

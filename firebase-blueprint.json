@@ -2,7 +2,7 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "User profile containing public display info, presence, security, and moderation status",
+      "description": "Private owner/admin user profile containing PII, moderation status, deletion grace period, and activity metrics",
       "type": "object",
       "properties": {
         "userId": {
@@ -17,7 +17,7 @@
         },
         "email": {
           "type": "string",
-          "description": "Email address of the user",
+          "description": "Email address of the user (PII, owner and Super Admin only)",
           "maxLength": 150
         },
         "photoURL": {
@@ -32,8 +32,32 @@
         },
         "username": {
           "type": "string",
-          "description": "Unique username handle",
+          "description": "Unique normalized lowercase username handle",
           "maxLength": 50
+        },
+        "hasAppLockPin": {
+          "type": "boolean",
+          "description": "Whether the user has configured a hashed Quick App-Lock PIN"
+        },
+        "status": {
+          "type": "string",
+          "description": "Account lifecycle status",
+          "enum": ["active", "scheduled_for_deletion", "deleted"]
+        },
+        "deleteRequestedAt": {
+          "type": "string",
+          "description": "ISO timestamp when 15-day deletion grace period started",
+          "maxLength": 64
+        },
+        "deleteScheduledAt": {
+          "type": "string",
+          "description": "ISO timestamp when deletion grace period expires",
+          "maxLength": 64
+        },
+        "themePreference": {
+          "type": "string",
+          "description": "Selected UI theme preference",
+          "enum": ["deep-slate", "minimal-light", "telegram-blue"]
         },
         "role": {
           "type": "string",
@@ -42,16 +66,31 @@
         },
         "isBanned": {
           "type": "boolean",
-          "description": "Whether this user is banned by admin"
+          "description": "Whether this user is suspended by admin"
         },
         "banReason": {
           "type": "string",
-          "description": "Admin justification for user ban",
+          "description": "Admin justification for user suspension",
           "maxLength": 500
         },
         "bannedAt": {
           "type": "string",
-          "description": "Timestamp when user was banned"
+          "description": "ISO timestamp when user was suspended",
+          "maxLength": 64
+        },
+        "bannedBy": {
+          "type": "string",
+          "description": "Admin email who imposed the suspension",
+          "maxLength": 150
+        },
+        "bannedUntil": {
+          "type": "string",
+          "description": "ISO timestamp when temporary suspension expires",
+          "maxLength": 64
+        },
+        "bannedUntilMs": {
+          "type": "number",
+          "description": "Epoch milliseconds when temporary suspension expires for server-time enforcement"
         },
         "warningNotice": {
           "type": "string",
@@ -60,7 +99,8 @@
         },
         "warningIssuedAt": {
           "type": "string",
-          "description": "Timestamp when warning was issued"
+          "description": "Timestamp when warning was issued",
+          "maxLength": 64
         },
         "warningDismissed": {
           "type": "boolean",
@@ -72,18 +112,112 @@
         },
         "lastSeen": {
           "type": "string",
-          "description": "ISO timestamp of last activity"
+          "description": "ISO timestamp of last activity",
+          "maxLength": 64
+        },
+        "lastLoginAt": {
+          "type": "string",
+          "description": "ISO timestamp of last active login",
+          "maxLength": 64
+        },
+        "lastExitAt": {
+          "type": "string",
+          "description": "ISO timestamp of last background/exit event",
+          "maxLength": 64
+        },
+        "totalActiveMinutes": {
+          "type": "number",
+          "description": "Cumulative tracked active minutes"
+        },
+        "dailyActivity": {
+          "type": "object",
+          "description": "Map of YYYY-MM-DD date keys to active minute counts"
         },
         "createdAt": {
           "type": "string",
-          "description": "Account registration timestamp"
+          "description": "Account registration timestamp",
+          "maxLength": 64
         }
       },
       "required": ["userId", "displayName", "email", "createdAt"]
     },
+    "DirectoryUser": {
+      "title": "DirectoryUser",
+      "description": "Non-PII public discovery and presence projection (strictly excludes email and private secrets)",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Unique Firebase Authentication UID",
+          "maxLength": 128
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Public display name",
+          "maxLength": 100
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Avatar URL or preset avatar identifier",
+          "maxLength": 1000
+        },
+        "about": {
+          "type": "string",
+          "description": "Public bio or status line",
+          "maxLength": 200
+        },
+        "username": {
+          "type": "string",
+          "description": "Indexed lowercase username handle",
+          "maxLength": 50
+        },
+        "status": {
+          "type": "string",
+          "description": "Lifecycle status for directory filtering",
+          "enum": ["active", "scheduled_for_deletion", "deleted"]
+        },
+        "isOnline": {
+          "type": "boolean",
+          "description": "Current online indicator"
+        },
+        "lastSeen": {
+          "type": "string",
+          "description": "ISO timestamp of last presence ping",
+          "maxLength": 64
+        },
+        "isBanned": {
+          "type": "boolean",
+          "description": "Whether account is currently suspended"
+        }
+      },
+      "required": ["userId", "displayName", "status"]
+    },
+    "UserSecurityLock": {
+      "title": "UserSecurityLock",
+      "description": "Owner-only salted SHA-256 hash configuration for Quick App-Lock PIN",
+      "type": "object",
+      "properties": {
+        "pinHash": {
+          "type": "string",
+          "description": "Hex-encoded salted SHA-256 hash of Quick App-Lock PIN",
+          "maxLength": 128
+        },
+        "salt": {
+          "type": "string",
+          "description": "Hex-encoded 16-byte random salt",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last PIN update",
+          "maxLength": 64
+        }
+      },
+      "required": ["pinHash", "salt", "updatedAt"]
+    },
     "Chat": {
       "title": "Chat",
-      "description": "Conversation between two users or a group",
+      "description": "Direct or group conversation room between participants",
       "type": "object",
       "properties": {
         "id": {
@@ -101,9 +235,41 @@
           "description": "Group chat name",
           "maxLength": 100
         },
+        "creatorId": {
+          "type": "string",
+          "description": "UID of group creator",
+          "maxLength": 128
+        },
+        "adminIds": {
+          "type": "array",
+          "description": "Bounded list of group admin UIDs"
+        },
+        "groupPhoto": {
+          "type": "string",
+          "description": "Group avatar URL",
+          "maxLength": 1000
+        },
         "participantIds": {
           "type": "array",
-          "description": "List of user UIDs participating in this chat"
+          "description": "Bounded list of user UIDs participating in this chat"
+        },
+        "participantDetails": {
+          "type": "object",
+          "description": "Cached participant display names, avatars, and suspension flags"
+        },
+        "isSuspended": {
+          "type": "boolean",
+          "description": "True when DM is locked due to a suspended participant"
+        },
+        "suspendedUserId": {
+          "type": "string",
+          "description": "UID of suspended participant in DM",
+          "maxLength": 128
+        },
+        "suspendedUserName": {
+          "type": "string",
+          "description": "Display name of suspended participant",
+          "maxLength": 150
         },
         "lastMessageText": {
           "type": "string",
@@ -117,18 +283,21 @@
         },
         "lastMessageTime": {
           "type": "string",
-          "description": "Timestamp of the last message"
+          "description": "ISO timestamp of the last message",
+          "maxLength": 64
         },
         "createdAt": {
           "type": "string",
-          "description": "Creation timestamp of the conversation"
+          "description": "Creation timestamp of the conversation",
+          "maxLength": 64
         },
         "updatedAt": {
           "type": "string",
-          "description": "Last activity timestamp of the conversation"
+          "description": "Last activity timestamp of the conversation",
+          "maxLength": 64
         }
       },
-      "required": ["id", "type", "participantIds", "createdAt", "updatedAt"]
+      "required": ["type", "participantIds", "createdAt", "updatedAt"]
     },
     "Message": {
       "title": "Message",
@@ -172,8 +341,8 @@
         },
         "mediaUrl": {
           "type": "string",
-          "description": "URL or data representation for media attachment",
-          "maxLength": 200000
+          "description": "Compressed data URL or media URL within 1MB Firestore document budget",
+          "maxLength": 950000
         },
         "audioDuration": {
           "type": "number",
@@ -182,6 +351,10 @@
         "readBy": {
           "type": "array",
           "description": "User UIDs who have read this message"
+        },
+        "seenByDetails": {
+          "type": "object",
+          "description": "Map of UID to read receipt metadata (displayName, photoURL, seenAt)"
         },
         "replyToId": {
           "type": "string",
@@ -198,13 +371,28 @@
           "description": "Sender name of quoted message",
           "maxLength": 100
         },
-        "reactions": {
+        "replyToType": {
           "type": "string",
-          "description": "JSON serialized string of emoji reactions mapping"
+          "description": "Message type of quoted message",
+          "enum": ["text", "image", "audio", "file"]
+        },
+        "reactions": {
+          "type": "object",
+          "description": "Map of emoji keys to arrays of reacting user UIDs"
+        },
+        "isEdited": {
+          "type": "boolean",
+          "description": "Whether message text was edited"
+        },
+        "editedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last edit",
+          "maxLength": 64
         },
         "createdAt": {
           "type": "string",
-          "description": "Timestamp of message sending"
+          "description": "ISO timestamp of message sending",
+          "maxLength": 64
         }
       },
       "required": ["id", "chatId", "senderId", "senderName", "type", "createdAt"]
@@ -244,6 +432,26 @@
           "description": "Name of user being reported",
           "maxLength": 100
         },
+        "targetUserEmail": {
+          "type": "string",
+          "description": "Optional email of reported user",
+          "maxLength": 150
+        },
+        "chatId": {
+          "type": "string",
+          "description": "Optional chat ID context",
+          "maxLength": 128
+        },
+        "messageId": {
+          "type": "string",
+          "description": "Optional offending message ID",
+          "maxLength": 128
+        },
+        "messageText": {
+          "type": "string",
+          "description": "Optional snippet of reported message",
+          "maxLength": 1000
+        },
         "reason": {
           "type": "string",
           "description": "Report category",
@@ -259,9 +467,25 @@
           "description": "Review status of the report",
           "enum": ["pending", "resolved", "dismissed"]
         },
+        "resolvedAt": {
+          "type": "string",
+          "description": "ISO timestamp of resolution",
+          "maxLength": 64
+        },
+        "resolvedBy": {
+          "type": "string",
+          "description": "Admin email who resolved the report",
+          "maxLength": 150
+        },
+        "resolutionNotes": {
+          "type": "string",
+          "description": "Admin resolution notes",
+          "maxLength": 1000
+        },
         "createdAt": {
           "type": "string",
-          "description": "Timestamp when report was submitted"
+          "description": "Timestamp when report was submitted",
+          "maxLength": 64
         }
       },
       "required": ["id", "reporterId", "targetUserId", "reason", "details", "status", "createdAt"]
@@ -297,19 +521,30 @@
         },
         "createdAt": {
           "type": "string",
-          "description": "Publish timestamp"
+          "description": "Publish timestamp",
+          "maxLength": 64
         },
         "createdBy": {
           "type": "string",
           "description": "Admin UID who created the broadcast",
           "maxLength": 128
+        },
+        "authorName": {
+          "type": "string",
+          "description": "Display name of the publishing admin",
+          "maxLength": 100
+        },
+        "expiresAt": {
+          "type": "string",
+          "description": "Optional expiration timestamp",
+          "maxLength": 64
         }
       },
       "required": ["id", "title", "content", "type", "active", "createdAt", "createdBy"]
     },
     "AdminLog": {
       "title": "AdminLog",
-      "description": "Audit trail log tracking actions taken by Super Admin",
+      "description": "Immutable audit trail log tracking actions taken by Super Admin",
       "type": "object",
       "properties": {
         "id": {
@@ -332,6 +567,11 @@
           "description": "UID or entity ID targeted by action",
           "maxLength": 128
         },
+        "targetName": {
+          "type": "string",
+          "description": "Display name of target entity",
+          "maxLength": 150
+        },
         "details": {
           "type": "string",
           "description": "Descriptive details of moderation action",
@@ -339,14 +579,15 @@
         },
         "timestamp": {
           "type": "string",
-          "description": "Timestamp when action occurred"
+          "description": "Timestamp when action occurred",
+          "maxLength": 64
         }
       },
       "required": ["id", "adminEmail", "action", "details", "timestamp"]
     },
     "RecoveryRequest": {
       "title": "RecoveryRequest",
-      "description": "Password or account reset request submitted to the Super Admin desk",
+      "description": "Account support ticket submitted to the Super Admin desk (zero plaintext passwords or PINs)",
       "type": "object",
       "properties": {
         "id": {
@@ -356,7 +597,7 @@
         },
         "email": {
           "type": "string",
-          "description": "Registered email address requiring recovery",
+          "description": "Registered email address requiring support",
           "maxLength": 150
         },
         "name": {
@@ -384,57 +625,136 @@
           "description": "Status of recovery ticket",
           "enum": ["pending", "resolved", "dismissed"]
         },
-        "temporaryPassword": {
-          "type": "string",
-          "description": "Temporary password assigned by Super Admin",
-          "maxLength": 100
-        },
-        "temporaryPin": {
-          "type": "string",
-          "description": "Temporary PIN assigned by Super Admin",
-          "maxLength": 10
-        },
         "adminNotes": {
           "type": "string",
           "description": "Internal notes or instructions from admin",
           "maxLength": 1000
         },
+        "resolvedAt": {
+          "type": "string",
+          "description": "ISO timestamp when ticket was resolved",
+          "maxLength": 64
+        },
+        "resolvedBy": {
+          "type": "string",
+          "description": "Admin email who handled the ticket",
+          "maxLength": 150
+        },
         "createdAt": {
           "type": "string",
-          "description": "Submission timestamp"
+          "description": "Submission timestamp",
+          "maxLength": 64
         }
       },
       "required": ["id", "email", "status", "createdAt"]
+    },
+    "AppUpdate": {
+      "title": "AppUpdate",
+      "description": "Signed GitHub Releases Android APK release manifest published by verified Super Admin",
+      "type": "object",
+      "properties": {
+        "versionName": {
+          "type": "string",
+          "description": "Semantic version name (e.g. 1.0.6)",
+          "maxLength": 32
+        },
+        "versionCode": {
+          "type": "number",
+          "description": "Monotonically increasing Android build number (e.g. 106)"
+        },
+        "apkDownloadUrl": {
+          "type": "string",
+          "description": "GitHub Releases APK download URL strictly validated by prefix allowlist",
+          "maxLength": 500,
+          "pattern": "^https://github\\.com/mydatasarverorg-ux/Anomahchat/releases/.*"
+        },
+        "apkSha256": {
+          "type": "string",
+          "description": "Optional 64-character lowercase hex SHA-256 digest of APK",
+          "maxLength": 64,
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "fileSizeBytes": {
+          "type": "number",
+          "description": "APK file size in bytes"
+        },
+        "fileSizeText": {
+          "type": "string",
+          "description": "Human-readable APK file size",
+          "maxLength": 32
+        },
+        "changelogEn": {
+          "type": "string",
+          "description": "English release notes",
+          "maxLength": 4000
+        },
+        "changelogBn": {
+          "type": "string",
+          "description": "Bengali release notes",
+          "maxLength": 4000
+        },
+        "forceUpdate": {
+          "type": "boolean",
+          "description": "Whether update prompt blocks app dismissal"
+        },
+        "minSupportedVersion": {
+          "type": "number",
+          "description": "Minimum supported Android versionCode"
+        },
+        "publishedAt": {
+          "type": "string",
+          "description": "ISO publication timestamp",
+          "maxLength": 64
+        },
+        "publishedBy": {
+          "type": "string",
+          "description": "Verified Super Admin email",
+          "maxLength": 150
+        }
+      },
+      "required": ["versionName", "versionCode", "apkDownloadUrl", "changelogEn", "changelogBn", "publishedAt", "publishedBy"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
-      "description": "Public directory of registered chat users with moderation flags"
+      "description": "Private owner/admin user records with PII, moderation status, and activity stats"
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": "UserSecurityLock",
+      "description": "Owner-only salted SHA-256 Quick App-Lock configuration"
+    },
+    "/directory/{userId}": {
+      "schema": "DirectoryUser",
+      "description": "Non-PII public discovery and presence projection for signed-in users"
     },
     "/chats/{chatId}": {
       "schema": "Chat",
-      "description": "Direct and group chat rooms"
+      "description": "Direct and group chat rooms restricted to participants and Super Admin"
     },
     "/chats/{chatId}/messages/{messageId}": {
       "schema": "Message",
-      "description": "Real-time message stream for a specific chat room"
+      "description": "Real-time message stream inside a chat room gated by parent participantIds"
     },
     "/reports/{reportId}": {
       "schema": "Report",
-      "description": "User abuse and conduct reports reviewable only by Super Admin"
+      "description": "User abuse and conduct reports submittable by signed-in users and reviewable only by Super Admin"
     },
     "/announcements/{announcementId}": {
       "schema": "Announcement",
-      "description": "Public broadcasts published by Super Admin"
+      "description": "Active broadcasts readable by signed-in users and managed by Super Admin"
     },
     "/admin_logs/{logId}": {
       "schema": "AdminLog",
-      "description": "Audit trail entries created by Super Admin operations"
+      "description": "Append-only immutable audit trail entries restricted strictly to verified Super Admin"
     },
     "/recovery_requests/{requestId}": {
       "schema": "RecoveryRequest",
-      "description": "Password and access recovery requests submitted for manual Super Admin assistance"
+      "description": "Account support tickets submittable before sign-in and readable/triaged strictly by verified Super Admin"
+    },
+    "/app_updates/{updateId}": {
+      "schema": "AppUpdate",
+      "description": "APK release metadata publicly readable for update checks and writable strictly by verified Super Admin with GitHub URL allowlist"
     }
   }
 }

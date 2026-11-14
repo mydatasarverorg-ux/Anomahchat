@@ -7,3 +7,7 @@ coverage/
 .env*
 !.env.example
 build-output/
+android/app/src/main/assets/public/
+*.jks
+*.keystore
+public/assets/aistudio/

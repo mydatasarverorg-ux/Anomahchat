@@ -332,10 +332,11 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
                   <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
                     {availableUsers
                       .filter((u) => {
-                        const q = userSearchQuery.toLowerCase();
+                        const q = userSearchQuery.toLowerCase().replace(/^@/, '');
                         return (
                           u.displayName?.toLowerCase().includes(q) ||
-                          u.email?.toLowerCase().includes(q)
+                          u.username?.toLowerCase().includes(q) ||
+                          u.about?.toLowerCase().includes(q)
                         );
                       })
                       .map((u) => {
@@ -365,7 +366,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
                                   {u.displayName}
                                 </span>
                                 <span className="block text-[10px] text-slate-400 font-mono">
-                                  {u.email}
+                                  {u.username ? `@${u.username}` : (u.about || '')}
                                 </span>
                               </div>
                             </div>

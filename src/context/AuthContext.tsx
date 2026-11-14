@@ -1,23 +1,25 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
   signOut,
   onAuthStateChanged,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
+  sendEmailVerification,
   updatePassword,
   updateProfile as updateFirebaseProfile,
   type User as FirebaseUser,
 } from 'firebase/auth';
-import { doc, getDoc, updateDoc, onSnapshot, deleteField } from 'firebase/firestore';
+import { doc, updateDoc, onSnapshot, deleteField } from 'firebase/firestore';
 import { auth, googleProvider, db } from '../firebase/config';
 import {
   syncUserProfile,
+  syncDirectoryEntry,
   setPresence,
-  verifySecretPin,
+  saveAppLockPin,
+  removeAppLockPin,
+  verifyAppLockPin,
   scheduleAccountDeletion,
   restoreAccount,
   checkAccountDeletionStatus,
@@ -34,12 +36,17 @@ interface AuthContextType {
   theme: ThemeMode;
   setTheme: (theme: ThemeMode) => void;
   deletionNotice: { daysRemaining: number } | null;
+  isAppLocked: boolean;
+  unlockAppWithPin: (pin: string) => Promise<{ success: boolean; error?: string }>;
+  setAppLockPin: (pin: string) => Promise<void>;
+  clearAppLockPin: () => Promise<void>;
+  lockAppNow: () => void;
+  resendVerificationEmail: () => Promise<void>;
   recoverAccount: () => Promise<void>;
   requestAccountDeletion: () => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signUpWithEmail: (email: string, pass: string, name: string, username?: string) => Promise<void>;
   signInWithEmail: (email: string, pass: string) => Promise<void>;
-  loginWithSecretPin: (identifier: string, pin: string) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
   changePassword: (newPass: string) => Promise<void>;
   signOutUser: () => Promise<void>;
@@ -47,13 +54,38 @@ interface AuthContextType {
     displayName: string,
     about: string,
     photoURL: string,
-    username?: string,
-    secretPin?: string
+    username?: string
   ) => Promise<void>;
   clearAuthError: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const SESSION_UNLOCK_PREFIX = 'anomah_pin_unlocked_';
+
+function markPinSessionUnlocked(uid: string) {
+  try {
+    sessionStorage.setItem(`${SESSION_UNLOCK_PREFIX}${uid}`, '1');
+  } catch {
+    // ignore storage limits
+  }
+}
+
+function clearPinSessionUnlocked(uid: string) {
+  try {
+    sessionStorage.removeItem(`${SESSION_UNLOCK_PREFIX}${uid}`);
+  } catch {
+    // ignore
+  }
+}
+
+function isPinSessionUnlocked(uid: string): boolean {
+  try {
+    return sessionStorage.getItem(`${SESSION_UNLOCK_PREFIX}${uid}`) === '1';
+  } catch {
+    return false;
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -61,6 +93,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [deletionNotice, setDeletionNotice] = useState<{ daysRemaining: number } | null>(null);
+  const [isAppLocked, setIsAppLocked] = useState(false);
+
+  // Prevents locking the user out immediately during an explicit login/signup action
+  const explicitAuthInProgressRef = useRef(false);
 
   const [theme, setThemeState] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem('anomah_chat_theme') as ThemeMode;
@@ -91,16 +127,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [theme]);
 
-  // Presence & Heartbeat tracking
+  // Clean up any legacy insecure localStorage keys from older builds
   useEffect(() => {
-    if (!user?.userId) return;
+    try {
+      localStorage.removeItem('anomah_active_pin_user');
+    } catch {
+      // ignore
+    }
+  }, []);
 
-    // Report online on login / focus
+  // Presence & Heartbeat tracking (only while unlocked)
+  useEffect(() => {
+    if (!user?.userId || isAppLocked) return;
+
     setPresence(user.userId, true);
 
     const heartbeat = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        // Record 1 active minute
         setPresence(user.userId, true, 1);
       }
     }, 60000);
@@ -127,35 +170,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('pagehide', handleTeardown);
       window.removeEventListener('beforeunload', handleTeardown);
     };
-  }, [user?.userId]);
+  }, [user?.userId, isAppLocked]);
 
-  // Live synchronization of current user profile (ban status, unban, warnings, details)
+  // Live synchronization of current user profile (ban status, unban, warnings, app lock)
   useEffect(() => {
     if (!user?.userId) return;
 
     const userDocRef = doc(db, 'users', user.userId);
-    const unsubscribe = onSnapshot(userDocRef, (snap) => {
-      if (snap.exists()) {
-        const fresh = snap.data() as UserProfile;
-        setUser((prev) => {
-          if (!prev) return fresh;
-          if (
-            prev.isBanned !== fresh.isBanned ||
-            prev.banReason !== fresh.banReason ||
-            prev.bannedUntil !== fresh.bannedUntil ||
-            prev.warningNotice !== fresh.warningNotice ||
-            prev.displayName !== fresh.displayName ||
-            prev.photoURL !== fresh.photoURL ||
-            prev.secretPin !== fresh.secretPin
-          ) {
-            return { ...prev, ...fresh };
-          }
-          return prev;
-        });
+    const unsubscribe = onSnapshot(
+      userDocRef,
+      (snap) => {
+        if (snap.exists()) {
+          const fresh = snap.data() as UserProfile;
+          setUser((prev) => {
+            if (!prev) return fresh;
+            if (
+              prev.isBanned !== fresh.isBanned ||
+              prev.banReason !== fresh.banReason ||
+              prev.bannedUntil !== fresh.bannedUntil ||
+              prev.warningNotice !== fresh.warningNotice ||
+              prev.displayName !== fresh.displayName ||
+              prev.photoURL !== fresh.photoURL ||
+              prev.username !== fresh.username ||
+              prev.hasAppLockPin !== fresh.hasAppLockPin
+            ) {
+              return { ...prev, ...fresh };
+            }
+            return prev;
+          });
+        }
+      },
+      (error) => {
+        console.warn('User profile sync subscription notice:', error);
       }
-    }, (error) => {
-      console.warn('User profile sync subscription notice:', error);
-    });
+    );
 
     return () => unsubscribe();
   }, [user?.userId]);
@@ -177,37 +225,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    // Check if returning from redirect sign-in on Android mobile APK
-    getRedirectResult(auth)
-      .then(async (res) => {
-        if (res?.user) {
-          localStorage.removeItem('anomah_active_pin_user');
-          try {
-            const profile = await syncUserProfile({
-              uid: res.user.uid,
-              displayName: res.user.displayName,
-              email: res.user.email,
-              photoURL: res.user.photoURL,
-            });
-            if (verifyDeletionStatus(profile)) {
-              setUser(profile);
-            } else {
-              await signOut(auth);
-            }
-          } catch (err) {
-            console.error('Failed to sync profile after redirect:', err);
-          }
-        }
-      })
-      .catch((err) => {
-        console.warn('Redirect sign-in check notice:', err);
-      });
-
-    // Listen to Firebase Auth state
     const unsubscribe = onAuthStateChanged(auth, async (current) => {
       setFirebaseUser(current);
       if (current) {
-        localStorage.removeItem('anomah_active_pin_user');
         try {
           const profile = await syncUserProfile({
             uid: current.uid,
@@ -216,38 +236,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             photoURL: current.photoURL,
           });
           if (verifyDeletionStatus(profile)) {
+            if (explicitAuthInProgressRef.current) {
+              markPinSessionUnlocked(profile.userId);
+              setIsAppLocked(false);
+            } else if (profile.hasAppLockPin && !isPinSessionUnlocked(profile.userId)) {
+              setIsAppLocked(true);
+            } else {
+              setIsAppLocked(false);
+            }
             setUser(profile);
           } else {
             await signOut(auth);
+            setIsAppLocked(false);
           }
         } catch (err) {
           console.error('Failed to sync profile on state change:', err);
         }
       } else {
-        // If not Firebase auth, check if Secret PIN session is saved locally
-        const pinSession = localStorage.getItem('anomah_active_pin_user');
-        if (pinSession) {
-          try {
-            const parsed = JSON.parse(pinSession) as UserProfile;
-            const snap = await getDoc(doc(db, 'users', parsed.userId));
-            if (snap.exists()) {
-              const fresh = snap.data() as UserProfile;
-              if (verifyDeletionStatus(fresh)) {
-                setUser(fresh);
-              } else {
-                localStorage.removeItem('anomah_active_pin_user');
-                setUser(null);
-              }
-            } else {
-              setUser(parsed);
-            }
-          } catch {
-            localStorage.removeItem('anomah_active_pin_user');
-            setUser(null);
-          }
-        } else {
-          setUser(null);
-        }
+        setUser(null);
+        setDeletionNotice(null);
+        setIsAppLocked(false);
       }
       setLoading(false);
     });
@@ -260,11 +268,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInWithGoogle = async () => {
     setLoading(true);
     setAuthError(null);
-    localStorage.removeItem('anomah_active_pin_user');
+    explicitAuthInProgressRef.current = true;
     try {
       const res = await signInWithPopup(auth, googleProvider);
       if (res.user) {
-        localStorage.removeItem('anomah_active_pin_user');
+        markPinSessionUnlocked(res.user.uid);
+        setIsAppLocked(false);
         const profile = await syncUserProfile({
           uid: res.user.uid,
           displayName: res.user.displayName,
@@ -282,16 +291,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAuthError('Google sign-in was cancelled. Please tap "Continue with Google" to try again.');
       } else if (msg.includes('unauthorized-domain')) {
         setAuthError(
-          'This domain is not authorized in Firebase Console yet. Please ensure your domain is added under Authentication > Settings > Authorized domains.'
+          'This domain is not authorized in Firebase Console yet. Please add your domain (e.g. "mydatasarverorg-ux.github.io") under Authentication > Settings > Authorized domains.'
         );
       } else {
         setAuthError(
           err instanceof Error
             ? err.message
-            : 'Unable to complete Google sign-in. Please try again or use PIN/Email login.'
+            : 'Unable to complete Google sign-in. Please try again or use Email login.'
         );
       }
     } finally {
+      explicitAuthInProgressRef.current = false;
       setLoading(false);
     }
   };
@@ -299,29 +309,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUpWithEmail = async (email: string, pass: string, name: string, username?: string) => {
     setLoading(true);
     setAuthError(null);
-    localStorage.removeItem('anomah_active_pin_user');
+    explicitAuthInProgressRef.current = true;
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim().slice(0, 100);
     const cleanUsername = username ? username.trim().toLowerCase().replace(/^@/, '') : undefined;
 
     try {
-      if (cleanUsername) {
-        if (cleanUsername.length < 3) {
-          const errText = 'Username must be at least 3 characters.';
-          setAuthError(errText);
-          throw new Error(errText);
-        }
-        const available = await isUsernameAvailable(cleanUsername);
-        if (!available) {
-          const errText = 'This username is already taken. Please choose another username.';
-          setAuthError(errText);
-          throw new Error(errText);
-        }
-      }
-
       const res = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
       if (res.user) {
-        localStorage.removeItem('anomah_active_pin_user');
+        markPinSessionUnlocked(res.user.uid);
+        setIsAppLocked(false);
         await updateFirebaseProfile(res.user, { displayName: cleanName });
         const profile = await syncUserProfile({
           uid: res.user.uid,
@@ -329,9 +326,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: cleanEmail,
           photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanName)}`,
         });
-        if (cleanUsername) {
-          await updateDoc(doc(db, 'users', res.user.uid), { username: cleanUsername });
-          profile.username = cleanUsername;
+
+        // Send verification link non-blockingly so Super Admin / standard accounts can verify email
+        sendEmailVerification(res.user).catch(() => {});
+
+        // Check username availability now that the user is signed in
+        if (cleanUsername && cleanUsername.length >= 3) {
+          const available = await isUsernameAvailable(cleanUsername, res.user.uid);
+          if (available) {
+            await updateDoc(doc(db, 'users', res.user.uid), { username: cleanUsername });
+            await syncDirectoryEntry(res.user.uid, { username: cleanUsername });
+            profile.username = cleanUsername;
+          }
         }
         setUser(profile);
         setPresence(res.user.uid, true);
@@ -350,6 +356,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       throw err;
     } finally {
+      explicitAuthInProgressRef.current = false;
       setLoading(false);
     }
   };
@@ -357,13 +364,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInWithEmail = async (email: string, pass: string) => {
     setLoading(true);
     setAuthError(null);
-    localStorage.removeItem('anomah_active_pin_user');
+    explicitAuthInProgressRef.current = true;
     const cleanEmail = email.trim().toLowerCase();
 
     try {
       const res = await signInWithEmailAndPassword(auth, cleanEmail, pass);
       if (res.user) {
-        localStorage.removeItem('anomah_active_pin_user');
+        markPinSessionUnlocked(res.user.uid);
+        setIsAppLocked(false);
         const profile = await syncUserProfile({
           uid: res.user.uid,
           displayName: res.user.displayName,
@@ -385,28 +393,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       throw err;
     } finally {
+      explicitAuthInProgressRef.current = false;
       setLoading(false);
     }
   };
 
-  const loginWithSecretPin = async (identifier: string, pin: string) => {
-    setLoading(true);
-    setAuthError(null);
-    try {
-      const res = await verifySecretPin(identifier, pin);
-      if (!res.success || !res.user) {
-        throw new Error(res.error || 'Invalid credentials');
-      }
-      setUser(res.user);
-      localStorage.setItem('anomah_active_pin_user', JSON.stringify(res.user));
-      setPresence(res.user.userId, true);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setAuthError(msg);
-      throw err;
-    } finally {
-      setLoading(false);
+  const resendVerificationEmail = async () => {
+    if (!auth.currentUser) {
+      throw new Error('No active signed-in session.');
     }
+    await auth.currentUser.reload().catch(() => {});
+    setFirebaseUser(auth.currentUser);
+    if (auth.currentUser.emailVerified) {
+      return;
+    }
+    await sendEmailVerification(auth.currentUser);
+  };
+
+  const unlockAppWithPin = async (pin: string) => {
+    if (!user) return { success: false, error: 'No active session.' };
+    const result = await verifyAppLockPin(user.userId, pin);
+    if (result.success) {
+      markPinSessionUnlocked(user.userId);
+      setIsAppLocked(false);
+    }
+    return result;
+  };
+
+  const setAppLockPin = async (pin: string) => {
+    if (!user) throw new Error('Not signed in.');
+    await saveAppLockPin(user.userId, pin);
+    markPinSessionUnlocked(user.userId);
+    setUser((prev) => (prev ? { ...prev, hasAppLockPin: true } : prev));
+  };
+
+  const clearAppLockPin = async () => {
+    if (!user) throw new Error('Not signed in.');
+    await removeAppLockPin(user.userId);
+    markPinSessionUnlocked(user.userId);
+    setIsAppLocked(false);
+    setUser((prev) => (prev ? { ...prev, hasAppLockPin: false } : prev));
+  };
+
+  const lockAppNow = () => {
+    if (!user?.hasAppLockPin) return;
+    clearPinSessionUnlocked(user.userId);
+    setIsAppLocked(true);
   };
 
   const sendPasswordReset = async (email: string) => {
@@ -448,13 +480,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOutUser = async () => {
     if (user) {
+      clearPinSessionUnlocked(user.userId);
       await setPresence(user.userId, false);
     }
-    localStorage.removeItem('anomah_active_pin_user');
     await signOut(auth);
     setUser(null);
     setFirebaseUser(null);
     setDeletionNotice(null);
+    setIsAppLocked(false);
   };
 
   const requestAccountDeletion = async () => {
@@ -478,27 +511,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     setUser(updated);
     setDeletionNotice(null);
-    if (localStorage.getItem('anomah_active_pin_user')) {
-      localStorage.setItem('anomah_active_pin_user', JSON.stringify(updated));
-    }
   };
 
   const updateProfile = async (
     displayName: string,
     about: string,
     photoURL: string,
-    username?: string,
-    secretPin?: string
+    username?: string
   ) => {
     if (!user) return;
     const userRef = doc(db, 'users', user.userId);
-    
-    // Determine username update
-    const resolvedUsername = username !== undefined
-      ? (username.trim() ? username.trim().toLowerCase().replace(/^@/, '') : deleteField())
-      : (user.username || undefined);
 
-    // If changing username, verify it is not already taken by another account
+    const resolvedUsername =
+      username !== undefined
+        ? username.trim()
+          ? username.trim().toLowerCase().replace(/^@/, '')
+          : deleteField()
+        : user.username || undefined;
+
     if (typeof resolvedUsername === 'string' && resolvedUsername !== user.username) {
       if (resolvedUsername.length < 3) {
         throw new Error('Username must be at least 3 characters.');
@@ -509,39 +539,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Determine secretPin update
-    // If explicitly provided: non-empty string sets new PIN, empty string deletes PIN
-    // If undefined: preserve existing user.secretPin
-    const resolvedPin = secretPin !== undefined
-      ? (secretPin.trim() ? secretPin.trim() : deleteField())
-      : (user.secretPin || undefined);
+    const cleanDisplayName = displayName.trim().slice(0, 100);
+    const cleanAbout = about.trim().slice(0, 200);
+    const cleanPhoto = photoURL.trim().slice(0, 1000);
 
     const docUpdates: Record<string, unknown> = {
-      displayName: displayName.trim().slice(0, 100),
-      about: about.trim().slice(0, 200),
-      photoURL: photoURL.trim().slice(0, 1000),
+      displayName: cleanDisplayName,
+      about: cleanAbout,
+      photoURL: cleanPhoto,
     };
     if (resolvedUsername !== undefined) {
       docUpdates.username = resolvedUsername;
     }
-    if (resolvedPin !== undefined) {
-      docUpdates.secretPin = resolvedPin;
-    }
 
     await updateDoc(userRef, docUpdates);
 
+    const dirUpdates: Record<string, unknown> = {
+      userId: user.userId,
+      displayName: cleanDisplayName,
+      about: cleanAbout,
+      photoURL: cleanPhoto,
+    };
+    if (resolvedUsername !== undefined) {
+      dirUpdates.username = resolvedUsername;
+    }
+    await syncDirectoryEntry(user.userId, dirUpdates);
+
     const merged: UserProfile = {
       ...user,
-      displayName: displayName.trim().slice(0, 100),
-      about: about.trim().slice(0, 200),
-      photoURL: photoURL.trim().slice(0, 1000),
+      displayName: cleanDisplayName,
+      about: cleanAbout,
+      photoURL: cleanPhoto,
       username: typeof resolvedUsername === 'string' ? resolvedUsername : undefined,
-      secretPin: typeof resolvedPin === 'string' ? resolvedPin : undefined,
     };
     setUser(merged);
-    if (localStorage.getItem('anomah_active_pin_user')) {
-      localStorage.setItem('anomah_active_pin_user', JSON.stringify(merged));
-    }
   };
 
   return (
@@ -554,12 +585,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         theme,
         setTheme,
         deletionNotice,
+        isAppLocked,
+        unlockAppWithPin,
+        setAppLockPin,
+        clearAppLockPin,
+        lockAppNow,
+        resendVerificationEmail,
         recoverAccount,
         requestAccountDeletion,
         signInWithGoogle,
         signUpWithEmail,
         signInWithEmail,
-        loginWithSecretPin,
         sendPasswordReset,
         changePassword,
         signOutUser,

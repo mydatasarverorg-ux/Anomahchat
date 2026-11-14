@@ -7,9 +7,7 @@ export interface UserProfile {
   photoURL: string;
   about?: string;
   username?: string;
-  secretPin?: string;
-  pinFailedAttempts?: number;
-  pinLockedUntil?: string;
+  hasAppLockPin?: boolean;
   isOnline?: boolean;
   lastSeen?: string;
   lastLoginAt?: string;
@@ -30,9 +28,28 @@ export interface UserProfile {
   bannedAt?: string;
   bannedBy?: string;
   bannedUntil?: string; // ISO timestamp when temporary suspension expires
+  bannedUntilMs?: number | null; // Epoch ms used for server-time expiry enforcement in Firestore Rules
   warningNotice?: string;
   warningIssuedAt?: string;
   warningDismissed?: boolean;
+}
+
+export interface DirectoryUser {
+  userId: string;
+  displayName: string;
+  photoURL: string;
+  about?: string;
+  username?: string;
+  isOnline?: boolean;
+  lastSeen?: string;
+  status: 'active' | 'scheduled_for_deletion' | 'deleted';
+  isBanned?: boolean;
+}
+
+export interface UserSecurityLock {
+  pinHash: string;
+  salt: string;
+  updatedAt: string;
 }
 
 export interface PasswordRecoveryRequest {
@@ -43,8 +60,6 @@ export interface PasswordRecoveryRequest {
   contactPhone?: string;
   details?: string;
   status: 'pending' | 'resolved' | 'dismissed';
-  temporaryPassword?: string;
-  temporaryPin?: string;
   adminNotes?: string;
   resolvedAt?: string;
   resolvedBy?: string;
@@ -109,6 +124,7 @@ export interface AdminAuditLog {
     | 'resolve_recovery'
     | 'dismiss_recovery'
     | 'reset_pin'
+    | 'clear_app_lock'
     | 'create_announcement'
     | 'toggle_announcement'
     | 'delete_announcement';
@@ -157,7 +173,7 @@ export interface ChatRoom {
   participantDetails?: Record<string, {
     displayName: string;
     photoURL?: string;
-    email: string;
+    email?: string;
     isBanned?: boolean;
     status?: 'active' | 'scheduled_for_deletion' | 'deleted';
   }>;
@@ -181,4 +197,3 @@ export interface CallSession {
   isVideoOff: boolean;
   durationSeconds: number;
 }
-

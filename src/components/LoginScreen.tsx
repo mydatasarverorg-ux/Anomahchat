@@ -5,7 +5,6 @@ import {
   MessageSquare,
   Globe,
   Shield,
-  Sparkles,
   CheckCircle2,
   AlertCircle,
   ArrowRight,
@@ -16,44 +15,32 @@ import {
   Eye,
   EyeOff,
   KeyRound,
-  AtSign,
   X,
   Languages,
-  Phone,
-  FileQuestion,
-  Search,
 } from 'lucide-react';
-import { submitRecoveryRequest, checkUserRecoveryRequests } from '../services/adminService';
-import type { PasswordRecoveryRequest } from '../types/chat';
+import { submitRecoveryRequest } from '../services/adminService';
 
 export function LoginScreen() {
   const {
     signInWithGoogle,
     signUpWithEmail,
     signInWithEmail,
-    loginWithSecretPin,
     sendPasswordReset,
     loading,
     authError,
     clearAuthError,
   } = useAuth();
 
-  const { language, toggleLanguage, setLanguage, t } = useLanguage();
+  const { language, setLanguage, t } = useLanguage();
 
-  // Mode: 'email-signin' | 'email-signup' | 'pin-login'
-  const [authMode, setAuthMode] = useState<'email-signin' | 'email-signup' | 'pin-login'>('email-signin');
+  // Mode: 'email-signin' | 'email-signup'
+  const [authMode, setAuthMode] = useState<'email-signin' | 'email-signup'>('email-signin');
 
   // Form Fields
   const [name, setName] = useState('');
-  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-
-  // PIN Form Fields
-  const [pinIdentifier, setPinIdentifier] = useState('');
-  const [enteredPin, setEnteredPin] = useState('');
-  const [showPin, setShowPin] = useState(false);
 
   // Status & Notifications
   const [localError, setLocalError] = useState<string | null>(null);
@@ -62,15 +49,13 @@ export function LoginScreen() {
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
 
-  // Recovery Desk Form Fields
-  const [recoveryTab, setRecoveryTab] = useState<'email' | 'request' | 'status'>('email');
+  // Recovery Support Desk Form Fields
+  const [recoveryTab, setRecoveryTab] = useState<'email' | 'request'>('email');
   const [recoveryName, setRecoveryName] = useState('');
   const [recoveryUsername, setRecoveryUsername] = useState('');
   const [recoveryPhone, setRecoveryPhone] = useState('');
   const [recoveryDetails, setRecoveryDetails] = useState('');
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
-  const [userRequests, setUserRequests] = useState<PasswordRecoveryRequest[]>([]);
-  const [checkedStatus, setCheckedStatus] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,13 +64,7 @@ export function LoginScreen() {
     setInfoMessage(null);
 
     try {
-      if (authMode === 'pin-login') {
-        if (!pinIdentifier.trim() || !enteredPin.trim()) {
-          setLocalError(language === 'bn' ? 'ইউজারনেম বা ইমেইল এবং পিন লিখুন।' : 'Please enter both your Username/Email and Secret PIN.');
-          return;
-        }
-        await loginWithSecretPin(pinIdentifier.trim(), enteredPin.trim());
-      } else if (authMode === 'email-signup') {
+      if (authMode === 'email-signup') {
         if (!name.trim()) {
           setLocalError(language === 'bn' ? 'আপনার পুরো নাম লিখুন।' : 'Please enter your full name or nickname.');
           return;
@@ -98,9 +77,8 @@ export function LoginScreen() {
           setLocalError(t('passwordMinLengthError'));
           return;
         }
-        await signUpWithEmail(email, password, name, username);
+        await signUpWithEmail(email, password, name);
       } else {
-        // email-signin
         if (!email.trim() || !password.trim()) {
           setLocalError(language === 'bn' ? 'ইমেইল ও পাসওয়ার্ড লিখুন।' : 'Please enter your email and password.');
           return;
@@ -215,8 +193,7 @@ export function LoginScreen() {
 
         {/* Right Authentication Form */}
         <div className="p-6 md:p-8 flex flex-col justify-center">
-          
-          {/* Main Mode Selector: Email vs Secret PIN */}
+          {/* Sign In / Create Account Switcher */}
           <div className="grid grid-cols-2 p-1.5 bg-slate-800/90 rounded-2xl mb-4 border border-slate-700/70">
             <button
               type="button"
@@ -226,68 +203,31 @@ export function LoginScreen() {
                 clearAuthError();
               }}
               className={`py-2 text-xs font-semibold rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5 ${
-                authMode === 'email-signin' || authMode === 'email-signup'
+                authMode === 'email-signin'
                   ? 'bg-emerald-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Mail className="w-3.5 h-3.5" />
-              <span>Email & Password</span>
+              <span>{t('loginTabEmailSignIn')}</span>
             </button>
             <button
               type="button"
               onClick={() => {
-                setAuthMode('pin-login');
+                setAuthMode('email-signup');
                 setLocalError(null);
                 clearAuthError();
               }}
               className={`py-2 text-xs font-semibold rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5 ${
-                authMode === 'pin-login'
+                authMode === 'email-signup'
                   ? 'bg-emerald-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <KeyRound className="w-3.5 h-3.5" />
-              <span>{t('loginTabPin')}</span>
+              <User className="w-3.5 h-3.5" />
+              <span>{t('loginTabEmailSignUp')}</span>
             </button>
           </div>
-
-          {/* Sub-selector for Email (Sign In vs Create Account) */}
-          {(authMode === 'email-signin' || authMode === 'email-signup') && (
-            <div className="flex items-center justify-center gap-4 mb-3 text-xs">
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('email-signin');
-                  setLocalError(null);
-                  clearAuthError();
-                }}
-                className={`font-semibold pb-1 cursor-pointer transition border-b-2 ${
-                  authMode === 'email-signin'
-                    ? 'border-emerald-400 text-emerald-400'
-                    : 'border-transparent text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {t('loginTabEmailSignIn')}
-              </button>
-              <span className="text-slate-600">•</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('email-signup');
-                  setLocalError(null);
-                  clearAuthError();
-                }}
-                className={`font-semibold pb-1 cursor-pointer transition border-b-2 ${
-                  authMode === 'email-signup'
-                    ? 'border-emerald-400 text-emerald-400'
-                    : 'border-transparent text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {t('loginTabEmailSignUp')}
-              </button>
-            </div>
-          )}
 
           {/* Notifications */}
           {infoMessage && (
@@ -316,133 +256,80 @@ export function LoginScreen() {
             </div>
           )}
 
-          {/* Form */}
+          {/* Email Auth Form */}
           <form onSubmit={handleSubmit} className="space-y-3 mb-3">
-            {authMode === 'pin-login' ? (
-              /* PIN Login Fields */
-              <>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                    {t('loginPinIdentifierLabel')}
-                  </label>
-                  <div className="relative">
-                    <AtSign className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      required
-                      placeholder={t('loginPinIdentifierPlaceholder')}
-                      value={pinIdentifier}
-                      onChange={(e) => setPinIdentifier(e.target.value)}
-                      className="w-full pl-10 pr-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
-                    />
-                  </div>
+            {authMode === 'email-signup' && (
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  {t('loginFullNameLabel')}
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    placeholder={language === 'bn' ? 'যেমন: আপনার নাম' : 'e.g. John Doe'}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full pl-10 pr-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+                    maxLength={100}
+                  />
                 </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                    {t('loginPinLabel')}
-                  </label>
-                  <div className="relative">
-                    <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type={showPin ? 'text' : 'password'}
-                      required
-                      placeholder="••••"
-                      value={enteredPin}
-                      onChange={(e) => setEnteredPin(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
-                      className="w-full pl-10 pr-10 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono tracking-widest transition"
-                      maxLength={6}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPin(!showPin)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer p-0.5"
-                    >
-                      {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  <span className="text-[10px] text-slate-400 mt-1 block">
-                    {t('secretPinHelpText')}
-                  </span>
-                </div>
-              </>
-            ) : (
-              /* Email Auth Fields */
-              <>
-                {authMode === 'email-signup' && (
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                      {t('loginFullNameLabel')}
-                    </label>
-                    <div className="relative">
-                      <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        required
-                        placeholder={language === 'bn' ? 'যেমন: আপনার নাম' : 'e.g. John Doe'}
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        className="w-full pl-10 pr-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
-                        maxLength={100}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                    {t('loginEmailLabel')}
-                  </label>
-                  <div className="relative">
-                    <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="email"
-                      required
-                      placeholder="name@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full pl-10 pr-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] font-semibold text-slate-300">
-                      {t('loginPasswordLabel')} {authMode === 'email-signup' && <span className="text-slate-400 font-normal">(min 6)</span>}
-                    </label>
-                    {authMode === 'email-signin' && (
-                      <button
-                        type="button"
-                        onClick={() => setShowForgotModal(true)}
-                        className="text-[10px] text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
-                      >
-                        {t('loginForgotPasswordBtn')}
-                      </button>
-                    )}
-                  </div>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      required
-                      placeholder="••••••••"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full pl-10 pr-10 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
-                      minLength={6}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer p-0.5"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-              </>
+              </div>
             )}
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                {t('loginEmailLabel')}
+              </label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="email"
+                  required
+                  placeholder="name@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full pl-10 pr-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[11px] font-semibold text-slate-300">
+                  {t('loginPasswordLabel')} {authMode === 'email-signup' && <span className="text-slate-400 font-normal">(min 6)</span>}
+                </label>
+                {authMode === 'email-signin' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotModal(true)}
+                    className="text-[10px] text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
+                  >
+                    {t('loginForgotPasswordBtn')}
+                  </button>
+                )}
+              </div>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full pl-10 pr-10 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+                  minLength={6}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer p-0.5"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
 
             {/* Submit Button */}
             <button
@@ -458,11 +345,7 @@ export function LoginScreen() {
               ) : (
                 <>
                   <span>
-                    {authMode === 'pin-login'
-                      ? t('loginWithPinBtn')
-                      : authMode === 'email-signup'
-                      ? t('loginSignUpBtn')
-                      : t('loginSignInBtn')}
+                    {authMode === 'email-signup' ? t('loginSignUpBtn') : t('loginSignInBtn')}
                   </span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </>
@@ -483,8 +366,6 @@ export function LoginScreen() {
           <button
             type="button"
             onClick={() => {
-              setPinIdentifier('');
-              setEnteredPin('');
               setPassword('');
               clearAuthError();
               signInWithGoogle();
@@ -515,16 +396,12 @@ export function LoginScreen() {
         </div>
       </div>
 
-      {/* Password Recovery Desk Modal */}
+      {/* Password Reset & Admin Support Modal */}
       {showForgotModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 animate-in fade-in select-none">
           <div className="bg-slate-900 border border-slate-700/80 rounded-3xl w-full max-w-md p-5 sm:p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button
-              onClick={() => {
-                setShowForgotModal(false);
-                setCheckedStatus(false);
-                setUserRequests([]);
-              }}
+              onClick={() => setShowForgotModal(false)}
               className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
             >
               <X className="w-5 h-5" />
@@ -540,8 +417,8 @@ export function LoginScreen() {
               {t('recoveryDeskSubtitle')}
             </p>
 
-            {/* Mode Switcher Tabs */}
-            <div className="grid grid-cols-3 p-1 bg-slate-950 border border-slate-800 rounded-xl mb-4 text-xs font-semibold">
+            {/* Mode Switcher Tabs (Reset Email / Support Ticket) */}
+            <div className="grid grid-cols-2 p-1 bg-slate-950 border border-slate-800 rounded-xl mb-4 text-xs font-semibold">
               <button
                 type="button"
                 onClick={() => setRecoveryTab('email')}
@@ -563,17 +440,6 @@ export function LoginScreen() {
                 }`}
               >
                 {t('submitRecoveryBtn')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setRecoveryTab('status')}
-                className={`py-1.5 px-2 rounded-lg transition cursor-pointer text-center truncate ${
-                  recoveryTab === 'status'
-                    ? 'bg-emerald-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {t('checkStatusBtn')}
               </button>
             </div>
 
@@ -604,7 +470,7 @@ export function LoginScreen() {
               </form>
             )}
 
-            {/* TAB 2: Submit Admin Manual Recovery Ticket */}
+            {/* TAB 2: Submit Admin Support Ticket (No plaintext credentials ever stored) */}
             {recoveryTab === 'request' && (
               <form
                 onSubmit={async (e) => {
@@ -623,7 +489,7 @@ export function LoginScreen() {
                     setShowForgotModal(false);
                     setRecoveryDetails('');
                   } catch (err: unknown) {
-                    setLocalError(err instanceof Error ? err.message : 'Failed to submit recovery request.');
+                    setLocalError(err instanceof Error ? err.message : 'Failed to submit support ticket.');
                   } finally {
                     setRecoverySubmitting(false);
                   }
@@ -702,118 +568,6 @@ export function LoginScreen() {
                   <span>{t('submitRecoveryBtn')}</span>
                 </button>
               </form>
-            )}
-
-            {/* TAB 3: Check Status of Submitted Ticket */}
-            {recoveryTab === 'status' && (
-              <div className="space-y-3">
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    if (!forgotEmail.trim()) return;
-                    setRecoverySubmitting(true);
-                    try {
-                      const results = await checkUserRecoveryRequests(forgotEmail.trim());
-                      setUserRequests(results);
-                      setCheckedStatus(true);
-                    } catch {
-                      setLocalError('Failed to fetch ticket status.');
-                    } finally {
-                      setRecoverySubmitting(false);
-                    }
-                  }}
-                  className="flex gap-2"
-                >
-                  <input
-                    type="email"
-                    required
-                    placeholder="Enter your registered email..."
-                    value={forgotEmail}
-                    onChange={(e) => setForgotEmail(e.target.value)}
-                    className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
-                  />
-                  <button
-                    type="submit"
-                    disabled={recoverySubmitting || !forgotEmail.trim()}
-                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50 transition"
-                  >
-                    {recoverySubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
-                    <span>{t('checkStatusBtn')}</span>
-                  </button>
-                </form>
-
-                {checkedStatus && (
-                  <div className="space-y-2 pt-2 border-t border-slate-800">
-                    {userRequests.length === 0 ? (
-                      <p className="text-xs text-slate-400 py-3 text-center">
-                        No recovery request found for this email address.
-                      </p>
-                    ) : (
-                      userRequests.map((req) => (
-                        <div
-                          key={req.id}
-                          className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2 text-xs"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                req.status === 'resolved'
-                                  ? 'bg-emerald-500/20 text-emerald-300'
-                                  : req.status === 'dismissed'
-                                  ? 'bg-rose-500/20 text-rose-300'
-                                  : 'bg-amber-500/20 text-amber-300'
-                              }`}
-                            >
-                              {req.status === 'resolved'
-                                ? t('recoveryStatusResolved')
-                                : req.status === 'dismissed'
-                                ? t('recoveryStatusDismissed')
-                                : t('recoveryStatusPending')}
-                            </span>
-                            <span className="text-[10px] text-slate-500">
-                              {new Date(req.createdAt).toLocaleDateString()}
-                            </span>
-                          </div>
-
-                          {req.temporaryPin && (
-                            <div className="bg-emerald-950/40 border border-emerald-500/30 p-2 rounded-lg text-emerald-200">
-                              <span className="font-semibold block text-[10px] uppercase">
-                                {t('tempPinLabel')}:
-                              </span>
-                              <span className="text-base font-mono font-bold tracking-widest text-emerald-300">
-                                {req.temporaryPin}
-                              </span>
-                              <span className="block text-[10px] text-emerald-400/80 mt-0.5">
-                                You can now log in using your email/username and this PIN!
-                              </span>
-                            </div>
-                          )}
-
-                          {req.temporaryPassword && (
-                            <div className="bg-emerald-950/40 border border-emerald-500/30 p-2 rounded-lg text-emerald-200">
-                              <span className="font-semibold block text-[10px] uppercase">
-                                {t('tempPasswordLabel')}:
-                              </span>
-                              <span className="font-mono font-bold text-white">
-                                {req.temporaryPassword}
-                              </span>
-                            </div>
-                          )}
-
-                          {req.adminNotes && (
-                            <div className="text-[11px] text-slate-300 bg-slate-900 p-2 rounded-lg border border-slate-800">
-                              <span className="text-[10px] text-slate-400 font-semibold block">
-                                {t('adminNotesLabel')}:
-                              </span>
-                              <p>{req.adminNotes}</p>
-                            </div>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
             )}
           </div>
         </div>

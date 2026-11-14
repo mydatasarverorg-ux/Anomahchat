@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLanguage } from '../context/LanguageContext';
 import { APP_VERSION } from '../utils/appVersion';
-import type { AppReleaseInfo } from '../services/updateService';
+import { isAllowedApkUrl, type AppReleaseInfo } from '../services/updateService';
 import {
   Download,
   CheckCircle2,
@@ -10,7 +10,6 @@ import {
   ShieldCheck,
   HardDrive,
   PackageCheck,
-  RotateCcw,
   ExternalLink,
   ArrowDownToLine,
   Copy,
@@ -24,13 +23,20 @@ interface UpdateModalProps {
   isManualCheck?: boolean;
 }
 
+interface NativeUpdaterBridge {
+  downloadAndInstall?: (url: string, versionName: string, expectedSha256?: string) => void;
+  downloadWithManager?: (url: string) => void;
+  openSystemDownload?: (url: string) => void;
+  installDownloadedApk?: () => void;
+}
+
 export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateModalProps) {
   const { language } = useLanguage();
   const [downloadStarted, setDownloadStarted] = useState(false);
   const [downloadComplete, setDownloadComplete] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [urlError, setUrlError] = useState<string | null>(null);
 
-  // Once download starts, back/escape button is strictly locked to require immediate install
   useEffect(() => {
     if ((release.forceUpdate || downloadStarted) && !isManualCheck) return;
     window.history.pushState({ modal: 'updateModal' }, '');
@@ -46,9 +52,8 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
     };
   }, [onClose, release.forceUpdate, isManualCheck, downloadStarted]);
 
-  // Listen to native download completion event sent by Android MainActivity
   useEffect(() => {
-    const win = window as any;
+    const win = window as unknown as { onNativeApkDownloadComplete?: (() => void) | null };
     win.onNativeApkDownloadComplete = () => {
       setDownloadComplete(true);
     };
@@ -62,24 +67,32 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
 
   const triggerApkDownload = () => {
     if (!release.apkDownloadUrl) return;
-    const url = release.apkDownloadUrl;
+    const url = release.apkDownloadUrl.trim();
 
+    if (!isAllowedApkUrl(url)) {
+      setUrlError(
+        language === 'bn'
+          ? 'নিরাপত্তা যাচাই ব্যর্থ: শুধুমাত্র অফিশিয়াল গিটহাব রিলিজ লিংক অনুমোদিত।'
+          : 'Security check failed: Only official GitHub Release APK URLs are allowed.'
+      );
+      return;
+    }
+
+    setUrlError(null);
     setDownloadStarted(true);
     setDownloadComplete(false);
 
-    // Clean any legacy install locks so user is never blocked from updating
     try {
       localStorage.removeItem('anomah_last_installed_code');
     } catch {
       // ignore
     }
 
-    // 1. Try Native Android Interface bridge with in-app auto-installer
-    const win = window as any;
+    const win = window as unknown as { AndroidUpdater?: NativeUpdaterBridge };
     if (win.AndroidUpdater) {
       try {
         if (typeof win.AndroidUpdater.downloadAndInstall === 'function') {
-          win.AndroidUpdater.downloadAndInstall(url, release.versionName);
+          win.AndroidUpdater.downloadAndInstall(url, release.versionName, release.apkSha256 || '');
           return;
         } else if (typeof win.AndroidUpdater.downloadWithManager === 'function') {
           win.AndroidUpdater.downloadWithManager(url);
@@ -88,7 +101,7 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
       } catch (e) {
         console.warn('AndroidUpdater downloadAndInstall failed, trying openSystemDownload:', e);
         try {
-          win.AndroidUpdater.openSystemDownload(url);
+          win.AndroidUpdater.openSystemDownload?.(url);
           return;
         } catch (ex) {
           console.warn('AndroidUpdater openSystemDownload failed:', ex);
@@ -96,15 +109,6 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
       }
     }
 
-    // 2. Open via Capacitor / Android system browser intent
-    try {
-      const opened = window.open(url, '_system');
-      if (opened) return;
-    } catch {
-      // ignore
-    }
-
-    // 3. Standard fallback: browser link click & navigation
     try {
       const a = document.createElement('a');
       a.href = url;
@@ -120,7 +124,7 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
   };
 
   const handleLaunchInstallerAgain = () => {
-    const win = window as any;
+    const win = window as unknown as { AndroidUpdater?: NativeUpdaterBridge };
     if (win.AndroidUpdater && typeof win.AndroidUpdater.installDownloadedApk === 'function') {
       try {
         win.AndroidUpdater.installDownloadedApk();
@@ -129,15 +133,23 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
         console.warn('installDownloadedApk failed:', e);
       }
     }
-    // Fallback: re-trigger or open system download
     handleOpenInBrowser();
   };
 
   const handleOpenInBrowser = () => {
     if (!release.apkDownloadUrl) return;
-    const url = release.apkDownloadUrl;
-    const win = window as any;
-    if (win.AndroidUpdater) {
+    const url = release.apkDownloadUrl.trim();
+    if (!isAllowedApkUrl(url)) {
+      setUrlError(
+        language === 'bn'
+          ? 'নিরাপত্তা যাচাই ব্যর্থ: অফিশিয়াল গিটহাব রিলিজ লিংক ছাড়া ওপেন করা যাবে না।'
+          : 'Blocked untrusted download URL.'
+      );
+      return;
+    }
+
+    const win = window as unknown as { AndroidUpdater?: NativeUpdaterBridge };
+    if (win.AndroidUpdater?.openSystemDownload) {
       try {
         win.AndroidUpdater.openSystemDownload(url);
         return;
@@ -146,7 +158,13 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
       }
     }
     try {
-      window.open(url, '_system');
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     } catch {
       window.location.href = url;
     }
@@ -166,7 +184,6 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in select-none">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 shadow-2xl relative flex flex-col max-h-[92vh] overflow-hidden">
-        {/* Close Button (ONLY before download starts, and only if not mandatory) */}
         {!release.forceUpdate && !downloadStarted && (
           <button
             onClick={onClose}
@@ -177,7 +194,6 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
           </button>
         )}
 
-        {/* Header Icon & Title */}
         <div className="text-center mb-4">
           <div className="w-13 h-13 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center mx-auto mb-3">
             <ArrowDownToLine className="w-6 h-6" />
@@ -192,7 +208,6 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
               : 'A new version of Anomah Messenger is ready to install.'}
           </p>
 
-          {/* Clean Unboxed Version Metadata */}
           <div className="flex items-center justify-center gap-2 mt-2 text-xs text-slate-400 font-mono">
             <span>v{APP_VERSION.versionName}</span>
             <span className="text-slate-600">→</span>
@@ -206,7 +221,13 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
           </div>
         </div>
 
-        {/* Changelog & Notes Box */}
+        {urlError && (
+          <div className="mb-3 p-3 bg-rose-950/70 border border-rose-500/40 rounded-xl text-xs text-rose-200 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+            <span>{urlError}</span>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto mb-4 p-3.5 bg-slate-950/70 border border-slate-800 rounded-2xl">
           <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-slate-200">
             <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -217,7 +238,6 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
             {changelog}
           </div>
 
-          {/* Storage & Auto-Clean Reassurance Note */}
           <div className="mt-3.5 pt-2.5 border-t border-slate-800/80 text-[11px] text-slate-400 flex items-start gap-2">
             <HardDrive className="w-3.5 h-3.5 text-teal-400 shrink-0 mt-0.5" />
             <span>
@@ -228,7 +248,6 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
           </div>
         </div>
 
-        {/* Action Area: Post-download mandatory install state */}
         {downloadStarted ? (
           <div className="space-y-3 animate-in fade-in zoom-in-95">
             {downloadComplete ? (

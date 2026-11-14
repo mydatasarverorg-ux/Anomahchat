@@ -32,10 +32,92 @@ import {
   WifiOff,
   Eye,
   ArrowLeft,
+  ShieldCheck,
+  MailCheck,
+  X,
+  LogOut,
+  KeyRound,
 } from 'lucide-react';
 
+function AppLockGate() {
+  const { user, unlockAppWithPin, signOutUser } = useAuth();
+  const { language } = useLanguage();
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const handleUnlock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pin.length < 4) return;
+    setChecking(true);
+    setError(null);
+    const res = await unlockAppWithPin(pin);
+    if (!res.success) {
+      setError(res.error || (language === 'bn' ? 'পিন সঠিক নয়।' : 'Incorrect App-Lock PIN.'));
+      setPin('');
+    }
+    setChecking(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 safe-area-container">
+      <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-5 text-center">
+        <div className="mx-auto w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+          <KeyRound className="w-7 h-7" />
+        </div>
+        <div>
+          <h2 className="text-base font-bold text-white">
+            {language === 'bn' ? 'অ্যাপ লক করা আছে' : 'App-Lock Protected'}
+          </h2>
+          <p className="text-xs text-slate-400 mt-1">
+            {language === 'bn'
+              ? `${user?.displayName || 'ব্যবহারকারী'}, চ্যাটে প্রবেশ করতে আপনার ৪-৬ ডিজিটের পিন দিন।`
+              : `Enter your 4-6 digit Quick App-Lock PIN for ${user?.displayName || 'your account'}.`}
+          </p>
+        </div>
+
+        {error && (
+          <div className="p-2.5 bg-rose-950/60 border border-rose-500/40 rounded-xl text-xs text-rose-200">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleUnlock} className="space-y-3">
+          <input
+            type="password"
+            inputMode="numeric"
+            autoFocus
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            placeholder="••••"
+            maxLength={6}
+            className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-center text-lg font-mono tracking-[0.5em] text-white focus:outline-none focus:border-emerald-500"
+          />
+          <button
+            type="submit"
+            disabled={checking || pin.length < 4}
+            className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-2"
+          >
+            {checking ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+            <span>{language === 'bn' ? 'আনলক করুন' : 'Unlock Messenger'}</span>
+          </button>
+        </form>
+
+        <button
+          type="button"
+          onClick={signOutUser}
+          className="text-xs text-slate-400 hover:text-rose-400 inline-flex items-center gap-1.5 cursor-pointer transition"
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          <span>{language === 'bn' ? 'লগআউট করে পাসওয়ার্ড দিয়ে ঢুকুন' : 'Sign out & use password'}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ChatDashboard({ user }: { user: UserProfile }) {
-  const { deletionNotice, recoverAccount, signOutUser } = useAuth();
+  const { deletionNotice, recoverAccount, signOutUser, firebaseUser, resendVerificationEmail } = useAuth();
   const { t, language } = useLanguage();
   const [chats, setChats] = useState<ChatRoom[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
@@ -45,9 +127,20 @@ function ChatDashboard({ user }: { user: UserProfile }) {
   const [showShare, setShowShare] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [callSession, setCallSession] = useState<CallSession | null>(null);
+  const [dismissVerifyBanner, setDismissVerifyBanner] = useState(false);
+  const [verificationSentNote, setVerificationSentNote] = useState<string | null>(null);
 
   // Ghost Inspection State (Admin enters user DM without login)
   const [ghostUser, setGhostUser] = useState<UserProfile | null>(null);
+
+  const isPasswordAccount = Boolean(
+    firebaseUser?.providerData?.some((p) => p.providerId === 'password')
+  );
+  const needsEmailVerification = Boolean(
+    firebaseUser && !firebaseUser.emailVerified && isPasswordAccount && !dismissVerifyBanner
+  );
+  const canAccessAdminPanel =
+    isSuperAdmin(user?.email) && Boolean(firebaseUser?.emailVerified);
 
   // Online / Offline state detection (WhatsApp style)
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -98,7 +191,9 @@ function ChatDashboard({ user }: { user: UserProfile }) {
 
   const activeChat =
     (activeChatId ? chats.find((c) => c.id === activeChatId) : null) ||
-    (selectedChat && Array.isArray(selectedChat.participantIds) && selectedChat.participantIds.includes(user.userId)
+    (selectedChat &&
+    Array.isArray(selectedChat.participantIds) &&
+    selectedChat.participantIds.includes((ghostUser || user).userId)
       ? selectedChat
       : null);
 
@@ -132,6 +227,51 @@ function ChatDashboard({ user }: { user: UserProfile }) {
         </div>
       )}
 
+      {/* Email Verification Reminder Banner */}
+      {needsEmailVerification && (
+        <div className="bg-amber-950/90 border-b border-amber-500/30 text-amber-100 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-2 z-40">
+          <div className="flex items-center gap-2 min-w-0">
+            <MailCheck className="w-4 h-4 text-amber-400 shrink-0" />
+            <span className="truncate">
+              {verificationSentNote ||
+                (language === 'bn'
+                  ? 'নিরাপত্তার জন্য আপনার ইমেইল ভেরিফাই করুন (ইনবক্স বা স্প্যাম চেক করুন)।'
+                  : 'Please verify your email address for full account security.')}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await resendVerificationEmail();
+                  setVerificationSentNote(
+                    language === 'bn'
+                      ? 'ভেরিফিকেশন লিংক পাঠানো হয়েছে! লিংকে ক্লিক করে রিলোড করুন।'
+                      : 'Verification email sent! Check your inbox then reload.'
+                  );
+                } catch {
+                  setVerificationSentNote(
+                    language === 'bn' ? 'কিছুক্ষণ পর আবার চেষ্টা করুন।' : 'Please try again shortly.'
+                  );
+                }
+              }}
+              className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg font-bold text-[11px] cursor-pointer transition"
+            >
+              {language === 'bn' ? 'ভেরিফিকেশন লিংক পাঠান' : 'Resend Verification'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDismissVerifyBanner(true)}
+              className="p-1 text-amber-300 hover:text-white cursor-pointer"
+              aria-label={t('close')}
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Offline Status Banner (WhatsApp/Messenger Style) */}
       {!isOnline && (
         <div className="bg-amber-600/95 text-amber-50 text-[11px] font-semibold py-1 px-4 text-center flex items-center justify-center gap-2 shadow-lg backdrop-blur-sm z-40">
@@ -157,10 +297,14 @@ function ChatDashboard({ user }: { user: UserProfile }) {
                 </span>
                 <span className="text-slate-600">·</span>
                 <span className="font-semibold text-xs text-white truncate">{ghostUser.displayName}</span>
-                <span className="text-slate-400 text-xs truncate hidden sm:inline">({ghostUser.email})</span>
+                {ghostUser.email && (
+                  <span className="text-slate-400 text-xs truncate hidden sm:inline">({ghostUser.email})</span>
+                )}
               </div>
               <p className="text-[11px] text-slate-400 truncate mt-0.5 hidden md:block">
-                {t('ghostModeBannerDesc').replace('{name}', ghostUser.displayName).replace('{email}', ghostUser.email)}
+                {t('ghostModeBannerDesc')
+                  .replace('{name}', ghostUser.displayName)
+                  .replace('{email}', ghostUser.email || ghostUser.userId)}
               </p>
             </div>
           </div>
@@ -200,7 +344,9 @@ function ChatDashboard({ user }: { user: UserProfile }) {
           onOpenNewChat={() => setShowNewChat(true)}
           onOpenProfile={() => setShowProfile(true)}
           onOpenShare={() => setShowShare(true)}
-          onOpenAdmin={() => setShowAdmin(true)}
+          onOpenAdmin={() => {
+            if (canAccessAdminPanel) setShowAdmin(true);
+          }}
           ghostUser={ghostUser}
           onExitGhostMode={() => {
             setGhostUser(null);
@@ -273,8 +419,8 @@ function ChatDashboard({ user }: { user: UserProfile }) {
       {/* User Warning Modal if Warning Issued */}
       <WarningNoticeModal />
 
-      {/* Super Admin Control Panel Modal */}
-      {showAdmin && isSuperAdmin(user?.email) && (
+      {/* Super Admin Control Panel Modal (Requires verified Super Admin email) */}
+      {showAdmin && canAccessAdminPanel && (
         <AdminModal
           onClose={() => setShowAdmin(false)}
           onEnterGhostMode={(targetUser, targetChatId) => {
@@ -306,7 +452,9 @@ function ChatDashboard({ user }: { user: UserProfile }) {
         <ProfileModal
           key={user.userId}
           onClose={() => setShowProfile(false)}
-          onOpenAdmin={() => setShowAdmin(true)}
+          onOpenAdmin={() => {
+            if (canAccessAdminPanel) setShowAdmin(true);
+          }}
         />
       )}
 
@@ -320,14 +468,12 @@ function ChatDashboard({ user }: { user: UserProfile }) {
 }
 
 function MainContent() {
-  const { user, loading } = useAuth();
+  const { user, loading, isAppLocked } = useAuth();
   const { t } = useLanguage();
   const [pendingRelease, setPendingRelease] = useState<AppReleaseInfo | null>(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
 
   // Subscribe to real-time app releases (Option 3 In-App Auto-Updater)
-  // CRITICAL: Only trigger APK update popup if running inside native Android APK!
-  // PWA / Web users update automatically through the browser and Service Worker without APK downloads.
   useEffect(() => {
     if (!isNativeApkApp()) {
       return;
@@ -351,15 +497,15 @@ function MainContent() {
 
   // Listen to manual update check events (Strictly for Native APK)
   useEffect(() => {
-    const handleCheckEvent = (e: any) => {
+    const handleCheckEvent = (e: CustomEvent<{ release?: AppReleaseInfo }>) => {
       if (!isNativeApkApp()) return;
       if (e.detail?.release) {
         setPendingRelease(e.detail.release);
         setShowUpdateModal(true);
       }
     };
-    window.addEventListener('anomah_open_update_modal', handleCheckEvent);
-    return () => window.removeEventListener('anomah_open_update_modal', handleCheckEvent);
+    window.addEventListener('anomah_open_update_modal', handleCheckEvent as EventListener);
+    return () => window.removeEventListener('anomah_open_update_modal', handleCheckEvent as EventListener);
   }, []);
 
   if (loading) {
@@ -377,6 +523,8 @@ function MainContent() {
         <LoginScreen />
       ) : user.isBanned ? (
         <BannedScreen />
+      ) : isAppLocked ? (
+        <AppLockGate />
       ) : (
         <ChatDashboard key={user.userId} user={user} />
       )}

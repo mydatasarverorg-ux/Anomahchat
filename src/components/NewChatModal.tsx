@@ -35,11 +35,11 @@ export function NewChatModal({ onClose, onSelectChat }: NewChatModalProps) {
 
   const filteredUsers = users.filter((u) => {
     if (u.status === 'scheduled_for_deletion' || u.status === 'deleted') return false;
-    const q = search.toLowerCase();
+    const q = search.toLowerCase().replace(/^@/, '');
     return (
       u.displayName.toLowerCase().includes(q) ||
-      u.email.toLowerCase().includes(q) ||
-      Boolean(u.username && u.username.toLowerCase().includes(q))
+      Boolean(u.username && u.username.toLowerCase().includes(q)) ||
+      Boolean(u.about && u.about.toLowerCase().includes(q))
     );
   });
 
@@ -217,7 +217,9 @@ export function NewChatModal({ onClose, onSelectChat }: NewChatModalProps) {
                           : (presence.statusText === 'Offline' ? t('offline') : presence.statusText)}
                       </span>
                     </div>
-                    <div className="text-[11px] text-slate-400 truncate">{u.about || u.email}</div>
+                    <div className="text-[11px] text-slate-400 truncate">
+                      {u.username ? `@${u.username} · ` : ''}{u.about || ''}
+                    </div>
                   </div>
                   {mode === 'group' && (
                     <div

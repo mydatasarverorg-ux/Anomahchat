@@ -3,7 +3,6 @@ import {
   doc,
   setDoc,
   getDocs,
-  getDoc,
   query,
   where,
   orderBy,
@@ -33,7 +32,7 @@ export function isSuperAdmin(email?: string | null): boolean {
   return email.trim().toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
 }
 
-// Log admin action to audit trail
+// Log admin action to immutable audit trail
 export async function logAdminAction(
   action: AdminAuditLog['action'],
   details: string,
@@ -42,7 +41,6 @@ export async function logAdminAction(
   targetName?: string
 ): Promise<void> {
   const logId = `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const path = `admin_logs/${logId}`;
   try {
     const logEntry: Record<string, unknown> = {
       id: logId,
@@ -52,17 +50,12 @@ export async function logAdminAction(
       timestamp: new Date().toISOString(),
     };
 
-    if (targetId) {
-      logEntry.targetId = targetId;
-    }
-    if (targetName) {
-      logEntry.targetName = targetName;
-    }
+    if (targetId) logEntry.targetId = targetId;
+    if (targetName) logEntry.targetName = targetName;
 
     await setDoc(doc(db, 'admin_logs', logId), logEntry as unknown as AdminAuditLog);
   } catch (error) {
     console.error('Failed to write admin log:', error);
-    // Don't block core action if logging encounters issue
   }
 }
 
@@ -75,7 +68,6 @@ export async function banUser(
   adminEmail: string,
   durationDays?: number | 'permanent'
 ): Promise<void> {
-  // Absolute protection for Root Super Admin
   if (isSuperAdmin(targetEmail)) {
     throw new Error('Root Super Admin account cannot be suspended.');
   }
@@ -87,11 +79,14 @@ export async function banUser(
     const nowIso = now.toISOString();
 
     let bannedUntil: string | null = null;
+    let bannedUntilMs: number | null = null;
     let durationLogText = 'Permanent';
 
     if (typeof durationDays === 'number' && durationDays > 0) {
-      const untilDate = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
+      const untilMs = now.getTime() + durationDays * 24 * 60 * 60 * 1000;
+      const untilDate = new Date(untilMs);
       bannedUntil = untilDate.toISOString();
+      bannedUntilMs = untilMs;
       durationLogText = `${durationDays} day(s) (until ${untilDate.toLocaleDateString()})`;
     }
 
@@ -101,12 +96,17 @@ export async function banUser(
       bannedAt: nowIso,
       bannedBy: adminEmail,
       bannedUntil,
+      bannedUntilMs,
       isOnline: false,
     };
 
     await updateDoc(userRef, updates);
+    await setDoc(
+      doc(db, 'directory', targetUserId),
+      { isBanned: true, isOnline: false },
+      { merge: true }
+    ).catch(() => {});
 
-    // Synchronize suspension status across all active chats involving this user
     try {
       const chatsSnap = await getDocs(
         query(collection(db, 'chats'), where('participantIds', 'array-contains', targetUserId))
@@ -139,7 +139,7 @@ export async function banUser(
   }
 }
 
-// Unban / Reactivate a user
+// Unban / Reactivate a user (Admin only)
 export async function unbanUser(
   targetUserId: string,
   targetEmail: string,
@@ -155,9 +155,15 @@ export async function unbanUser(
       bannedAt: null,
       bannedBy: null,
       bannedUntil: null,
+      bannedUntilMs: null,
     });
 
-    // Synchronize reinstatement across all active chats involving this user
+    await setDoc(
+      doc(db, 'directory', targetUserId),
+      { isBanned: false },
+      { merge: true }
+    ).catch(() => {});
+
     try {
       const chatsSnap = await getDocs(
         query(collection(db, 'chats'), where('participantIds', 'array-contains', targetUserId))
@@ -185,6 +191,45 @@ export async function unbanUser(
       targetUserId,
       targetName || targetEmail
     );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+// Self-reinstatement when temporary suspension timer expires (enforced server-side via request.time in firestore.rules)
+export async function claimExpiredSuspension(userId: string): Promise<void> {
+  const path = `users/${userId}`;
+  try {
+    await updateDoc(doc(db, 'users', userId), {
+      isBanned: false,
+      banReason: null,
+      bannedAt: null,
+      bannedBy: null,
+      bannedUntil: null,
+      bannedUntilMs: null,
+    });
+
+    await setDoc(
+      doc(db, 'directory', userId),
+      { isBanned: false },
+      { merge: true }
+    ).catch(() => {});
+
+    const chatsSnap = await getDocs(
+      query(collection(db, 'chats'), where('participantIds', 'array-contains', userId))
+    );
+    for (const chatDoc of chatsSnap.docs) {
+      const cdata = chatDoc.data() as ChatRoom;
+      const chatUpdates: Record<string, unknown> = {
+        [`participantDetails.${userId}.isBanned`]: false,
+      };
+      if (cdata.type === 'direct' && cdata.suspendedUserId === userId) {
+        chatUpdates.isSuspended = false;
+        chatUpdates.suspendedUserId = null;
+        chatUpdates.suspendedUserName = null;
+      }
+      await updateDoc(doc(db, 'chats', chatDoc.id), chatUpdates).catch(() => {});
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
@@ -291,18 +336,10 @@ export async function submitReport(reportData: {
       createdAt: new Date().toISOString(),
     };
 
-    if (reportData.targetUserEmail) {
-      newReport.targetUserEmail = reportData.targetUserEmail;
-    }
-    if (reportData.chatId) {
-      newReport.chatId = reportData.chatId;
-    }
-    if (reportData.messageId) {
-      newReport.messageId = reportData.messageId;
-    }
-    if (reportData.messageText) {
-      newReport.messageText = reportData.messageText;
-    }
+    if (reportData.targetUserEmail) newReport.targetUserEmail = reportData.targetUserEmail;
+    if (reportData.chatId) newReport.chatId = reportData.chatId;
+    if (reportData.messageId) newReport.messageId = reportData.messageId;
+    if (reportData.messageText) newReport.messageText = reportData.messageText;
 
     await setDoc(doc(db, 'reports', reportId), newReport as unknown as UserReport);
   } catch (error) {
@@ -370,13 +407,15 @@ export async function deleteReport(reportId: string, adminEmail: string): Promis
   }
 }
 
-// Subscribe to announcements (Public: active only or all for admin)
+// Subscribe to announcements (Signed-in active only uses where('active', '==', true); Admin views all)
 export function subscribeToAnnouncements(
   activeOnly: boolean,
   callback: (announcements: SystemAnnouncement[]) => void
 ): Unsubscribe {
   const path = 'announcements';
-  const q = query(collection(db, path));
+  const q = activeOnly
+    ? query(collection(db, path), where('active', '==', true))
+    : query(collection(db, path));
 
   return onSnapshot(
     q,
@@ -501,10 +540,9 @@ export async function deleteAdminMessage(
 }
 
 // ----------------------------------------------------
-// PASSWORD RECOVERY DESK (Admin Assisted Recovery)
+// PASSWORD RECOVERY DESK (Support Ticket Only - Zero Plaintext Secrets)
 // ----------------------------------------------------
 
-// Submit a new password recovery request from login screen
 export async function submitRecoveryRequest(data: {
   email: string;
   name?: string;
@@ -523,10 +561,10 @@ export async function submitRecoveryRequest(data: {
     createdAt: new Date().toISOString(),
   };
 
-  if (data.name?.trim()) reqDoc.name = data.name.trim();
-  if (data.username?.trim()) reqDoc.username = data.username.trim().replace(/^@/, '');
-  if (data.contactPhone?.trim()) reqDoc.contactPhone = data.contactPhone.trim();
-  if (data.details?.trim()) reqDoc.details = data.details.trim();
+  if (data.name?.trim()) reqDoc.name = data.name.trim().slice(0, 100);
+  if (data.username?.trim()) reqDoc.username = data.username.trim().replace(/^@/, '').slice(0, 50);
+  if (data.contactPhone?.trim()) reqDoc.contactPhone = data.contactPhone.trim().slice(0, 50);
+  if (data.details?.trim()) reqDoc.details = data.details.trim().slice(0, 1000);
 
   try {
     await setDoc(doc(db, 'recovery_requests', reqId), reqDoc as unknown as PasswordRecoveryRequest);
@@ -537,7 +575,6 @@ export async function submitRecoveryRequest(data: {
   }
 }
 
-// Subscribe to recovery requests (Admin only)
 export function subscribeToRecoveryRequests(
   callback: (requests: PasswordRecoveryRequest[]) => void
 ): Unsubscribe {
@@ -559,12 +596,8 @@ export function subscribeToRecoveryRequests(
   );
 }
 
-// Resolve a recovery request with temporary password / PIN instructions
 export async function resolveRecoveryRequest(
   requestId: string,
-  targetUserId: string | undefined,
-  temporaryPassword: string,
-  temporaryPin: string,
   adminNotes: string,
   adminEmail: string
 ): Promise<void> {
@@ -575,25 +608,14 @@ export async function resolveRecoveryRequest(
 
     await updateDoc(reqRef, {
       status: 'resolved',
-      temporaryPassword: temporaryPassword.trim() || undefined,
-      temporaryPin: temporaryPin.trim() || undefined,
       adminNotes: adminNotes.trim(),
       resolvedAt: nowIso,
       resolvedBy: adminEmail,
     });
 
-    // If targetUserId is provided and PIN was specified, set the user's secretPin directly in their profile
-    if (targetUserId && temporaryPin.trim()) {
-      await updateDoc(doc(db, 'users', targetUserId), {
-        secretPin: temporaryPin.trim(),
-        pinFailedAttempts: 0,
-        pinLockedUntil: null,
-      });
-    }
-
     await logAdminAction(
       'resolve_recovery',
-      `Resolved password recovery request. Admin assigned credentials/guidance. Notes: "${adminNotes.trim()}"`,
+      `Resolved support recovery ticket. Notes: "${adminNotes.trim()}"`,
       adminEmail,
       requestId
     );
@@ -602,7 +624,6 @@ export async function resolveRecoveryRequest(
   }
 }
 
-// Dismiss a recovery request
 export async function dismissRecoveryRequest(
   requestId: string,
   adminNotes: string,
@@ -629,40 +650,20 @@ export async function dismissRecoveryRequest(
   }
 }
 
-// Check recovery status by email (for user querying on login page)
-export async function checkUserRecoveryRequests(email: string): Promise<PasswordRecoveryRequest[]> {
-  const cleanEmail = email.trim().toLowerCase();
-  const path = 'recovery_requests';
-  try {
-    const q = query(collection(db, path), where('email', '==', cleanEmail));
-    const snap = await getDocs(q);
-    const list: PasswordRecoveryRequest[] = [];
-    snap.forEach((d) => list.push(d.data() as PasswordRecoveryRequest));
-    list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    return list;
-  } catch (err) {
-    console.warn('Check recovery error:', err);
-    return [];
-  }
-}
-
-// Directly reset user PIN by Super Admin
-export async function adminSetUserPin(
+// Clear a user's Quick App-Lock PIN (Admin recovery support without exposing/storing plaintext PIN)
+export async function adminClearUserAppLock(
   targetUserId: string,
-  newPin: string,
   adminEmail: string
 ): Promise<void> {
   const path = `users/${targetUserId}`;
   try {
-    const userRef = doc(db, 'users', targetUserId);
-    await updateDoc(userRef, {
-      secretPin: newPin.trim(),
-      pinFailedAttempts: 0,
-      pinLockedUntil: null,
+    await deleteDoc(doc(db, 'users', targetUserId, 'private', 'security')).catch(() => {});
+    await updateDoc(doc(db, 'users', targetUserId), {
+      hasAppLockPin: false,
     });
     await logAdminAction(
-      'reset_pin',
-      `Admin assigned a new secret PIN (${newPin.trim()}) for user account.`,
+      'clear_app_lock',
+      'Cleared Quick App-Lock PIN for user account recovery.',
       adminEmail,
       targetUserId
     );
@@ -671,11 +672,35 @@ export async function adminSetUserPin(
   }
 }
 
+// Admin-only one-time backfill so legacy users appear in public non-PII directory immediately
+export async function backfillDirectoryFromUsers(users: UserProfile[]): Promise<void> {
+  for (const u of users) {
+    if (!u?.userId) continue;
+    try {
+      const payload: Record<string, unknown> = {
+        userId: u.userId,
+        displayName: (u.displayName || 'User').slice(0, 100),
+        photoURL: (u.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${u.userId}`).slice(0, 1000),
+        about: (u.about || 'Available | Using Anomah Chat').slice(0, 200),
+        status: u.status || 'active',
+        isOnline: Boolean(u.isOnline),
+        lastSeen: u.lastSeen || u.createdAt || new Date().toISOString(),
+        isBanned: Boolean(u.isBanned),
+      };
+      if (u.username) {
+        payload.username = u.username.toLowerCase();
+      }
+      await setDoc(doc(db, 'directory', u.userId), payload, { merge: true });
+    } catch {
+      // non-blocking per item
+    }
+  }
+}
+
 // ----------------------------------------------------
 // CHAT & MESSAGE INSPECTION & AUDIT (Admin moderation)
 // ----------------------------------------------------
 
-// Subscribe to all platform chats (Admin only)
 export function subscribeToAllChatsForAdmin(
   callback: (chats: ChatRoom[]) => void
 ): Unsubscribe {
@@ -700,7 +725,6 @@ export function subscribeToAllChatsForAdmin(
   );
 }
 
-// Subscribe to messages of a specific chat for admin inspection
 export function subscribeToChatMessagesForAdmin(
   chatId: string,
   callback: (messages: ChatMessage[]) => void
@@ -724,4 +748,3 @@ export function subscribeToChatMessagesForAdmin(
     }
   );
 }
-

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { unbanUser } from '../services/adminService';
+import { claimExpiredSuspension } from '../services/adminService';
 import { ShieldAlert, LogOut, Mail, Calendar, AlertTriangle, Clock, CheckCircle2 } from 'lucide-react';
 
 export function BannedScreen() {
@@ -25,10 +25,10 @@ export function BannedScreen() {
 
       if (diffMs <= 0) {
         setTimeLeft({ expired: true, text: '' });
-        // Automatically reinstate user when time is up
+        // Automatically reinstate user when temporary suspension timer expires
         if (!isReactivating && user) {
           setIsReactivating(true);
-          unbanUser(user.userId, user.email, user.displayName, 'system_auto_reinstated').catch(console.error);
+          claimExpiredSuspension(user.userId).catch(console.error);
         }
         return;
       }

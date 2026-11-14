@@ -51,20 +51,42 @@ jobs:
       - name: Make Gradle Executable
         run: chmod +x android/gradlew
 
-      - name: Build Debug Android APK
+      - name: Build Signed Release APK (or Debug fallback)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           cd android
-          ./gradlew assembleDebug --no-daemon
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 --decode > release-keystore.jks
+            export ANDROID_KEYSTORE_PATH="$(pwd)/release-keystore.jks"
+            ./gradlew assembleRelease --no-daemon
+          else
+            echo "::warning::ANDROID_KEYSTORE_BASE64 not configured; building debug APK as fallback. Add GitHub Release Keystore Secrets for consistent signature updates."
+            ./gradlew assembleDebug --no-daemon
+          fi
 
-      - name: Prepare APK Output
+      - name: Cleanup Temporary Keystore
+        if: always()
+        run: rm -f android/release-keystore.jks
+
+      - name: Prepare APK Output & Compute SHA-256
+        id: apk
         run: |
           mkdir -p build-output
-          APK_PATH=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
+          APK_PATH=$(find android/app/build/outputs/apk/release -name "*.apk" 2>/dev/null | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            APK_PATH=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
+          fi
           if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
-            cp "$APK_PATH" build-output/AnomahChat-v1.0.5.apk
+            cp "$APK_PATH" build-output/AnomahChat-v1.0.6.apk
             cp "$APK_PATH" build-output/AnomahChat.apk
-            cp "$APK_PATH" build-output/Anomah-Chat-vMahi-A05.apk
-            echo "Successfully prepared APK from: $APK_PATH"
+            cp "$APK_PATH" build-output/Anomah-Chat-vMahi-A06.apk
+            SHA256=$(sha256sum build-output/AnomahChat.apk | awk '{print $1}')
+            echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+            echo "Prepared APK from $APK_PATH (SHA-256: $SHA256)"
           else
             echo "::error::No APK file found in android/app/build/outputs/apk!"
             exit 1
@@ -73,7 +95,7 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AnomahChat-v1.0.5-APK
+          name: AnomahChat-v1.0.6-APK
           path: build-output/*.apk
           retention-days: 30
 
@@ -81,20 +103,21 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         with:
-          tag_name: v1.0.5
-          name: Anomah Chat v1.0.5 (Mahi A05 Release)
+          tag_name: v1.0.6
+          name: Anomah Chat v1.0.6 (Mahi A06 Release)
           body: |
-            ## Anomah Chat Android APK v1.0.5 (Mahi A05)
+            ## Anomah Chat Android APK v1.0.6 (Mahi A06)
             Direct installation package for Android devices.
-            - Bulletproof In-App Auto-Update & Installer Dialog
-            - Direct Google Sign-In In-App Dialog Support
-            - Post-Install Automatic Cache Cleanup
-            - Realtime Voice & Video Calls
-            - High-Speed WebRTC & Messaging
+            - Hardened Zero-Trust Firestore Security Rules & Owner-Only PII Protection
+            - Signed Release APK Pipeline + Native SHA-256 Checksum Verification
+            - Client-Side Salted SHA-256 Quick App-Lock PIN
+            - Realtime Voice Notes, Media Sharing & Calling
+
+            SHA-256: `${{ steps.apk.outputs.sha256 }}`
           draft: false
           prerelease: false
           files: |
-            build-output/AnomahChat-v1.0.5.apk
+            build-output/AnomahChat-v1.0.6.apk
             build-output/AnomahChat.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -13,7 +13,6 @@ import {
   Palette,
   Trash2,
   Lock,
-  Mail,
   AlertCircle,
   Eye,
   EyeOff,
@@ -24,9 +23,10 @@ import {
   Languages,
   ExternalLink,
   ArrowLeft,
-  Rocket,
   RefreshCw,
   Loader2,
+  MailCheck,
+  KeyRound,
 } from 'lucide-react';
 import { APP_VERSION, isUpdateAvailable, isNativeApkApp } from '../utils/appVersion';
 import { getLatestRelease } from '../services/updateService';
@@ -42,6 +42,10 @@ export function ProfileModal({
     user,
     firebaseUser,
     updateProfile,
+    setAppLockPin,
+    clearAppLockPin,
+    lockAppNow,
+    resendVerificationEmail,
     changePassword,
     sendPasswordReset,
     theme,
@@ -50,7 +54,7 @@ export function ProfileModal({
   } = useAuth();
 
   const { language, setLanguage, t } = useLanguage();
-  const isUserSuperAdmin = isSuperAdmin(user?.email);
+  const isUserSuperAdmin = isSuperAdmin(user?.email) && Boolean(firebaseUser?.emailVerified);
 
   const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'appearance' | 'language' | 'danger'>('profile');
 
@@ -59,16 +63,15 @@ export function ProfileModal({
   const [about, setAbout] = useState(user?.about || 'Available | Using Anomah Chat');
   const [photoURL, setPhotoURL] = useState(user?.photoURL || '');
 
-  // Security Fields
+  // Security Fields (Quick App-Lock PIN is hashed client-side, never stored in plaintext)
   const [username, setUsername] = useState(user?.username || '');
-  const [secretPin, setSecretPin] = useState(user?.secretPin || '');
+  const [appLockPinInput, setAppLockPinInput] = useState('');
   const [showPin, setShowPin] = useState(false);
   const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
 
   // Password Change Fields
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [showNewPassword, setShowNewPassword] = useState(false);
 
   // Account Deletion Confirmation
   const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
@@ -85,7 +88,6 @@ export function ProfileModal({
     setCheckingUpdate(true);
     setUpdateStatusMessage(null);
     try {
-      // In PWA / Web Browser mode, updates happen automatically via browser / Service Worker
       if (!isNativeApkApp()) {
         if ('serviceWorker' in navigator) {
           try {
@@ -105,7 +107,6 @@ export function ProfileModal({
         return;
       }
 
-      // In Native Android APK mode, check for newer published APK release
       const latest = await getLatestRelease();
       if (latest && isUpdateAvailable(latest)) {
         window.dispatchEvent(new CustomEvent('anomah_open_update_modal', { detail: { release: latest } }));
@@ -139,26 +140,22 @@ export function ProfileModal({
     'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
   ];
 
-  // Always sync internal form state whenever active user changes
   useEffect(() => {
     setDisplayName(user?.displayName || '');
     setAbout(user?.about || 'Available | Using Anomah Chat');
     setPhotoURL(user?.photoURL || '');
     setUsername(user?.username || '');
-    setSecretPin(user?.secretPin || '');
+    setAppLockPinInput('');
     setShowPin(false);
     setNewPassword('');
     setConfirmPassword('');
     setErrorMessage(null);
     setSuccessMessage(null);
-  }, [user?.userId, user?.secretPin, user?.username, user?.displayName, user?.about, user?.photoURL]);
+  }, [user?.userId, user?.hasAppLockPin, user?.username, user?.displayName, user?.about, user?.photoURL]);
 
-  // Intercept mobile hardware / browser back button & Esc key
   useEffect(() => {
     window.history.pushState({ modal: 'profileModal' }, '');
-    const handlePopState = () => {
-      onClose();
-    };
+    const handlePopState = () => onClose();
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
@@ -170,7 +167,6 @@ export function ProfileModal({
     };
   }, [onClose]);
 
-  // Check username availability with debounce
   useEffect(() => {
     const clean = username.trim().toLowerCase().replace(/^@/, '');
     if (!clean || clean === (user?.username || '')) {
@@ -210,19 +206,11 @@ export function ProfileModal({
         }
       }
 
-      // If user typed a PIN: use it.
-      // If user had a PIN previously and emptied it: pass '' to remove PIN.
-      // If user never had a PIN and input is empty: pass undefined so it stays empty.
-      const resolvedPin = secretPin.trim()
-        ? secretPin.trim()
-        : (user?.secretPin ? '' : undefined);
-
       await updateProfile(
         displayName.trim(),
         about.trim(),
         photoURL,
-        cleanUsername,
-        resolvedPin
+        cleanUsername
       );
 
       setSuccessMessage(t('profileSavedSuccess'));
@@ -235,27 +223,53 @@ export function ProfileModal({
     }
   };
 
-  const handleUpdatePin = async () => {
-    if (secretPin.length < 4 || secretPin.length > 6) {
-      setErrorMessage(t('pinMinLengthError'));
-      return;
-    }
+  const handleSaveSecurityAndPin = async () => {
     setSaving(true);
     setErrorMessage(null);
     setSuccessMessage(null);
     try {
-      await updateProfile(
-        user?.displayName || displayName,
-        user?.about || about,
-        user?.photoURL || photoURL,
-        user?.username || username,
-        secretPin.trim()
-      );
+      const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
+      if (cleanUsername !== (user?.username || '')) {
+        if (cleanUsername && cleanUsername.length < 3) {
+          throw new Error(t('usernameMinLength'));
+        }
+        await updateProfile(
+          user?.displayName || displayName,
+          user?.about || about,
+          user?.photoURL || photoURL,
+          cleanUsername
+        );
+      }
+
+      if (appLockPinInput.trim()) {
+        if (appLockPinInput.length < 4 || appLockPinInput.length > 6) {
+          throw new Error(t('pinMinLengthError'));
+        }
+        await setAppLockPin(appLockPinInput.trim());
+        setAppLockPinInput('');
+      }
+
       setSuccessMessage(t('profileSavedSuccess'));
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : t('profileUpdateError');
       setErrorMessage(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemoveAppLock = async () => {
+    setSaving(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      await clearAppLockPin();
+      setAppLockPinInput('');
+      setSuccessMessage(language === 'bn' ? 'অ্যাপ-লক পিন মুছে ফেলা হয়েছে।' : 'Quick App-Lock PIN removed.');
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to remove App-Lock PIN.');
     } finally {
       setSaving(false);
     }
@@ -353,7 +367,7 @@ export function ProfileModal({
           </button>
         </div>
 
-        {/* Master Settings Layout (Sidebar Navigation + Content Area) */}
+        {/* Master Settings Layout */}
         <div className="flex-1 flex flex-col sm:flex-row overflow-hidden">
           {/* Settings Sidebar */}
           <div className="w-full sm:w-56 bg-slate-950/50 border-b sm:border-b-0 sm:border-r border-slate-800 p-2 sm:p-3 space-y-1 shrink-0 overflow-x-auto sm:overflow-y-auto">
@@ -403,7 +417,7 @@ export function ProfileModal({
                 return (
                   <button
                     key={item.id}
-                    onClick={() => setActiveTab(item.id as any)}
+                    onClick={() => setActiveTab(item.id as typeof activeTab)}
                     className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer shrink-0 sm:w-full text-left ${
                       isActive
                         ? isItemDanger
@@ -424,8 +438,8 @@ export function ProfileModal({
                 );
               })}
 
-              {/* Super Admin Special Item (Only visible for chinisdramaorg@gmail.com) */}
-              {isSuperAdmin(user?.email) && onOpenAdmin && (
+              {/* Super Admin Special Item */}
+              {isUserSuperAdmin && onOpenAdmin && (
                 <button
                   onClick={() => {
                     onClose();
@@ -441,12 +455,11 @@ export function ProfileModal({
                 </button>
               )}
 
-              {/* Install PWA Option */}
               <div className="mt-2">
                 <PWAInstallButton variant="sidebar" />
               </div>
 
-              {/* In-App APK Version & Auto-Update Check (Strictly for installed Mobile APK, hidden on Web) */}
+              {/* In-App APK Version & Auto-Update Check (Strictly for Native APK) */}
               {isNativeApkApp() && (
                 <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-1.5">
                   <div className="flex items-center justify-between px-1">
@@ -490,7 +503,6 @@ export function ProfileModal({
           {/* Settings Content Pane */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-900/60 flex flex-col justify-between">
             <div>
-              {/* Feedback Alerts */}
               {successMessage && (
                 <div className="mb-4 p-3 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs rounded-xl flex items-center gap-2">
                   <Check className="w-4 h-4 shrink-0 text-emerald-400" />
@@ -520,7 +532,6 @@ export function ProfileModal({
                     </div>
                   </div>
 
-                  {/* Preset Avatars */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-2">
                       {t('chooseAvatar')}
@@ -540,7 +551,6 @@ export function ProfileModal({
                     </div>
                   </div>
 
-                  {/* Display Name */}
                   <div className="space-y-1">
                     <label className="block text-xs font-semibold text-slate-300">{t('displayNameLabel')}</label>
                     <input
@@ -553,7 +563,6 @@ export function ProfileModal({
                     />
                   </div>
 
-                  {/* About / Bio */}
                   <div className="space-y-1">
                     <label className="block text-xs font-semibold text-slate-300">{t('aboutLabel')}</label>
                     <input
@@ -568,14 +577,62 @@ export function ProfileModal({
                 </form>
               )}
 
-              {/* TAB 2: Security & PIN */}
+              {/* TAB 2: Security & Quick App-Lock PIN */}
               {activeTab === 'security' && (
                 <div className="space-y-4">
-                  {/* Username & Secret PIN Form */}
+                  {/* Email Verification Status */}
+                  <div className="p-3.5 bg-slate-950/60 border border-slate-800 rounded-2xl flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <MailCheck className={`w-4 h-4 shrink-0 ${firebaseUser?.emailVerified ? 'text-emerald-400' : 'text-amber-400'}`} />
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-white">
+                          {firebaseUser?.emailVerified
+                            ? (language === 'bn' ? 'ইমেইল ভেরিফায়েড' : 'Email Verified')
+                            : (language === 'bn' ? 'ইমেইল ভেরিফায়েড নয়' : 'Email Not Verified')}
+                        </div>
+                        <div className="text-[11px] text-slate-400 truncate">{user?.email}</div>
+                      </div>
+                    </div>
+                    {!firebaseUser?.emailVerified && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setSaving(true);
+                          setErrorMessage(null);
+                          try {
+                            await resendVerificationEmail();
+                            setSuccessMessage(
+                              language === 'bn'
+                                ? 'ভেরিফিকেশন ইমেইল পাঠানো হয়েছে! আপনার ইনবক্স দেখুন।'
+                                : 'Verification email sent! Please check your inbox.'
+                            );
+                          } catch (e: unknown) {
+                            setErrorMessage(e instanceof Error ? e.message : 'Failed to send verification email.');
+                          } finally {
+                            setSaving(false);
+                          }
+                        }}
+                        disabled={saving}
+                        className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-[11px] font-bold shrink-0 cursor-pointer"
+                      >
+                        {language === 'bn' ? 'ভেরিফাই লিংক পাঠান' : 'Send Link'}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Username & Quick App-Lock PIN */}
                   <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-2xl space-y-3">
-                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">
-                      {t('usernamePinConfigTitle')}
-                    </h4>
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                        {t('usernamePinConfigTitle')}
+                      </h4>
+                      {user?.hasAppLockPin && (
+                        <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
+                          <KeyRound className="w-3 h-3" />
+                          {language === 'bn' ? 'অ্যাপ-লক চালু আছে' : 'App-Lock Active'}
+                        </span>
+                      )}
+                    </div>
 
                     {/* Unique Username */}
                     <div className="space-y-1">
@@ -603,22 +660,27 @@ export function ProfileModal({
                       </div>
                     </div>
 
-                    {/* Secret PIN */}
+                    {/* Quick App-Lock PIN */}
                     <div className="space-y-1">
                       <label className="block text-xs font-medium text-slate-300">{t('secretPinLabel')}</label>
                       <div className="relative">
                         <input
                           type={showPin ? 'text' : 'password'}
-                          value={secretPin}
-                          onChange={(e) => setSecretPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                          placeholder={t('secretPinPlaceholder')}
+                          inputMode="numeric"
+                          value={appLockPinInput}
+                          onChange={(e) => setAppLockPinInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                          placeholder={
+                            user?.hasAppLockPin
+                              ? (language === 'bn' ? 'নতুন পিন সেট করতে লিখুন (৪-৬ ডিজিট)' : 'Enter new 4-6 digits to change PIN')
+                              : t('secretPinPlaceholder')
+                          }
                           className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono tracking-widest"
                           maxLength={6}
                         />
                         <button
                           type="button"
                           onClick={() => setShowPin(!showPin)}
-                          className="absolute right-3 top-2 text-slate-400 hover:text-white"
+                          className="absolute right-3 top-2 text-slate-400 hover:text-white cursor-pointer"
                         >
                           {showPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                         </button>
@@ -626,14 +688,41 @@ export function ProfileModal({
                       <p className="text-[10px] text-slate-400">{t('secretPinHelpText')}</p>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={handleUpdatePin}
-                      disabled={saving || secretPin.length < 4}
-                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold disabled:opacity-50 cursor-pointer transition shadow"
-                    >
-                      {saving ? t('saving') : t('updatePinUsernameBtn')}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSaveSecurityAndPin}
+                        disabled={saving || (!appLockPinInput.trim() && username.trim().toLowerCase() === (user?.username || ''))}
+                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold disabled:opacity-50 cursor-pointer transition shadow"
+                      >
+                        {saving ? t('saving') : t('updatePinUsernameBtn')}
+                      </button>
+
+                      {user?.hasAppLockPin && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onClose();
+                              lockAppNow();
+                            }}
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold cursor-pointer transition flex items-center gap-1"
+                          >
+                            <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>{language === 'bn' ? 'এখনই লক করুন' : 'Lock Now'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleRemoveAppLock}
+                            disabled={saving}
+                            className="px-3 py-1.5 bg-rose-950/60 hover:bg-rose-900/60 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-semibold cursor-pointer transition"
+                          >
+                            {language === 'bn' ? 'পিন বন্ধ করুন' : 'Remove PIN'}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
 
                   {/* Password Change / Recovery */}
@@ -644,14 +733,14 @@ export function ProfileModal({
 
                     <div className="space-y-2">
                       <input
-                        type={showNewPassword ? 'text' : 'password'}
+                        type="password"
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
                         placeholder={t('newPasswordPlaceholder')}
                         className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                       />
                       <input
-                        type={showNewPassword ? 'text' : 'password'}
+                        type="password"
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
                         placeholder={t('confirmPasswordPlaceholder')}
@@ -694,21 +783,18 @@ export function ProfileModal({
                         nameKey: 'themeDeepSlateName',
                         descKey: 'themeDeepSlateDesc',
                         icon: Moon,
-                        color: 'bg-slate-900 border-emerald-500/50',
                       },
                       {
                         id: 'minimal-light' as ThemeMode,
                         nameKey: 'themeMinimalLightName',
                         descKey: 'themeMinimalLightDesc',
                         icon: Sun,
-                        color: 'bg-slate-800 border-sky-400/50',
                       },
                       {
                         id: 'telegram-blue' as ThemeMode,
                         nameKey: 'themeTelegramBlueName',
                         descKey: 'themeTelegramBlueDesc',
                         icon: Compass,
-                        color: 'bg-[#0f172a] border-emerald-400/50',
                       },
                     ].map((item) => {
                       const Icon = item.icon;
@@ -728,8 +814,8 @@ export function ProfileModal({
                               <Icon className="w-4 h-4" />
                             </div>
                             <div>
-                              <div className="text-xs font-bold text-white">{t(item.nameKey as any)}</div>
-                              <div className="text-[11px] text-slate-400">{t(item.descKey as any)}</div>
+                              <div className="text-xs font-bold text-white">{t(item.nameKey as Parameters<typeof t>[0])}</div>
+                              <div className="text-[11px] text-slate-400">{t(item.descKey as Parameters<typeof t>[0])}</div>
                             </div>
                           </div>
                           {isSelected && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
@@ -765,8 +851,8 @@ export function ProfileModal({
                           }`}
                         >
                           <div>
-                            <div className="text-xs font-bold text-white">{t(item.nameKey as any)}</div>
-                            <div className="text-[11px] text-slate-400 mt-0.5">{t(item.descKey as any)}</div>
+                            <div className="text-xs font-bold text-white">{t(item.nameKey as Parameters<typeof t>[0])}</div>
+                            <div className="text-[11px] text-slate-400 mt-0.5">{t(item.descKey as Parameters<typeof t>[0])}</div>
                           </div>
                           {isSelected && (
                             <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[10px] font-bold rounded-full border border-emerald-500/30">
@@ -780,7 +866,7 @@ export function ProfileModal({
                 </div>
               )}
 
-              {/* TAB 5: Danger Zone (Account Deletion) OR Super Admin Root Protection */}
+              {/* TAB 5: Danger Zone */}
               {activeTab === 'danger' && (
                 isUserSuperAdmin ? (
                   <div className="p-5 bg-gradient-to-r from-emerald-950/40 via-slate-900 to-slate-950/80 border border-emerald-500/40 rounded-2xl space-y-4 shadow-md animate-in fade-in">
@@ -808,7 +894,7 @@ export function ProfileModal({
                         <Check className="w-4 h-4 shrink-0" />
                         <span>
                           {language === 'bn'
-                            ? 'ভুলবশত ক্লিক করলেও কোনো প্রকার ডিলিট হওয়ার সুযোগ নেই (১০০% নিরাপদ)।'
+                            ? 'ভুলবশত ক্লিক করলেও কোনো প্রকার ডিলিট হওয়ার সুযোগ নেই।'
                             : 'Permanent deletion lockout active. No accidental deletion is possible.'}
                         </span>
                       </div>
@@ -857,7 +943,6 @@ export function ProfileModal({
               )}
             </div>
 
-            {/* Bottom Form Actions for Profile Tab */}
             {activeTab === 'profile' && (
               <div className="pt-4 border-t border-slate-800 flex justify-end">
                 <button

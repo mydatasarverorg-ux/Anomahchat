@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { deleteChatRoom, formatLastSeenStatus } from '../services/chatService';
 import { isSuperAdmin } from '../services/adminService';
-import type { ChatRoom, UserProfile } from '../types/chat';
+import type { ChatRoom, DirectoryUser, UserProfile } from '../types/chat';
 import {
   MessageSquarePlus,
   Search,
@@ -47,12 +47,12 @@ export function Sidebar({
   ghostUser,
   onExitGhostMode,
 }: SidebarProps) {
-  const { user, signOutUser } = useAuth();
+  const { user, firebaseUser, signOutUser } = useAuth();
   const { language, toggleLanguage, t } = useLanguage();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'direct' | 'group'>('all');
   const [chatToDelete, setChatToDelete] = useState<ChatRoom | null>(null);
-  const [liveUsersMap, setLiveUsersMap] = useState<Record<string, UserProfile>>({});
+  const [liveUsersMap, setLiveUsersMap] = useState<Record<string, DirectoryUser>>({});
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -71,19 +71,23 @@ export function Sidebar({
     };
   }, [showMenu]);
 
-  // Real-time live presence listener for users
+  // Real-time live presence listener for public non-PII directory
   useEffect(() => {
+    const q = query(
+      collection(db, 'directory'),
+      where('status', 'in', ['active', 'scheduled_for_deletion'])
+    );
     const unsubscribe = onSnapshot(
-      collection(db, 'users'),
+      q,
       (snapshot) => {
-        const map: Record<string, UserProfile> = {};
+        const map: Record<string, DirectoryUser> = {};
         snapshot.forEach((docItem) => {
-          map[docItem.id] = docItem.data() as UserProfile;
+          map[docItem.id] = docItem.data() as DirectoryUser;
         });
         setLiveUsersMap(map);
       },
       (error) => {
-        console.warn('Users presence listener warning:', error);
+        console.warn('Directory presence listener warning:', error);
       }
     );
     return () => unsubscribe();
@@ -135,7 +139,9 @@ export function Sidebar({
       isOnline: presence.isOnline && !isSuspended && !isDeleted,
       isSuspended,
       isDeleted,
-      about: isDeleted ? t('deletedAccountStatus') : liveProfile?.email || details?.email || '',
+      about: isDeleted
+        ? t('deletedAccountStatus')
+        : liveProfile?.about || (liveProfile?.username ? `@${liveProfile.username}` : ''),
     };
   };
 
@@ -287,8 +293,8 @@ export function Sidebar({
                 <span>{t('shareLinkBtn')}</span>
               </button>
 
-              {/* Super Admin Control Panel (Visible strictly to chinisdramaorg@gmail.com) */}
-              {isSuperAdmin(user?.email) && onOpenAdmin && (
+              {/* Super Admin Control Panel (Visible strictly to verified chinisdramaorg@gmail.com) */}
+              {isSuperAdmin(user?.email) && Boolean(firebaseUser?.emailVerified) && onOpenAdmin && (
                 <>
                   <div className="h-px bg-slate-800 my-1 mx-2" />
                   <button

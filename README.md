@@ -1,4 +1,4 @@
-# Anomah Chat (Version: Mahi A01)
+# Anomah Chat (Version: v1.0.6 · Mahi A06)
 > **Owner & Developer:** Mahi Muhtasim  
 > **Platform:** Web & Android (APK)
 
@@ -16,7 +16,7 @@ This repository is pre-configured with **Capacitor** and a **GitHub Actions Work
    ```bash
    git init
    git add .
-   git commit -m "Anomah Chat Mahi A01 release"
+   git commit -m "Anomah Chat v1.0.6 (Mahi A06) release"
    git branch -M main
    git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git
    git push -u origin main
@@ -31,7 +31,7 @@ This repository is pre-configured with **Capacitor** and a **GitHub Actions Work
 3. **Download your APK:**
    * Once the workflow run shows a green checkmark (Succeeded), click on it.
    * Scroll down to the **Artifacts** section at the bottom.
-   * Click on **`Anomah-Chat-vMahi-A01-APK`** to download your Android APK file (`Anomah-Chat-vMahi-A01.apk`).
+   * Click on **`AnomahChat-v1.0.6-APK`** to download your Android APK file (`AnomahChat-v1.0.6.apk`).
 
 4. **Install on your Android Phone:**
    * Transfer the `.apk` file to your Android phone (or download it directly from your phone's browser).
@@ -55,4 +55,4 @@ npm run build:apk
 ```
 
 ---
-*Built with ❤️ by Mahi Muhtasim • Version: Mahi A01*
+*Built with ❤️ by Mahi Muhtasim • Version: v1.0.6 (Mahi A06)*
