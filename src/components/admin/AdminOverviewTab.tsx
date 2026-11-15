@@ -1,4 +1,4 @@
-import { KeyRound, Lock, MessageSquare, Users } from 'lucide-react';
+import { HardDrive, KeyRound, Lock, MessageSquare, Users } from 'lucide-react';
 import { SUPER_ADMIN_EMAIL } from '../../services/adminService';
 
 interface AdminOverviewTabProps {
@@ -9,7 +9,7 @@ interface AdminOverviewTabProps {
   pendingRecoveryCount: number;
   pendingReportsCount: number;
   bannedUsersCount: number;
-  onSelectTab: (tab: 'recovery' | 'chat_audit' | 'users') => void;
+  onSelectTab: (tab: 'recovery' | 'chat_audit' | 'users' | 'backup') => void;
 }
 
 export function AdminOverviewTab({
@@ -72,7 +72,7 @@ export function AdminOverviewTab({
         <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
           {t('quickActionsTitle')}
         </h4>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <button
             onClick={() => onSelectTab('recovery')}
             className="p-4 bg-slate-950/70 border border-slate-800 hover:border-amber-500/50 rounded-2xl text-left transition cursor-pointer group"
@@ -103,6 +103,17 @@ export function AdminOverviewTab({
             <div className="text-xs font-bold text-white">{t('quickSearchUsersBtn')}</div>
             <div className="text-[11px] text-slate-400 mt-1">
               Inspect user dossiers, app-lock status, and activity graphs
+            </div>
+          </button>
+
+          <button
+            onClick={() => onSelectTab('backup')}
+            className="p-4 bg-slate-950/70 border border-slate-800 hover:border-purple-500/50 rounded-2xl text-left transition cursor-pointer group"
+          >
+            <HardDrive className="w-5 h-5 text-purple-400 mb-2 group-hover:scale-110 transition" />
+            <div className="text-xs font-bold text-white">Drive Backup & 1 GiB Clean</div>
+            <div className="text-[11px] text-slate-400 mt-1">
+              Back up chats to anomahchatsarverorg@gmail.com & reclaim storage
             </div>
           </button>
         </div>

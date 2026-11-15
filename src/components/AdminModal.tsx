@@ -55,6 +55,7 @@ import {
   MessageSquare,
   Sparkles,
   AlertTriangle,
+  HardDrive,
 } from 'lucide-react';
 import { AdminOverviewTab } from './admin/AdminOverviewTab';
 import { AdminUsersTab } from './admin/AdminUsersTab';
@@ -64,6 +65,7 @@ import { AdminReportsTab } from './admin/AdminReportsTab';
 import { AdminAnnouncementsTab } from './admin/AdminAnnouncementsTab';
 import { AdminReleaseTab } from './admin/AdminReleaseTab';
 import { AdminLogsTab } from './admin/AdminLogsTab';
+import { AdminBackupTab } from './admin/AdminBackupTab';
 import { AdminModals } from './admin/AdminModals';
 
 interface AdminModalProps {
@@ -76,20 +78,20 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   const { t, language } = useLanguage();
 
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'users' | 'chat_audit' | 'recovery' | 'reports' | 'announcements' | 'logs' | 'updates'
+    'overview' | 'users' | 'chat_audit' | 'backup' | 'recovery' | 'reports' | 'announcements' | 'logs' | 'updates'
   >('overview');
 
   const [currentLiveRelease, setCurrentLiveRelease] = useState<AppReleaseInfo | null>(null);
-  const [releaseVersionName, setReleaseVersionName] = useState('1.0.8');
-  const [releaseVersionCode, setReleaseVersionCode] = useState('108');
+  const [releaseVersionName, setReleaseVersionName] = useState('1.0.9');
+  const [releaseVersionCode, setReleaseVersionCode] = useState('109');
   const [releaseApkUrl, setReleaseApkUrl] = useState('https://github.com/mydatasarverorg-ux/Anomahchat/releases/latest/download/AnomahChat.apk');
   const [releaseApkSha256, setReleaseApkSha256] = useState('');
   const [releaseFileSizeText, setReleaseFileSizeText] = useState('');
   const [releaseChangelogEn, setReleaseChangelogEn] = useState(
-    '• Native Android Camera, Audio & Notification Runtime Permissions\n• Real-Time Background Message & Incoming Call Notifications with Tap-to-Open Chat\n• Real-Time 1-on-1 WebRTC Audio & Video Calling (Mahi A08)'
+    '• Super Admin Google Drive Backup & Safe 1 GiB Firestore Cleanup\n• Automatic In-Chat Audio/Video Call Logs (Duration, Missed, Declined & Callback)\n• Native Android Camera, Audio & Background Notification Support (Mahi A09)'
   );
   const [releaseChangelogBn, setReleaseChangelogBn] = useState(
-    '• অ্যান্ড্রয়েড ক্যামেরা, অডিও ও নোটিফিকেশন রানটাইম পারমিশন\n• ব্যাকগ্রাউন্ড ও অন্য চ্যাটে থাকা অবস্থায় রিয়েল-টাইম মেসেজ ও ইনকামিং কল নোটিফিকেশন\n• রিয়েল-টাইম ১-অন-১ WebRTC অডিও ও ভিডিও কলিং (Mahi A08)'
+    '• সুপার অ্যাডমিন Google Drive চ্যাট ব্যাকআপ ও নিরাপদ ১ GiB স্টোরেজ ক্লিনআপ\n• চ্যাটের ভেতর অটোমেটিক অডিও/ভিডিও কল লগ ও কলব্যাক সুবিধা\n• অ্যান্ড্রয়েড ক্যামেরা, অডিও ও ব্যাকগ্রাউন্ড নোটিফিকেশন সাপোর্ট (Mahi A09)'
   );
   const [releaseForceUpdate, setReleaseForceUpdate] = useState(false);
   const [publishingRelease, setPublishingRelease] = useState(false);
@@ -222,8 +224,9 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   }, []);
 
   const showSuccessBanner = (msg: string) => {
+    setActionErrorMsg(null);
     setActionSuccessMsg(msg);
-    setTimeout(() => setActionSuccessMsg(null), 3000);
+    setTimeout(() => setActionSuccessMsg(null), 3500);
   };
 
   const copyToClipboard = (text: string) => {
@@ -238,7 +241,7 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     setPublishingRelease(true);
     setActionErrorMsg(null);
     try {
-      let parsedCode = parseInt(releaseVersionCode, 10) || 108;
+      let parsedCode = parseInt(releaseVersionCode, 10) || 109;
       if (parsedCode < 10) {
         parsedCode = parsedCode * 100 + (parsedCode === 2 ? 2 : 0);
       }
@@ -543,6 +546,7 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
             { id: 'overview', label: t('adminTabOverview'), icon: Sparkles },
             { id: 'users', label: t('adminTabUsers'), icon: Users, badge: totalUsersCount },
             { id: 'chat_audit', label: t('adminTabChatAudit'), icon: MessageSquare, badge: totalChatsCount },
+            { id: 'backup', label: language === 'bn' ? 'ড্রাইভ ব্যাকআপ' : 'Drive Backup', icon: HardDrive },
             { id: 'recovery', label: t('adminTabRecovery'), icon: KeyRound, badge: pendingRecoveryCount, alert: pendingRecoveryCount > 0 },
             { id: 'reports', label: t('adminTabReports'), icon: Flag, badge: pendingReportsCount, alert: pendingReportsCount > 0 },
             { id: 'announcements', label: t('adminTabAnnouncements'), icon: Radio },
@@ -746,6 +750,15 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
               setReleaseForceUpdate={setReleaseForceUpdate}
               publishingRelease={publishingRelease}
               onPublishRelease={handlePublishRelease}
+            />
+          )}
+
+          {activeTab === 'backup' && (
+            <AdminBackupTab
+              language={language}
+              allChats={allChats}
+              onSuccess={showSuccessBanner}
+              onError={(msg) => setActionErrorMsg(msg || null)}
             />
           )}
 

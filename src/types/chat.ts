@@ -127,7 +127,9 @@ export interface AdminAuditLog {
     | 'clear_app_lock'
     | 'create_announcement'
     | 'toggle_announcement'
-    | 'delete_announcement';
+    | 'delete_announcement'
+    | 'backup_chats'
+    | 'cleanup_storage';
   targetId?: string;
   targetName?: string;
   details: string;
