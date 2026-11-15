@@ -97,7 +97,7 @@ export function Sidebar({
     if (chat.type === 'group') {
       return {
         name: chat.name || t('filterGroup'),
-        photo: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=100&auto=format&fit=crop&q=80',
+        photo: chat.groupPhoto || `https://api.dicebear.com/7.x/identicon/svg?seed=${chat.id}&backgroundColor=0f172a`,
         isOnline: false,
         about: t('membersCount', { count: chat.participantIds.length }),
       };

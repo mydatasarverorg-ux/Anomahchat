@@ -84,7 +84,7 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   const [releaseVersionCode, setReleaseVersionCode] = useState('106');
   const [releaseApkUrl, setReleaseApkUrl] = useState('https://github.com/mydatasarverorg-ux/Anomahchat/releases/latest/download/AnomahChat.apk');
   const [releaseApkSha256, setReleaseApkSha256] = useState('');
-  const [releaseFileSizeText, setReleaseFileSizeText] = useState('9.6 MB');
+  const [releaseFileSizeText, setReleaseFileSizeText] = useState('');
   const [releaseChangelogEn, setReleaseChangelogEn] = useState(
     '• Hardened Firestore Zero-Trust Security Rules\n• Signed Release APK & SHA-256 Auto-Update Verification\n• Version Mahi A06 release'
   );
@@ -178,18 +178,17 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
           didBackfillRef.current = true;
           backfillDirectoryFromUsers(list).catch(() => {});
         }
-
-        if (selectedDossierUser) {
-          const fresh = list.find((u) => u.userId === selectedDossierUser.userId);
-          if (fresh) setSelectedDossierUser(fresh);
-        }
       },
       (error) => {
         console.warn('Admin users snapshot notice:', error);
       }
     );
     return () => unsubscribe();
-  }, [selectedDossierUser]);
+  }, []);
+
+  const activeDossierUser = selectedDossierUser
+    ? usersList.find((u) => u.userId === selectedDossierUser.userId) || selectedDossierUser
+    : null;
 
   useEffect(() => subscribeToAllChatsForAdmin((data) => setAllChats(data)), []);
 
@@ -214,7 +213,7 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
         setReleaseVersionCode(String(rel.versionCode));
         setReleaseApkUrl(rel.apkDownloadUrl || '');
         setReleaseApkSha256(rel.apkSha256 || '');
-        setReleaseFileSizeText(rel.fileSizeText || '9.6 MB');
+        setReleaseFileSizeText(rel.fileSizeText || '');
         setReleaseChangelogEn(rel.changelogEn || '');
         setReleaseChangelogBn(rel.changelogBn || '');
         setReleaseForceUpdate(Boolean(rel.forceUpdate));
@@ -339,14 +338,14 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   };
 
   const handleClearUserAppLock = async () => {
-    if (!selectedDossierUser || !user?.email) return;
+    if (!activeDossierUser || !user?.email) return;
     try {
       setIsClearingLock(true);
-      await adminClearUserAppLock(selectedDossierUser.userId, user.email);
+      await adminClearUserAppLock(activeDossierUser.userId, user.email);
       showSuccessBanner(
         language === 'bn'
-          ? `${selectedDossierUser.displayName}-এর অ্যাপ-লক রিসেট করা হয়েছে।`
-          : `Cleared Quick App-Lock for ${selectedDossierUser.displayName}.`
+          ? `${activeDossierUser.displayName}-এর অ্যাপ-লক রিসেট করা হয়েছে।`
+          : `Cleared Quick App-Lock for ${activeDossierUser.displayName}.`
       );
     } catch (err) {
       console.error(err);
@@ -759,7 +758,7 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
         language={language}
         copiedText={copiedText}
         onCopy={copyToClipboard}
-        selectedDossierUser={selectedDossierUser}
+        selectedDossierUser={activeDossierUser}
         onCloseDossier={() => setSelectedDossierUser(null)}
         onConfirmUnban={handleConfirmUnban}
         onInspectUserChats={handleInspectUserChats}

@@ -61,8 +61,8 @@ export async function syncUserProfile(user: {
 
     if (existingSnap.exists()) {
       const data = existingSnap.data() as UserProfile;
-      const resolvedName = (user.displayName || data.displayName || fallbackName).slice(0, 100);
-      const resolvedPhoto = (user.photoURL || data.photoURL || fallbackPhoto).slice(0, 1000);
+      const resolvedName = (data.displayName || user.displayName || fallbackName).slice(0, 100);
+      const resolvedPhoto = (data.photoURL || user.photoURL || fallbackPhoto).slice(0, 1000);
       const updated: Record<string, unknown> = {
         isOnline: true,
         lastSeen: nowIso,
@@ -641,14 +641,25 @@ export async function deleteChatRoom(chatId: string, currentUserId: string) {
     if (!snap.exists()) return;
     const data = snap.data() as ChatRoom;
 
-    const remaining = data.participantIds.filter((id) => id !== currentUserId);
-    if (remaining.length <= 1 || data.type === 'direct') {
+    if (data.type === 'direct') {
+      // Purge all messages in deterministic dm_* room so deleted history never resurrects on new DM
+      const msgsSnap = await getDocs(collection(db, 'chats', chatId, 'messages'));
+      await Promise.all(msgsSnap.docs.map((d) => deleteDoc(d.ref)));
+
+      const callsSnap = await getDocs(collection(db, 'chats', chatId, 'calls')).catch(() => null);
+      if (callsSnap) {
+        await Promise.all(callsSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})));
+      }
+
       await deleteDoc(chatRef);
+      return;
+    }
+
+    const remaining = (data.participantIds || []).filter((id) => id !== currentUserId);
+    if (remaining.length === 0) {
+      await deleteGroupChatPermanently(chatId);
     } else {
-      await updateDoc(chatRef, {
-        participantIds: remaining,
-        updatedAt: new Date().toISOString(),
-      });
+      await leaveGroupChat(chatId, currentUserId);
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
@@ -855,38 +866,70 @@ export async function isUsernameAvailable(username: string, currentUserId?: stri
   const clean = username.trim().toLowerCase().replace(/^@/, '');
   if (!clean || clean.length < 3) return false;
   try {
-    const q = query(
-      collection(db, 'directory'),
-      where('username', '==', clean),
-      where('status', 'in', ['active', 'scheduled_for_deletion'])
-    );
-    const snap = await getDocs(q);
-    if (snap.empty) return true;
-    if (currentUserId && snap.docs.length === 1 && snap.docs[0].id === currentUserId) {
-      return true;
+    try {
+      const q = query(
+        collection(db, 'directory'),
+        where('username', '==', clean),
+        where('status', 'in', ['active', 'scheduled_for_deletion'])
+      );
+      const snap = await getDocs(q);
+      if (snap.empty) return true;
+      if (currentUserId && snap.docs.length === 1 && snap.docs[0].id === currentUserId) {
+        return true;
+      }
+      return false;
+    } catch {
+      // Fallback if composite index on (username, status) is not provisioned yet
+      const qFallback = query(
+        collection(db, 'directory'),
+        where('status', 'in', ['active', 'scheduled_for_deletion'])
+      );
+      const snap = await getDocs(qFallback);
+      const matches = snap.docs.filter(
+        (d) => ((d.data() as DirectoryUser).username || '').toLowerCase() === clean
+      );
+      if (matches.length === 0) return true;
+      if (currentUserId && matches.length === 1 && matches[0].id === currentUserId) {
+        return true;
+      }
+      return false;
     }
-    return false;
   } catch (err) {
     console.warn('Error checking username:', err);
     return false;
   }
 }
 
-// Indexed lookup in directory by username or UID (no full-collection scan)
+// Indexed lookup in directory by username or UID
 export async function findDirectoryUserByIdentifier(identifier: string): Promise<DirectoryUser | null> {
   const raw = identifier.trim().replace(/^@/, '');
   const clean = raw.toLowerCase();
   if (!clean) return null;
 
   try {
-    const qUsername = query(
-      collection(db, 'directory'),
-      where('username', '==', clean),
-      where('status', '==', 'active')
-    );
-    const snapUser = await getDocs(qUsername);
-    if (!snapUser.empty) {
-      return snapUser.docs[0].data() as DirectoryUser;
+    try {
+      const qUsername = query(
+        collection(db, 'directory'),
+        where('username', '==', clean),
+        where('status', '==', 'active')
+      );
+      const snapUser = await getDocs(qUsername);
+      if (!snapUser.empty) {
+        return snapUser.docs[0].data() as DirectoryUser;
+      }
+    } catch {
+      // Fallback if composite index on (username, status) is not provisioned yet
+      const qFallback = query(
+        collection(db, 'directory'),
+        where('status', '==', 'active')
+      );
+      const snapFallback = await getDocs(qFallback);
+      const match = snapFallback.docs.find(
+        (d) => ((d.data() as DirectoryUser).username || '').toLowerCase() === clean
+      );
+      if (match) {
+        return match.data() as DirectoryUser;
+      }
     }
 
     const dirDocRef = doc(db, 'directory', raw);

@@ -187,6 +187,38 @@ service cloud.firestore {
         && (!('editedAt' in data) || (data.editedAt is string && data.editedAt.size() <= 64));
     }
 
+    function isValidCallSignal(data, chatId, callId) {
+      return data.keys().hasAll(['id', 'chatId', 'callerId', 'calleeId', 'type', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'chatId', 'callerId', 'callerName', 'callerPhoto',
+          'calleeId', 'calleeName', 'calleePhoto', 'type', 'status',
+          'offer', 'answer', 'createdAt', 'updatedAt'
+        ])
+        && data.id is string && data.id == callId && data.id.size() <= 128
+        && data.chatId is string && data.chatId == chatId && data.chatId.size() <= 128
+        && data.callerId is string && data.callerId.size() >= 1 && data.callerId.size() <= 128
+        && data.calleeId is string && data.calleeId.size() >= 1 && data.calleeId.size() <= 128
+        && data.type in ['audio', 'video']
+        && data.status in ['ringing', 'answered', 'declined', 'ended', 'missed']
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && data.updatedAt is string && data.updatedAt.size() <= 64
+        && (!('callerName' in data) || (data.callerName is string && data.callerName.size() <= 100))
+        && (!('callerPhoto' in data) || (data.callerPhoto is string && data.callerPhoto.size() <= 1000))
+        && (!('calleeName' in data) || (data.calleeName is string && data.calleeName.size() <= 100))
+        && (!('calleePhoto' in data) || (data.calleePhoto is string && data.calleePhoto.size() <= 1000))
+        && (!('offer' in data) || (data.offer is map && data.offer.keys().hasOnly(['type', 'sdp']) && data.offer.sdp is string && data.offer.sdp.size() <= 20000))
+        && (!('answer' in data) || (data.answer is map && data.answer.keys().hasOnly(['type', 'sdp']) && data.answer.sdp is string && data.answer.sdp.size() <= 20000));
+    }
+
+    function isValidIceCandidate(data) {
+      return data.keys().hasAll(['candidate'])
+        && data.keys().hasOnly(['candidate', 'sdpMid', 'sdpMLineIndex', 'usernameFragment'])
+        && data.candidate is string && data.candidate.size() >= 1 && data.candidate.size() <= 2000
+        && (!('sdpMid' in data) || data.sdpMid == null || (data.sdpMid is string && data.sdpMid.size() <= 64))
+        && (!('sdpMLineIndex' in data) || data.sdpMLineIndex == null || data.sdpMLineIndex is number)
+        && (!('usernameFragment' in data) || data.usernameFragment == null || (data.usernameFragment is string && data.usernameFragment.size() <= 128));
+    }
+
     function isValidReport(data, reportId) {
       return data.keys().hasAll(['id', 'reporterId', 'targetUserId', 'reason', 'details', 'status', 'createdAt'])
         && data.keys().hasOnly([
@@ -390,7 +422,9 @@ service cloud.firestore {
               'participantIds', 'adminIds', 'lastMessageText', 'lastMessageTime', 'updatedAt'
             ])) ||
           // Action 4: Direct chat leave when removing self
-          (incoming().diff(existing()).affectedKeys().hasOnly(['participantIds', 'updatedAt']) &&
+          (existing().type == 'direct' &&
+            incoming().participantIds.size() + 1 == existing().participantIds.size() &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['participantIds', 'updatedAt']) &&
             !(request.auth.uid in incoming().participantIds)) ||
           // Action 5: Claim expired suspension sync after master profile reinstated
           (isCallerNotBanned() &&
@@ -399,7 +433,15 @@ service cloud.firestore {
         ))
       );
 
-      allow delete: if isValidId(chatId) && (isAdmin() || (isSignedIn() && request.auth.uid in existing().participantIds));
+      allow delete: if isValidId(chatId) && (
+        isAdmin() ||
+        (isSignedIn() && request.auth.uid in existing().participantIds && (
+          existing().type == 'direct' ||
+          existing().participantIds.size() <= 1 ||
+          (('adminIds' in existing()) && request.auth.uid in existing().adminIds) ||
+          (('creatorId' in existing()) && existing().creatorId == request.auth.uid)
+        ))
+      );
 
       // Messages Sub-Collection (Master Gate to parent chat participantIds)
       match /messages/{messageId} {
@@ -439,9 +481,77 @@ service cloud.firestore {
           isAdmin() ||
           (isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds && (
             existing().senderId == request.auth.uid ||
-            get(/databases/$(database)/documents/chats/$(chatId)).data.type == 'group'
+            get(/databases/$(database)/documents/chats/$(chatId)).data.type == 'direct' ||
+            (get(/databases/$(database)/documents/chats/$(chatId)).data.type == 'group' && (
+              get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds.size() <= 1 ||
+              (('adminIds' in get(/databases/$(database)/documents/chats/$(chatId)).data) &&
+                request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds) ||
+              (('creatorId' in get(/databases/$(database)/documents/chats/$(chatId)).data) &&
+                get(/databases/$(database)/documents/chats/$(chatId)).data.creatorId == request.auth.uid)
+            ))
           ))
         );
+      }
+
+      // 1-on-1 WebRTC Call Signaling Sub-Collection
+      match /calls/{callId} {
+        allow get, list: if isValidId(chatId) && (
+          isAdmin() ||
+          (isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds)
+        );
+
+        allow create: if isSignedIn() && isValidId(chatId) && isValidId(callId)
+          && isValidCallSignal(incoming(), chatId, callId)
+          && incoming().callerId == request.auth.uid
+          && incoming().status == 'ringing'
+          && isCallerNotBanned()
+          && get(/databases/$(database)/documents/chats/$(chatId)).data.type == 'direct'
+          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
+          && incoming().calleeId in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
+          && incoming().calleeId != request.auth.uid;
+
+        allow update: if isSignedIn() && isValidId(chatId) && isValidId(callId)
+          && isValidCallSignal(incoming(), chatId, callId)
+          && incoming().callerId == existing().callerId
+          && incoming().calleeId == existing().calleeId
+          && incoming().chatId == existing().chatId
+          && incoming().createdAt == existing().createdAt
+          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
+          && (request.auth.uid == existing().callerId || request.auth.uid == existing().calleeId)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'answer', 'updatedAt']);
+
+        allow delete: if isValidId(chatId) && isValidId(callId) && (
+          isAdmin() ||
+          (isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds)
+        );
+
+        match /offerCandidates/{candidateId} {
+          allow get, list: if isValidId(chatId) && isValidId(callId) && (
+            isAdmin() ||
+            (isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds)
+          );
+          allow create: if isSignedIn() && isValidId(chatId) && isValidId(callId) && isValidId(candidateId)
+            && isValidIceCandidate(incoming())
+            && get(/databases/$(database)/documents/chats/$(chatId)/calls/$(callId)).data.callerId == request.auth.uid;
+          allow delete: if isValidId(chatId) && isValidId(callId) && isValidId(candidateId) && (
+            isAdmin() ||
+            (isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds)
+          );
+        }
+
+        match /answerCandidates/{candidateId} {
+          allow get, list: if isValidId(chatId) && isValidId(callId) && (
+            isAdmin() ||
+            (isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds)
+          );
+          allow create: if isSignedIn() && isValidId(chatId) && isValidId(callId) && isValidId(candidateId)
+            && isValidIceCandidate(incoming())
+            && get(/databases/$(database)/documents/chats/$(chatId)/calls/$(callId)).data.calleeId == request.auth.uid;
+          allow delete: if isValidId(chatId) && isValidId(callId) && isValidId(candidateId) && (
+            isAdmin() ||
+            (isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds)
+          );
+        }
       }
     }
 

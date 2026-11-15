@@ -554,11 +554,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     await updateDoc(userRef, docUpdates);
 
+    if (auth.currentUser) {
+      updateFirebaseProfile(auth.currentUser, {
+        displayName: cleanDisplayName,
+        ...(cleanPhoto.startsWith('http') ? { photoURL: cleanPhoto } : {}),
+      }).catch(() => {});
+    }
+
     const dirUpdates: Record<string, unknown> = {
       userId: user.userId,
       displayName: cleanDisplayName,
       about: cleanAbout,
       photoURL: cleanPhoto,
+      status: user.status || 'active',
     };
     if (resolvedUsername !== undefined) {
       dirUpdates.username = resolvedUsername;

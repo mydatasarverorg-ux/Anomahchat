@@ -63,7 +63,7 @@ async function fetchGitHubLatestRelease(): Promise<AppReleaseInfo | null> {
     const shaMatch = bodyText.match(/SHA-?256[:\s`]+([a-fA-F0-9]{64})/i);
     const apkSha256 = shaMatch ? shaMatch[1].toLowerCase() : undefined;
 
-    const sizeMb = apkAsset?.size ? `${(apkAsset.size / (1024 * 1024)).toFixed(1)} MB` : '9.6 MB';
+    const sizeMb = apkAsset?.size ? `${(apkAsset.size / (1024 * 1024)).toFixed(1)} MB` : undefined;
 
     return {
       versionName: tag,

@@ -187,13 +187,35 @@ export interface ChatRoom {
   updatedAt: string;
 }
 
+export interface CallSignalData {
+  id: string;
+  chatId: string;
+  callerId: string;
+  callerName: string;
+  callerPhoto?: string;
+  calleeId: string;
+  calleeName: string;
+  calleePhoto?: string;
+  type: 'audio' | 'video';
+  status: 'ringing' | 'answered' | 'declined' | 'ended' | 'missed';
+  offer?: { type: string; sdp: string };
+  answer?: { type: string; sdp: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CallSession {
   active: boolean;
+  callId?: string;
+  chatId: string;
+  role: 'caller' | 'callee';
   type: 'audio' | 'video';
+  partnerId: string;
   recipientName: string;
   recipientPhoto?: string;
-  status: 'calling' | 'connected' | 'ended';
+  status: 'calling' | 'ringing' | 'connecting' | 'connected' | 'declined' | 'missed' | 'ended' | 'error';
   isMuted: boolean;
   isVideoOff: boolean;
   durationSeconds: number;
+  signalData?: CallSignalData;
 }

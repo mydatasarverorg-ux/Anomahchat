@@ -713,6 +713,40 @@
         }
       },
       "required": ["versionName", "versionCode", "apkDownloadUrl", "changelogEn", "changelogBn", "publishedAt", "publishedBy"]
+    },
+    "CallSignal": {
+      "title": "CallSignal",
+      "description": "WebRTC signaling session for direct 1-on-1 audio or video calls",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "chatId": { "type": "string", "maxLength": 128 },
+        "callerId": { "type": "string", "maxLength": 128 },
+        "callerName": { "type": "string", "maxLength": 100 },
+        "callerPhoto": { "type": "string", "maxLength": 1000 },
+        "calleeId": { "type": "string", "maxLength": 128 },
+        "calleeName": { "type": "string", "maxLength": 100 },
+        "calleePhoto": { "type": "string", "maxLength": 1000 },
+        "type": { "type": "string", "enum": ["audio", "video"] },
+        "status": { "type": "string", "enum": ["ringing", "answered", "declined", "ended", "missed"] },
+        "offer": { "type": "object" },
+        "answer": { "type": "object" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "chatId", "callerId", "calleeId", "type", "status", "createdAt", "updatedAt"]
+    },
+    "IceCandidate": {
+      "title": "IceCandidate",
+      "description": "WebRTC ICE candidate payload exchanged during call negotiation",
+      "type": "object",
+      "properties": {
+        "candidate": { "type": "string", "maxLength": 2000 },
+        "sdpMid": { "type": "string", "maxLength": 64 },
+        "sdpMLineIndex": { "type": "number" },
+        "usernameFragment": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["candidate"]
     }
   },
   "firestore": {
@@ -735,6 +769,18 @@
     "/chats/{chatId}/messages/{messageId}": {
       "schema": "Message",
       "description": "Real-time message stream inside a chat room gated by parent participantIds"
+    },
+    "/chats/{chatId}/calls/{callId}": {
+      "schema": "CallSignal",
+      "description": "WebRTC offer/answer signaling records for direct 1-on-1 calls"
+    },
+    "/chats/{chatId}/calls/{callId}/offerCandidates/{candidateId}": {
+      "schema": "IceCandidate",
+      "description": "Caller ICE candidates"
+    },
+    "/chats/{chatId}/calls/{callId}/answerCandidates/{candidateId}": {
+      "schema": "IceCandidate",
+      "description": "Callee ICE candidates"
     },
     "/reports/{reportId}": {
       "schema": "Report",

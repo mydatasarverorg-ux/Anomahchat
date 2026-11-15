@@ -87,6 +87,7 @@ export function ChatArea({
   const [showDeleteChatConfirm, setShowDeleteChatConfirm] = useState(false);
   const [messageToDelete, setMessageToDelete] = useState<ChatMessage | null>(null);
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   const [activeMenuMessage, setActiveMenuMessage] = useState<ChatMessage | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
@@ -147,7 +148,7 @@ export function ChatArea({
       : partnerUser?.displayName || partnerDetails?.displayName || (language === 'bn' ? 'ব্যবহারকারী' : 'User');
   const avatar =
     chat.type === 'group'
-      ? 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=100&auto=format&fit=crop&q=80'
+      ? chat.groupPhoto || `https://api.dicebear.com/7.x/identicon/svg?seed=${chat.id}&backgroundColor=0f172a`
       : isPartnerDeleted
       ? 'https://api.dicebear.com/7.x/bottts/svg?seed=deleted_user'
       : partnerUser?.photoURL || partnerDetails?.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${partnerId}`;
@@ -228,36 +229,48 @@ export function ChatArea({
     if (!inputText.trim() || !user || isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended) return;
 
     const text = inputText;
-    setInputText('');
     const currentReply = replyingTo;
+    setInputText('');
     setReplyingTo(null);
     setShowEmojiPicker(false);
+    setSendError(null);
 
-    sounds.playMessageSent();
-
-    await sendMessage({
-      chatId: chat.id,
-      sender: user,
-      text,
-      type: 'text',
-      replyTo: currentReply
-        ? {
-            id: currentReply.id,
-            text: currentReply.text || (currentReply.type === 'audio' ? t('voiceNoteLabel') : t('imageLabel')),
-            senderName: currentReply.senderName,
-          }
-        : undefined,
-    });
+    try {
+      await sendMessage({
+        chatId: chat.id,
+        sender: user,
+        text,
+        type: 'text',
+        replyTo: currentReply
+          ? {
+              id: currentReply.id,
+              text: currentReply.text || (currentReply.type === 'audio' ? t('voiceNoteLabel') : t('imageLabel')),
+              senderName: currentReply.senderName,
+            }
+          : undefined,
+      });
+      sounds.playMessageSent();
+    } catch (err) {
+      setInputText(text);
+      setReplyingTo(currentReply);
+      setSendError(
+        err instanceof Error
+          ? err.message
+          : language === 'bn'
+          ? 'বার্তা পাঠানো যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।'
+          : 'Failed to send message. Please try again.'
+      );
+    }
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user || isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended) return;
     e.target.value = '';
+    setSendError(null);
 
     try {
       const compressedDataUrl = await compressImageForChat(file);
-      sounds.playMessageSent();
       await sendMessage({
         chatId: chat.id,
         sender: user,
@@ -265,8 +278,16 @@ export function ChatArea({
         type: 'image',
         mediaUrl: compressedDataUrl,
       });
+      sounds.playMessageSent();
     } catch (err) {
       console.error('Failed to process and send image:', err);
+      setSendError(
+        err instanceof Error
+          ? err.message
+          : language === 'bn'
+          ? 'ছবি পাঠানো যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।'
+          : 'Failed to send photo. Please try again.'
+      );
     }
   };
 
@@ -411,7 +432,7 @@ export function ChatArea({
             <Search className="w-4 h-4" />
           </button>
 
-          {!ghostUser && (
+          {!ghostUser && chat.type === 'direct' && partnerId && (
             <>
               <button
                 disabled={isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended}
@@ -419,7 +440,10 @@ export function ChatArea({
                   if (isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended) return;
                   onStartCall({
                     active: true,
+                    chatId: chat.id,
+                    role: 'caller',
                     type: 'audio',
+                    partnerId,
                     recipientName: title,
                     recipientPhoto: avatar,
                     status: 'calling',
@@ -450,7 +474,10 @@ export function ChatArea({
                   if (isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended) return;
                   onStartCall({
                     active: true,
+                    chatId: chat.id,
+                    role: 'caller',
                     type: 'video',
+                    partnerId,
                     recipientName: title,
                     recipientPhoto: avatar,
                     status: 'calling',
@@ -690,6 +717,22 @@ export function ChatArea({
             className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
           >
             <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {sendError && (
+        <div className="px-4 py-2 bg-rose-950/70 border-t border-rose-500/40 text-rose-200 text-xs flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span className="truncate">{sendError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSendError(null)}
+            className="text-rose-300 hover:text-white text-xs px-1.5 py-0.5 rounded cursor-pointer shrink-0"
+          >
+            ✕
           </button>
         </div>
       )}

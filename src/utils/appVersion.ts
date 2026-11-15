@@ -26,21 +26,7 @@ export function isUpdateAvailable(
     remoteName = typeof remote.versionName === 'string' ? remote.versionName : undefined;
   }
 
-  // If remoteCode is single digit e.g. 2 while client has 101/102, normalize to 102
-  if (remoteCode !== undefined && !isNaN(remoteCode)) {
-    let normalizedCode = remoteCode;
-    if (normalizedCode < 10 && APP_VERSION.versionCode >= 100) {
-      normalizedCode = normalizedCode * 100 + (remoteCode === 2 ? 2 : 0);
-    }
-    if (normalizedCode <= APP_VERSION.versionCode) {
-      return false;
-    }
-    if (normalizedCode > APP_VERSION.versionCode) {
-      return true;
-    }
-  }
-
-  // Semver comparison on versionName (e.g. "1.0.2" vs "1.0.1")
+  // Compare semver versionName first when provided (handles multi-digit minor/patch cleanly)
   if (remoteName && typeof remoteName === 'string') {
     const parse = (v: string) =>
       v
@@ -58,6 +44,15 @@ export function isUpdateAvailable(
       if (r > c) return true;
       if (r < c) return false;
     }
+  }
+
+  // Fallback / same-versionName build bump via numeric versionCode
+  if (remoteCode !== undefined && !isNaN(remoteCode)) {
+    let normalizedCode = remoteCode;
+    if (normalizedCode < 10 && APP_VERSION.versionCode >= 100) {
+      normalizedCode = normalizedCode * 100 + (remoteCode === 2 ? 2 : 0);
+    }
+    return normalizedCode > APP_VERSION.versionCode;
   }
 
   return false;

@@ -28,7 +28,10 @@ export function BannedScreen() {
         // Automatically reinstate user when temporary suspension timer expires
         if (!isReactivating && user) {
           setIsReactivating(true);
-          claimExpiredSuspension(user.userId).catch(console.error);
+          claimExpiredSuspension(user.userId).catch((err) => {
+            console.warn('Temporary suspension expiry claim retry queued:', err);
+            setIsReactivating(false);
+          });
         }
         return;
       }
@@ -53,7 +56,7 @@ export function BannedScreen() {
     };
 
     calculateTime();
-    const timer = setInterval(calculateTime, 30000); // Check every 30s
+    const timer = setInterval(calculateTime, 10000); // Check every 10s so server-time skew resolves quickly
     return () => clearInterval(timer);
   }, [user, language, isReactivating]);
 

@@ -19,6 +19,7 @@ import { AnnouncementBanner } from './components/AnnouncementBanner';
 import { AdminModal } from './components/AdminModal';
 import { UpdateModal } from './components/UpdateModal';
 import { subscribeToUserChats } from './services/chatService';
+import { subscribeToIncomingDirectCalls } from './services/callService';
 import { isSuperAdmin } from './services/adminService';
 import { subscribeToLatestRelease, type AppReleaseInfo } from './services/updateService';
 import { isUpdateAvailable, isNativeApkApp } from './utils/appVersion';
@@ -165,6 +166,37 @@ function ChatDashboard({ user }: { user: UserProfile }) {
 
     return () => unsubscribe();
   }, [user.userId, ghostUser]);
+
+  // Listen for incoming 1-on-1 WebRTC calls across active direct chats
+  useEffect(() => {
+    if (ghostUser || user.isBanned) return;
+    const directChats = chats.filter((c) => c.type === 'direct' && !c.isSuspended);
+    if (directChats.length === 0) return;
+
+    const unsubscribe = subscribeToIncomingDirectCalls(user.userId, directChats, (incoming) => {
+      if (!incoming) return;
+      setCallSession((prev) => {
+        if (prev && prev.active) return prev;
+        return {
+          active: true,
+          callId: incoming.id,
+          chatId: incoming.chatId,
+          role: 'callee',
+          type: incoming.type,
+          partnerId: incoming.callerId,
+          recipientName: incoming.callerName,
+          recipientPhoto: incoming.callerPhoto,
+          status: 'ringing',
+          isMuted: false,
+          isVideoOff: incoming.type === 'audio',
+          durationSeconds: 0,
+          signalData: incoming,
+        };
+      });
+    });
+
+    return () => unsubscribe();
+  }, [chats, user.userId, user.isBanned, ghostUser]);
 
   // Handle mobile hardware back and Escape key while in Ghost Mode
   useEffect(() => {
@@ -461,7 +493,11 @@ function ChatDashboard({ user }: { user: UserProfile }) {
       {showShare && <ShareLinkModal onClose={() => setShowShare(false)} />}
 
       {callSession && (
-        <CallModal session={callSession} onEndCall={() => setCallSession(null)} />
+        <CallModal
+          session={callSession}
+          currentUser={user}
+          onEndCall={() => setCallSession(null)}
+        />
       )}
     </div>
   );
