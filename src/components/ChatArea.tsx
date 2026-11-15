@@ -665,6 +665,30 @@ export function ChatArea({
                   if (user && !ghostUser) toggleMessageReaction(chat.id, msgId, user.userId, emoji);
                 }}
                 onOpenMessageInfo={(target) => setMessageInfoTarget(target)}
+                onCallBack={
+                  !ghostUser &&
+                  chat.type === 'direct' &&
+                  partnerId &&
+                  !isPartnerSuspended &&
+                  !isPartnerDeleted &&
+                  !isCurrentUserSuspended
+                    ? (callType) => {
+                        onStartCall({
+                          active: true,
+                          chatId: chat.id,
+                          role: 'caller',
+                          type: callType,
+                          partnerId,
+                          recipientName: title,
+                          recipientPhoto: avatar,
+                          status: 'calling',
+                          isMuted: false,
+                          isVideoOff: callType === 'audio',
+                          durationSeconds: 0,
+                        });
+                      }
+                    : undefined
+                }
               />
             );
           })

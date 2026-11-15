@@ -337,7 +337,7 @@
         "type": {
           "type": "string",
           "description": "Content type of the message",
-          "enum": ["text", "image", "audio", "file"]
+          "enum": ["text", "image", "audio", "file", "call"]
         },
         "mediaUrl": {
           "type": "string",
@@ -347,6 +347,30 @@
         "audioDuration": {
           "type": "number",
           "description": "Duration in seconds for voice notes"
+        },
+        "callId": {
+          "type": "string",
+          "description": "Associated WebRTC call session ID for call log messages",
+          "maxLength": 128
+        },
+        "callerId": {
+          "type": "string",
+          "description": "UID of the user who initiated the call",
+          "maxLength": 128
+        },
+        "callType": {
+          "type": "string",
+          "description": "Media type of the logged call",
+          "enum": ["audio", "video"]
+        },
+        "callStatus": {
+          "type": "string",
+          "description": "Final outcome of the logged call",
+          "enum": ["completed", "missed", "declined", "cancelled"]
+        },
+        "callDuration": {
+          "type": "number",
+          "description": "Duration in seconds for completed calls"
         },
         "readBy": {
           "type": "array",
@@ -374,7 +398,7 @@
         "replyToType": {
           "type": "string",
           "description": "Message type of quoted message",
-          "enum": ["text", "image", "audio", "file"]
+          "enum": ["text", "image", "audio", "file", "call"]
         },
         "reactions": {
           "type": "object",

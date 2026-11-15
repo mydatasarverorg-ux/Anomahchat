@@ -1,5 +1,5 @@
 import type React from 'react';
-import { CheckCheck, Pause, Play } from 'lucide-react';
+import { CheckCheck, Pause, Play, Phone, Video, PhoneIncoming, PhoneOutgoing, PhoneMissed } from 'lucide-react';
 import type { ChatMessage, ChatRoom, UserProfile } from '../../types/chat';
 
 interface MessageBubbleProps {
@@ -28,6 +28,7 @@ interface MessageBubbleProps {
   onContextMenu: (e: React.MouseEvent, msg: ChatMessage) => void;
   onToggleReaction: (msgId: string, emoji: string) => void;
   onOpenMessageInfo: (msg: ChatMessage) => void;
+  onCallBack?: (callType: 'audio' | 'video') => void;
 }
 
 const getSenderColor = (senderId: string) => {
@@ -71,10 +72,32 @@ export function MessageBubble({
   onContextMenu,
   onToggleReaction,
   onOpenMessageInfo,
+  onCallBack,
 }: MessageBubbleProps) {
   const seenList = Object.entries(msg.seenByDetails || {}).filter(
     ([uid]) => uid !== msg.senderId
   );
+  const viewerId = ghostUser?.userId || user?.userId;
+  const isCallMessage = msg.type === 'call';
+  const isOutgoingCall = isCallMessage
+    ? (msg.callerId || msg.senderId) === viewerId
+    : isMine;
+  const bubbleIsRight = isCallMessage ? isOutgoingCall : isMine;
+
+  const formatCallDurationLocalized = (secs?: number) => {
+    const safe = Math.max(0, Math.round(secs || 0));
+    const hrs = Math.floor(safe / 3600);
+    const mins = Math.floor((safe % 3600) / 60);
+    const remSecs = safe % 60;
+    if (language === 'bn') {
+      if (hrs > 0) return `${hrs} ঘ ${mins} মি ${remSecs} সে`;
+      if (mins > 0) return `${mins} মি ${remSecs} সে`;
+      return `${remSecs} সেকেন্ড`;
+    }
+    if (hrs > 0) return `${hrs}h ${mins}m ${remSecs}s`;
+    if (mins > 0) return `${mins}m ${remSecs}s`;
+    return `${remSecs}s`;
+  };
 
   return (
     <div className="w-full">
@@ -103,7 +126,7 @@ export function MessageBubble({
 
       <div
         id={`msg-${msg.id}`}
-        className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} group relative ${
+        className={`flex flex-col ${bubbleIsRight ? 'items-end' : 'items-start'} group relative ${
           isSameSenderAsPrev ? 'mt-1' : 'mt-3.5'
         }`}
       >
@@ -132,8 +155,10 @@ export function MessageBubble({
           onTouchMove={onTouchEnd}
           onContextMenu={(e) => onContextMenu(e, msg)}
           className={`max-w-[85%] sm:max-w-md px-3.5 py-2 transition-all cursor-pointer shadow-sm relative select-text ${
-            isMine
-              ? 'bg-emerald-600 text-white rounded-2xl rounded-tr-sm shadow-emerald-950/20'
+            bubbleIsRight
+              ? isCallMessage
+                ? 'bg-slate-800/95 text-slate-100 rounded-2xl rounded-tr-sm border border-emerald-500/30 shadow-emerald-950/20'
+                : 'bg-emerald-600 text-white rounded-2xl rounded-tr-sm shadow-emerald-950/20'
               : 'bg-slate-800/90 text-slate-100 rounded-2xl rounded-tl-sm border border-slate-700/50'
           }`}
         >
@@ -234,6 +259,97 @@ export function MessageBubble({
             </div>
           )}
 
+          {msg.type === 'call' && (() => {
+            const isVideo = msg.callType === 'video';
+            const status = msg.callStatus || 'completed';
+            const isUnanswered = status === 'missed' || status === 'declined' || status === 'cancelled';
+
+            let callTitle = '';
+            let callSubtitle = '';
+
+            if (status === 'completed') {
+              callTitle = language === 'bn'
+                ? isOutgoingCall
+                  ? isVideo ? 'আউটগোয়িং ভিডিও কল' : 'আউটগোয়িং অডিও কল'
+                  : isVideo ? 'ইনকামিং ভিডিও কল' : 'ইনকামিং অডিও কল'
+                : isOutgoingCall
+                ? isVideo ? 'Outgoing video call' : 'Outgoing voice call'
+                : isVideo ? 'Incoming video call' : 'Incoming voice call';
+              callSubtitle = formatCallDurationLocalized(msg.callDuration);
+            } else if (status === 'declined') {
+              callTitle = language === 'bn'
+                ? isVideo ? 'ভিডিও কল প্রত্যাখ্যাত' : 'অডিও কল প্রত্যাখ্যাত'
+                : isVideo ? 'Declined video call' : 'Declined voice call';
+              callSubtitle = language === 'bn' ? 'কল রিসিভ করা হয়নি' : 'Declined';
+            } else if (status === 'cancelled') {
+              if (isOutgoingCall) {
+                callTitle = language === 'bn'
+                  ? isVideo ? 'ভিডিও কল বাতিল হয়েছে' : 'অডিও কল বাতিল হয়েছে'
+                  : isVideo ? 'Cancelled video call' : 'Cancelled voice call';
+                callSubtitle = language === 'bn' ? 'রিসিভ হওয়ার আগে কাটা হয়েছে' : 'Cancelled';
+              } else {
+                callTitle = language === 'bn'
+                  ? isVideo ? 'মিসড ভিডিও কল' : 'মিসড অডিও কল'
+                  : isVideo ? 'Missed video call' : 'Missed voice call';
+                callSubtitle = language === 'bn' ? 'কল রিসিভ হয়নি' : 'Not answered';
+              }
+            } else {
+              callTitle = language === 'bn'
+                ? isOutgoingCall
+                  ? isVideo ? 'কোনো উত্তর পাওয়া যায়নি' : 'কোনো উত্তর পাওয়া যায়নি'
+                  : isVideo ? 'মিসড ভিডিও কল' : 'মিসড অডিও কল'
+                : isOutgoingCall
+                ? isVideo ? 'No answer · Video' : 'No answer · Voice'
+                : isVideo ? 'Missed video call' : 'Missed voice call';
+              callSubtitle = language === 'bn' ? 'কল রিসিভ হয়নি' : 'No answer';
+            }
+
+            return (
+              <div className="flex items-center gap-3 py-1 min-w-[215px]">
+                <div
+                  className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 border ${
+                    isUnanswered
+                      ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                      : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                  }`}
+                >
+                  {isUnanswered ? (
+                    <PhoneMissed className="w-4 h-4" />
+                  ) : isOutgoingCall ? (
+                    <PhoneOutgoing className="w-4 h-4" />
+                  ) : (
+                    <PhoneIncoming className="w-4 h-4" />
+                  )}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold text-white truncate">{callTitle}</div>
+                  <div
+                    className={`text-[11px] mt-0.5 font-medium ${
+                      isUnanswered ? 'text-rose-300/90' : 'text-emerald-300'
+                    }`}
+                  >
+                    {callSubtitle}
+                  </div>
+                </div>
+
+                {onCallBack && !ghostUser && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCallBack(isVideo ? 'video' : 'audio');
+                    }}
+                    className="w-8 h-8 rounded-full bg-slate-700/70 hover:bg-emerald-600 text-slate-200 hover:text-white flex items-center justify-center transition cursor-pointer shrink-0"
+                    title={language === 'bn' ? 'পুনরায় কল করুন' : 'Call back'}
+                  >
+                    {isVideo ? <Video className="w-3.5 h-3.5" /> : <Phone className="w-3.5 h-3.5" />}
+                  </button>
+                )}
+              </div>
+            );
+          })()}
+
           {msg.type === 'text' &&
             (editingMessage?.id === msg.id ? (
               <div className="space-y-2 min-w-[200px] max-w-full" onClick={(e) => e.stopPropagation()}>
@@ -276,7 +392,7 @@ export function MessageBubble({
 
           <div
             className={`flex items-center justify-end gap-1 mt-1 text-[10px] ${
-              isMine ? 'text-emerald-100/75' : 'text-slate-400'
+              bubbleIsRight && !isCallMessage ? 'text-emerald-100/75' : 'text-slate-400'
             }`}
           >
             {msg.isEdited && <span className="italic text-[9px] mr-0.5">{t('editedTag')}</span>}
@@ -286,7 +402,7 @@ export function MessageBubble({
                 minute: '2-digit',
               })}
             </span>
-            {isMine && (
+            {isMine && !isCallMessage && (
               <span>
                 <CheckCheck
                   className={`w-3.5 h-3.5 ${

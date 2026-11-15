@@ -27,9 +27,16 @@ import {
   Loader2,
   MailCheck,
   KeyRound,
+  Bell,
 } from 'lucide-react';
 import { APP_VERSION, isUpdateAvailable, isNativeApkApp } from '../utils/appVersion';
 import { getLatestRelease } from '../services/updateService';
+import {
+  isAppNotificationSupported,
+  getAppNotificationPermission,
+  requestAppNotificationPermission,
+  type AppNotificationPermission,
+} from '../services/notificationService';
 
 export function ProfileModal({
   onClose,
@@ -83,6 +90,19 @@ export function ProfileModal({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateStatusMessage, setUpdateStatusMessage] = useState<string | null>(null);
+  const [notifPermission, setNotifPermission] = useState<AppNotificationPermission>(() =>
+    getAppNotificationPermission()
+  );
+
+  useEffect(() => {
+    const syncNotif = () => setNotifPermission(getAppNotificationPermission());
+    window.addEventListener('anomah_notification_permission_changed', syncNotif);
+    window.addEventListener('focus', syncNotif);
+    return () => {
+      window.removeEventListener('anomah_notification_permission_changed', syncNotif);
+      window.removeEventListener('focus', syncNotif);
+    };
+  }, []);
 
   const handleCheckForUpdates = async () => {
     setCheckingUpdate(true);
@@ -823,6 +843,75 @@ export function ProfileModal({
                       );
                     })}
                   </div>
+
+                  {/* Background & Live Notification Permissions Card */}
+                  {isAppNotificationSupported() && (
+                    <div className="mt-4 p-4 bg-slate-950/60 border border-slate-800 rounded-2xl space-y-2.5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5">
+                            <Bell className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold text-white">
+                              {language === 'bn' ? 'মেসেজ ও কল নোটিফিকেশন' : 'Message & Call Notifications'}
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                              {language === 'bn'
+                                ? 'অ্যাপ মিনিমাইজ বা অন্য অ্যাপে থাকা অবস্থায় নতুন মেসেজ ও ইনকামিং কলের রিং-অ্যালার্ট পেতে এটি চালু রাখুন।'
+                                : 'Keep alerts enabled to get notified for new messages and incoming calls while minimized or in another tab.'}
+                            </p>
+                          </div>
+                        </div>
+
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0 border ${
+                            notifPermission === 'granted'
+                              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                              : notifPermission === 'denied'
+                              ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                              : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                          }`}
+                        >
+                          {notifPermission === 'granted'
+                            ? language === 'bn'
+                              ? 'চালু আছে'
+                              : 'Active'
+                            : notifPermission === 'denied'
+                            ? language === 'bn'
+                              ? 'ব্লক করা'
+                              : 'Blocked'
+                            : language === 'bn'
+                            ? 'বন্ধ আছে'
+                            : 'Off'}
+                        </span>
+                      </div>
+
+                      {notifPermission !== 'granted' && (
+                        <div className="flex items-center justify-between gap-2 pt-1">
+                          <span className="text-[10px] text-slate-400">
+                            {notifPermission === 'denied'
+                              ? language === 'bn'
+                                ? 'ফোন/ব্রাউজার সেটিংস থেকে নোটিফিকেশন Allow করে দিন।'
+                                : 'Allow notifications in device or browser site settings.'
+                              : language === 'bn'
+                              ? '১ ক্লিকেই অনুমতি সক্রিয় করুন।'
+                              : 'Click to grant permission.'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const next = await requestAppNotificationPermission();
+                              setNotifPermission(next);
+                            }}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[11px] font-bold cursor-pointer transition shadow-xs shrink-0"
+                          >
+                            {language === 'bn' ? 'নোটিফিকেশন চালু করুন' : 'Enable Notifications'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 

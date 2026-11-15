@@ -162,7 +162,8 @@ service cloud.firestore {
       return data.keys().hasAll(['id', 'chatId', 'senderId', 'senderName', 'text', 'type', 'readBy', 'createdAt'])
         && data.keys().hasOnly([
           'id', 'chatId', 'senderId', 'senderName', 'senderPhoto', 'text',
-          'type', 'mediaUrl', 'audioDuration', 'readBy', 'seenByDetails',
+          'type', 'mediaUrl', 'audioDuration', 'callId', 'callerId', 'callType',
+          'callStatus', 'callDuration', 'readBy', 'seenByDetails',
           'replyToId', 'replyToText', 'replyToSender', 'replyToType',
           'reactions', 'isEdited', 'editedAt', 'createdAt'
         ])
@@ -171,17 +172,22 @@ service cloud.firestore {
         && data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128
         && data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 100
         && data.text is string && data.text.size() <= 5000
-        && data.type in ['text', 'image', 'audio', 'file']
+        && data.type in ['text', 'image', 'audio', 'file', 'call']
         && data.readBy is list && data.readBy.size() >= 1 && data.readBy.size() <= 100 && data.readBy[0] is string
         && data.createdAt is string && data.createdAt.size() <= 64
         && (!('senderPhoto' in data) || (data.senderPhoto is string && data.senderPhoto.size() <= 1000))
         && (!('mediaUrl' in data) || (data.mediaUrl is string && data.mediaUrl.size() <= 950000))
         && (!('audioDuration' in data) || data.audioDuration is number)
+        && (!('callId' in data) || (data.callId is string && data.callId.size() <= 128))
+        && (!('callerId' in data) || (data.callerId is string && data.callerId.size() <= 128))
+        && (!('callType' in data) || data.callType in ['audio', 'video'])
+        && (!('callStatus' in data) || data.callStatus in ['completed', 'missed', 'declined', 'cancelled'])
+        && (!('callDuration' in data) || (data.callDuration is number && data.callDuration >= 0 && data.callDuration <= 86400))
         && (!('seenByDetails' in data) || data.seenByDetails is map)
         && (!('replyToId' in data) || (data.replyToId is string && data.replyToId.size() <= 128))
         && (!('replyToText' in data) || (data.replyToText is string && data.replyToText.size() <= 300))
         && (!('replyToSender' in data) || (data.replyToSender is string && data.replyToSender.size() <= 100))
-        && (!('replyToType' in data) || data.replyToType in ['text', 'image', 'audio', 'file'])
+        && (!('replyToType' in data) || data.replyToType in ['text', 'image', 'audio', 'file', 'call'])
         && (!('reactions' in data) || data.reactions is map)
         && (!('isEdited' in data) || data.isEdited is bool)
         && (!('editedAt' in data) || (data.editedAt is string && data.editedAt.size() <= 64));

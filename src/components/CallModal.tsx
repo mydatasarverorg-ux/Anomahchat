@@ -10,8 +10,10 @@ import {
   addIceCandidateSignal,
   subscribeToCallSignal,
   subscribeToIceCandidates,
+  logCallToChat,
 } from '../services/callService';
 import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff, Volume2, AlertTriangle } from 'lucide-react';
+import { cancelAppNotification } from '../services/notificationService';
 
 interface CallModalProps {
   session: CallSession;
@@ -39,9 +41,45 @@ export function CallModal({ session, currentUser, onEndCall }: CallModalProps) {
 
   const callIdRef = useRef<string | null>(session.callId || null);
   const endedRef = useRef(false);
+  const connectedAtRef = useRef<number | null>(null);
+  const callLoggedRef = useRef(false);
   const unsubSignalRef = useRef<(() => void) | null>(null);
   const unsubIceRef = useRef<(() => void) | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+
+  const callerId = session.role === 'caller' ? currentUser.userId : session.partnerId;
+
+  const recordCallLogOnce = (finalStatus: 'ended' | 'declined' | 'missed') => {
+    if (callLoggedRef.current) return;
+    const activeCallId = callIdRef.current;
+    if (!activeCallId || !session.chatId) return;
+    callLoggedRef.current = true;
+
+    const secs = connectedAtRef.current
+      ? Math.max(1, Math.round((Date.now() - connectedAtRef.current) / 1000))
+      : 0;
+
+    let logStatus: 'completed' | 'missed' | 'declined' | 'cancelled' = 'cancelled';
+    if (secs > 0) {
+      logStatus = 'completed';
+    } else if (finalStatus === 'declined') {
+      logStatus = 'declined';
+    } else if (finalStatus === 'missed') {
+      logStatus = 'missed';
+    } else {
+      logStatus = session.role === 'caller' ? 'cancelled' : 'declined';
+    }
+
+    logCallToChat({
+      chatId: session.chatId,
+      callId: activeCallId,
+      currentUser,
+      callerId,
+      callType: session.type,
+      callStatus: logStatus,
+      durationSeconds: secs,
+    }).catch(() => {});
+  };
 
   const cleanupMediaAndPeer = () => {
     unsubSignalRef.current?.();
@@ -73,6 +111,8 @@ export function CallModal({ session, currentUser, onEndCall }: CallModalProps) {
     }
     endedRef.current = true;
     const activeCallId = callIdRef.current;
+    cancelAppNotification(activeCallId || session.callId);
+    recordCallLogOnce(nextStatus);
     cleanupMediaAndPeer();
     if (activeCallId && session.chatId) {
       await updateCallSignalStatus(session.chatId, activeCallId, nextStatus);
@@ -114,6 +154,9 @@ export function CallModal({ session, currentUser, onEndCall }: CallModalProps) {
       const connState = pc.connectionState;
       const iceState = pc.iceConnectionState;
       if (connState === 'connected' || iceState === 'connected' || iceState === 'completed') {
+        if (!connectedAtRef.current) {
+          connectedAtRef.current = Date.now();
+        }
         setCallState('connected');
       } else if (connState === 'failed') {
         setErrorText(
@@ -268,14 +311,16 @@ export function CallModal({ session, currentUser, onEndCall }: CallModalProps) {
             setCallState('declined');
             cleanupMediaAndPeer();
             setTimeout(() => {
+              recordCallLogOnce('declined');
               if (mounted) onEndCall();
-            }, 1600);
+            }, 1400);
           } else if (data.status === 'ended' || data.status === 'missed') {
             setCallState(data.status);
             cleanupMediaAndPeer();
             setTimeout(() => {
+              recordCallLogOnce(data.status as 'ended' | 'missed');
               if (mounted) onEndCall();
-            }, 1000);
+            }, 950);
           }
         });
 
@@ -316,6 +361,7 @@ export function CallModal({ session, currentUser, onEndCall }: CallModalProps) {
           setCallState(data.status);
           cleanupMediaAndPeer();
           setTimeout(() => {
+            recordCallLogOnce(data.status as 'ended' | 'missed' | 'declined');
             if (mounted) onEndCall();
           }, 900);
         }
@@ -333,10 +379,11 @@ export function CallModal({ session, currentUser, onEndCall }: CallModalProps) {
       if (ringTimeout) clearTimeout(ringTimeout);
       if (!endedRef.current) {
         const cid = callIdRef.current;
-        cleanupMediaAndPeer();
         if (cid && session.chatId && session.role === 'caller') {
+          recordCallLogOnce('ended');
           updateCallSignalStatus(session.chatId, cid, 'ended');
         }
+        cleanupMediaAndPeer();
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -344,6 +391,7 @@ export function CallModal({ session, currentUser, onEndCall }: CallModalProps) {
 
   const handleAcceptIncoming = async () => {
     if (!session.callId || !session.signalData?.offer) return;
+    cancelAppNotification(session.callId);
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error('Media devices unavailable.');

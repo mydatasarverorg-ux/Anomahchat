@@ -1,16 +1,23 @@
 package com.mahimuhtasim.anomahchat;
 
 import android.Manifest;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.media.AudioAttributes;
+import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.Settings;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.PermissionRequest;
@@ -19,6 +26,8 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.Toast;
 import androidx.core.app.ActivityCompat;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.view.WindowCompat;
@@ -28,12 +37,21 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends BridgeActivity {
-    private static final int MIC_PERMISSION_REQUEST_CODE = 1001;
+    private static final int RUNTIME_PERMISSIONS_REQUEST_CODE = 1001;
+    private static final int NOTIFICATION_PERMISSION_REQUEST_CODE = 1002;
+    private static final int MEDIA_PERMISSIONS_REQUEST_CODE = 1003;
+    private static final String PREFS_NAME = "anomah_native_prefs";
+    private static final String KEY_ASKED_NOTIF_PERM = "asked_notif_perm";
+    private static final String CHANNEL_MESSAGES_ID = "anomah_messages";
+    private static final String CHANNEL_CALLS_ID = "anomah_calls";
     private static final String ALLOWED_RELEASE_PREFIX = "https://github.com/mydatasarverorg-ux/Anomahchat/releases/";
     private BroadcastReceiver downloadCompleteReceiver = null;
     private long activeDownloadId = -1;
+    private PermissionRequest pendingWebPermissionRequest = null;
 
     private boolean isAllowedReleaseUrl(String url) {
         if (url == null) return false;
@@ -129,16 +147,8 @@ public class MainActivity extends BridgeActivity {
                 insetsController.setAppearanceLightNavigationBars(false);
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-                        != PackageManager.PERMISSION_GRANTED) {
-                    ActivityCompat.requestPermissions(
-                            this,
-                            new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.MODIFY_AUDIO_SETTINGS},
-                            MIC_PERMISSION_REQUEST_CODE
-                    );
-                }
-            }
+            createNotificationChannels();
+            requestMissingRuntimePermissions();
 
             WebView webView = getBridge().getWebView();
             if (webView != null) {
@@ -161,10 +171,44 @@ public class MainActivity extends BridgeActivity {
                             @Override
                             public void run() {
                                 if (request == null) return;
-                                if (isTrustedWebOrigin(request.getOrigin())) {
+                                if (!isTrustedWebOrigin(request.getOrigin())) {
+                                    request.deny();
+                                    return;
+                                }
+
+                                List<String> missingAndroidPerms = new ArrayList<>();
+                                String[] resources = request.getResources();
+                                if (resources != null) {
+                                    for (String res : resources) {
+                                        if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(res)) {
+                                            if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA)
+                                                    != PackageManager.PERMISSION_GRANTED) {
+                                                missingAndroidPerms.add(Manifest.permission.CAMERA);
+                                            }
+                                        } else if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(res)) {
+                                            if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
+                                                    != PackageManager.PERMISSION_GRANTED) {
+                                                missingAndroidPerms.add(Manifest.permission.RECORD_AUDIO);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (missingAndroidPerms.isEmpty()) {
                                     request.grant(request.getResources());
                                 } else {
-                                    request.deny();
+                                    if (pendingWebPermissionRequest != null) {
+                                        try {
+                                            pendingWebPermissionRequest.deny();
+                                        } catch (Exception ignored) {
+                                        }
+                                    }
+                                    pendingWebPermissionRequest = request;
+                                    ActivityCompat.requestPermissions(
+                                            MainActivity.this,
+                                            missingAndroidPerms.toArray(new String[0]),
+                                            MEDIA_PERMISSIONS_REQUEST_CODE
+                                    );
                                 }
                             }
                         });
@@ -226,10 +270,158 @@ public class MainActivity extends BridgeActivity {
                 });
 
                 webView.addJavascriptInterface(new AndroidUpdaterInterface(), "AndroidUpdater");
+                webView.addJavascriptInterface(new AndroidNotificationInterface(), "AndroidNotifications");
             }
+            handleNotificationIntent(getIntent());
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleNotificationIntent(intent);
+    }
+
+    private void handleNotificationIntent(Intent intent) {
+        if (intent == null) return;
+        final String chatId = intent.getStringExtra("openChatId");
+        if (chatId == null || chatId.trim().isEmpty()) return;
+        intent.removeExtra("openChatId");
+        final String safeChatId = chatId.replaceAll("[^a-zA-Z0-9_-]", "");
+        if (safeChatId.isEmpty()) return;
+        runOnUiThread(() -> {
+            try {
+                WebView webView = getBridge().getWebView();
+                if (webView != null) {
+                    webView.postDelayed(() -> {
+                        String script = "window.__pendingNotificationChatId='" + safeChatId + "';"
+                                + "window.dispatchEvent(new CustomEvent('anomah_open_chat_from_notification',{detail:{chatId:'" + safeChatId + "'}}));";
+                        webView.evaluateJavascript(script, null);
+                    }, 400);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    private void notifyNotificationPermissionChanged() {
+        runOnUiThread(() -> {
+            try {
+                WebView webView = getBridge().getWebView();
+                if (webView != null) {
+                    webView.evaluateJavascript(
+                            "window.dispatchEvent(new CustomEvent('anomah_notification_permission_changed'));",
+                            null
+                    );
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode == MEDIA_PERMISSIONS_REQUEST_CODE && pendingWebPermissionRequest != null) {
+            final PermissionRequest req = pendingWebPermissionRequest;
+            pendingWebPermissionRequest = null;
+            runOnUiThread(() -> {
+                try {
+                    List<String> grantable = new ArrayList<>();
+                    String[] requestedResources = req.getResources();
+                    if (requestedResources != null) {
+                        for (String res : requestedResources) {
+                            if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(res)) {
+                                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA)
+                                        == PackageManager.PERMISSION_GRANTED) {
+                                    grantable.add(res);
+                                }
+                            } else if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(res)) {
+                                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
+                                        == PackageManager.PERMISSION_GRANTED) {
+                                    grantable.add(res);
+                                }
+                            } else {
+                                grantable.add(res);
+                            }
+                        }
+                    }
+                    if (!grantable.isEmpty()) {
+                        req.grant(grantable.toArray(new String[0]));
+                    } else {
+                        req.deny();
+                    }
+                } catch (Exception ignored) {
+                }
+            });
+        }
+
+        if (requestCode == RUNTIME_PERMISSIONS_REQUEST_CODE || requestCode == NOTIFICATION_PERMISSION_REQUEST_CODE) {
+            notifyNotificationPermissionChanged();
+        }
+    }
+
+    private void requestMissingRuntimePermissions() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+        List<String> needed = new ArrayList<>();
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.RECORD_AUDIO);
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.MODIFY_AUDIO_SETTINGS) != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.MODIFY_AUDIO_SETTINGS);
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.CAMERA);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                needed.add(Manifest.permission.POST_NOTIFICATIONS);
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_ASKED_NOTIF_PERM, true).apply();
+            }
+        }
+        if (!needed.isEmpty()) {
+            ActivityCompat.requestPermissions(this, needed.toArray(new String[0]), RUNTIME_PERMISSIONS_REQUEST_CODE);
+        }
+    }
+
+    private void createNotificationChannels() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+
+        NotificationChannel msgChannel = new NotificationChannel(
+                CHANNEL_MESSAGES_ID,
+                "Chat Messages",
+                NotificationManager.IMPORTANCE_HIGH
+        );
+        msgChannel.setDescription("Real-time incoming chat messages");
+        msgChannel.enableVibration(true);
+        msgChannel.setVibrationPattern(new long[]{0, 220, 120, 220});
+        nm.createNotificationChannel(msgChannel);
+
+        NotificationChannel callChannel = new NotificationChannel(
+                CHANNEL_CALLS_ID,
+                "Incoming Calls",
+                NotificationManager.IMPORTANCE_HIGH
+        );
+        callChannel.setDescription("Incoming 1-on-1 voice and video calls");
+        callChannel.enableVibration(true);
+        callChannel.setVibrationPattern(new long[]{0, 500, 300, 500, 300, 500});
+        Uri ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+        if (ringtoneUri != null) {
+            AudioAttributes audioAttrs = new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build();
+            callChannel.setSound(ringtoneUri, audioAttrs);
+        }
+        nm.createNotificationChannel(callChannel);
     }
 
     private void cleanOldUpdateFiles() {
@@ -437,6 +629,146 @@ public class MainActivity extends BridgeActivity {
         @android.webkit.JavascriptInterface
         public void downloadWithManager(final String url) {
             downloadAndInstall(url, "latest", "");
+        }
+    }
+
+    public class AndroidNotificationInterface {
+        @android.webkit.JavascriptInterface
+        public boolean hasPermission() {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.POST_NOTIFICATIONS)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    return false;
+                }
+            }
+            return NotificationManagerCompat.from(MainActivity.this).areNotificationsEnabled();
+        }
+
+        @android.webkit.JavascriptInterface
+        public void requestPermission() {
+            runOnUiThread(() -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    boolean granted = ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.POST_NOTIFICATIONS)
+                            == PackageManager.PERMISSION_GRANTED;
+                    if (!granted) {
+                        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                        boolean askedBefore = prefs.getBoolean(KEY_ASKED_NOTIF_PERM, false);
+                        boolean shouldShowRationale = ActivityCompat.shouldShowRequestPermissionRationale(
+                                MainActivity.this,
+                                Manifest.permission.POST_NOTIFICATIONS
+                        );
+                        if (!askedBefore || shouldShowRationale) {
+                            prefs.edit().putBoolean(KEY_ASKED_NOTIF_PERM, true).apply();
+                            ActivityCompat.requestPermissions(
+                                    MainActivity.this,
+                                    new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                                    NOTIFICATION_PERMISSION_REQUEST_CODE
+                            );
+                            return;
+                        }
+                    }
+                }
+
+                if (!NotificationManagerCompat.from(MainActivity.this).areNotificationsEnabled()) {
+                    try {
+                        Intent settingsIntent = new Intent();
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            settingsIntent.setAction(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+                            settingsIntent.putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+                        } else {
+                            settingsIntent.setAction(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                            settingsIntent.setData(Uri.fromParts("package", getPackageName(), null));
+                        }
+                        settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(settingsIntent);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+            });
+        }
+
+        @android.webkit.JavascriptInterface
+        public void showNotification(
+                final String notifId,
+                final String title,
+                final String body,
+                final String type,
+                final String chatId
+        ) {
+            runOnUiThread(() -> {
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.POST_NOTIFICATIONS)
+                                != PackageManager.PERMISSION_GRANTED) {
+                            return;
+                        }
+                    }
+
+                    boolean isCall = "call".equalsIgnoreCase(type);
+                    String channelId = isCall ? CHANNEL_CALLS_ID : CHANNEL_MESSAGES_ID;
+                    String key = (notifId != null && !notifId.isEmpty()) ? notifId : (chatId != null ? chatId : "anomah");
+                    int intId = (key.hashCode() & 0x7fffffff);
+
+                    Intent launchIntent = new Intent(MainActivity.this, MainActivity.class);
+                    launchIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                    if (chatId != null && !chatId.isEmpty()) {
+                        launchIntent.putExtra("openChatId", chatId);
+                    }
+
+                    int pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        pendingFlags |= PendingIntent.FLAG_IMMUTABLE;
+                    }
+                    PendingIntent pendingIntent = PendingIntent.getActivity(
+                            MainActivity.this,
+                            intId,
+                            launchIntent,
+                            pendingFlags
+                    );
+
+                    NotificationCompat.Builder builder = new NotificationCompat.Builder(MainActivity.this, channelId)
+                            .setSmallIcon(R.mipmap.ic_launcher)
+                            .setContentTitle(title != null && !title.isEmpty() ? title : "Anomah Chat")
+                            .setContentText(body != null ? body : "")
+                            .setStyle(new NotificationCompat.BigTextStyle().bigText(body != null ? body : ""))
+                            .setPriority(NotificationCompat.PRIORITY_HIGH)
+                            .setAutoCancel(true)
+                            .setContentIntent(pendingIntent);
+
+                    if (isCall) {
+                        builder.setCategory(NotificationCompat.CATEGORY_CALL);
+                        Uri ringUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+                        if (ringUri != null) {
+                            builder.setSound(ringUri);
+                        }
+                        builder.setVibrate(new long[]{0, 500, 300, 500});
+                    } else {
+                        builder.setCategory(NotificationCompat.CATEGORY_MESSAGE);
+                        Uri msgSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+                        if (msgSound != null) {
+                            builder.setSound(msgSound);
+                        }
+                    }
+
+                    NotificationManagerCompat.from(MainActivity.this).notify(intId, builder.build());
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
+        }
+
+        @android.webkit.JavascriptInterface
+        public void cancelNotification(final String notifId) {
+            if (notifId == null || notifId.isEmpty()) return;
+            runOnUiThread(() -> {
+                try {
+                    int intId = (notifId.hashCode() & 0x7fffffff);
+                    NotificationManagerCompat.from(MainActivity.this).cancel(intId);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
         }
     }
 }

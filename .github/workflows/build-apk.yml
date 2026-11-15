@@ -81,9 +81,9 @@ jobs:
             APK_PATH=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
           fi
           if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
-            cp "$APK_PATH" build-output/AnomahChat-v1.0.7.apk
+            cp "$APK_PATH" build-output/AnomahChat-v1.0.8.apk
             cp "$APK_PATH" build-output/AnomahChat.apk
-            cp "$APK_PATH" build-output/Anomah-Chat-vMahi-A07.apk
+            cp "$APK_PATH" build-output/Anomah-Chat-vMahi-A08.apk
             SHA256=$(sha256sum build-output/AnomahChat.apk | awk '{print $1}')
             echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
             echo "Prepared APK from $APK_PATH (SHA-256: $SHA256)"
@@ -95,7 +95,7 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AnomahChat-v1.0.7-APK
+          name: AnomahChat-v1.0.8-APK
           path: build-output/*.apk
           retention-days: 30
 
@@ -103,22 +103,22 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         with:
-          tag_name: v1.0.7
-          name: Anomah Chat v1.0.7 (Mahi A07 Release)
+          tag_name: v1.0.8
+          name: Anomah Chat v1.0.8 (Mahi A08 Release)
           body: |
-            ## Anomah Chat Android APK v1.0.7 (Mahi A07)
+            ## Anomah Chat Android APK v1.0.8 (Mahi A08)
             Direct installation package for Android devices.
+            - Native Android Notification Channels (`Chat Messages` & `Incoming Calls`) with Tap-to-Open Chat Deep-Linking
+            - Dynamic Android Runtime Camera, Audio & Notification (`POST_NOTIFICATIONS`) Permission Handling
+            - Real-Time Background/Minimized Message & Incoming Call Notifications across APK & Web/PWA
             - Real-Time 1-on-1 WebRTC Peer-to-Peer Audio & Video Calling via Firestore Signaling
-            - Hardened Group & Direct Chat Security Rules + Clean Conversation History Purge
-            - Reliable Profile Sync, Error-Safe Message Sending & Automatic Username Query Fallbacks
             - Signed Release APK Pipeline + Native SHA-256 Checksum Verification
-            - Client-Side Salted SHA-256 Quick App-Lock PIN
 
             SHA-256: `${{ steps.apk.outputs.sha256 }}`
           draft: false
           prerelease: false
           files: |
-            build-output/AnomahChat-v1.0.7.apk
+            build-output/AnomahChat-v1.0.8.apk
             build-output/AnomahChat.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

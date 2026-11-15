@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { LoginScreen } from './components/LoginScreen';
@@ -20,6 +20,15 @@ import { AdminModal } from './components/AdminModal';
 import { UpdateModal } from './components/UpdateModal';
 import { subscribeToUserChats } from './services/chatService';
 import { subscribeToIncomingDirectCalls } from './services/callService';
+import {
+  isAppNotificationSupported,
+  getAppNotificationPermission,
+  requestAppNotificationPermission,
+  isAppInBackground,
+  showChatOrCallNotification,
+  cancelAppNotification,
+  type AppNotificationPermission,
+} from './services/notificationService';
 import { isSuperAdmin } from './services/adminService';
 import { subscribeToLatestRelease, type AppReleaseInfo } from './services/updateService';
 import { isUpdateAvailable, isNativeApkApp } from './utils/appVersion';
@@ -38,6 +47,7 @@ import {
   X,
   LogOut,
   KeyRound,
+  Bell,
 } from 'lucide-react';
 
 function AppLockGate() {
@@ -130,6 +140,96 @@ function ChatDashboard({ user }: { user: UserProfile }) {
   const [callSession, setCallSession] = useState<CallSession | null>(null);
   const [dismissVerifyBanner, setDismissVerifyBanner] = useState(false);
   const [verificationSentNote, setVerificationSentNote] = useState<string | null>(null);
+  const [notifPermission, setNotifPermission] = useState<AppNotificationPermission>(() =>
+    getAppNotificationPermission()
+  );
+  const [dismissNotifBanner, setDismissNotifBanner] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('anomah_dismiss_notif_banner') === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  // Refs for background notification deduplication and Android tap deep-linking
+  const activeChatIdRef = useRef<string | null>(null);
+  const chatsRef = useRef<ChatRoom[]>([]);
+  const chatsInitializedRef = useRef(false);
+  const lastNotifiedMsgTimeRef = useRef<Map<string, string>>(new Map());
+  const activeIncomingCallNotifRef = useRef<string | null>(null);
+  const callActiveRef = useRef(false);
+  const pendingOpenChatIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+    if (activeChatId) {
+      cancelAppNotification(`msg_${activeChatId}`);
+    }
+  }, [activeChatId]);
+
+  useEffect(() => {
+    chatsRef.current = chats;
+    if (pendingOpenChatIdRef.current) {
+      const target = chats.find((c) => c.id === pendingOpenChatIdRef.current);
+      if (target) {
+        setActiveChatId(target.id);
+        setSelectedChat(target);
+        pendingOpenChatIdRef.current = null;
+      }
+    }
+  }, [chats]);
+
+  useEffect(() => {
+    callActiveRef.current = Boolean(callSession?.active);
+    if (!callSession && activeIncomingCallNotifRef.current) {
+      cancelAppNotification(activeIncomingCallNotifRef.current);
+      activeIncomingCallNotifRef.current = null;
+    }
+  }, [callSession]);
+
+  // Sync notification permission state when returning from system dialog or settings
+  useEffect(() => {
+    const syncPerm = () => setNotifPermission(getAppNotificationPermission());
+    window.addEventListener('anomah_notification_permission_changed', syncPerm);
+    window.addEventListener('focus', syncPerm);
+    document.addEventListener('visibilitychange', syncPerm);
+    return () => {
+      window.removeEventListener('anomah_notification_permission_changed', syncPerm);
+      window.removeEventListener('focus', syncPerm);
+      document.removeEventListener('visibilitychange', syncPerm);
+    };
+  }, []);
+
+  // Open chat when user taps an Android native notification (handles both warm & cold launch)
+  useEffect(() => {
+    const openFromNotification = (chatId?: string | null) => {
+      if (!chatId) return;
+      const found = chatsRef.current.find((c) => c.id === chatId);
+      if (found) {
+        setActiveChatId(found.id);
+        setSelectedChat(found);
+        pendingOpenChatIdRef.current = null;
+      } else {
+        setActiveChatId(chatId);
+        pendingOpenChatIdRef.current = chatId;
+      }
+    };
+
+    const win = window as unknown as { __pendingNotificationChatId?: string };
+    if (win.__pendingNotificationChatId) {
+      const pendingId = win.__pendingNotificationChatId;
+      delete win.__pendingNotificationChatId;
+      openFromNotification(pendingId);
+    }
+
+    const handleOpenEvent = (e: CustomEvent<{ chatId?: string }>) => {
+      openFromNotification(e.detail?.chatId);
+    };
+    window.addEventListener('anomah_open_chat_from_notification', handleOpenEvent as EventListener);
+    return () => {
+      window.removeEventListener('anomah_open_chat_from_notification', handleOpenEvent as EventListener);
+    };
+  }, []);
 
   // Ghost Inspection State (Admin enters user DM without login)
   const [ghostUser, setGhostUser] = useState<UserProfile | null>(null);
@@ -160,12 +260,73 @@ function ChatDashboard({ user }: { user: UserProfile }) {
   useEffect(() => {
     const targetUserId = ghostUser ? ghostUser.userId : user.userId;
     if (!targetUserId) return;
+    chatsInitializedRef.current = false;
+    lastNotifiedMsgTimeRef.current.clear();
+
     const unsubscribe = subscribeToUserChats(targetUserId, (data) => {
       setChats(data);
+      if (ghostUser) return;
+
+      if (!chatsInitializedRef.current) {
+        chatsInitializedRef.current = true;
+        data.forEach((chat) => {
+          if (chat.lastMessageTime) {
+            lastNotifiedMsgTimeRef.current.set(chat.id, chat.lastMessageTime);
+          }
+        });
+        return;
+      }
+
+      data.forEach((chat) => {
+        const latestTime = chat.lastMessageTime;
+        if (!latestTime) return;
+        const prevTime = lastNotifiedMsgTimeRef.current.get(chat.id);
+        if (prevTime && latestTime <= prevTime) return;
+        lastNotifiedMsgTimeRef.current.set(chat.id, latestTime);
+
+        const isFromOther = Boolean(
+          chat.lastMessageSenderId && chat.lastMessageSenderId !== user.userId
+        );
+        const shouldAlert = isAppInBackground() || activeChatIdRef.current !== chat.id;
+        if (!isFromOther || !shouldAlert) return;
+
+        let title = chat.name || 'Anomah Chat';
+        let icon: string | undefined = chat.groupPhoto;
+        if (chat.type === 'direct') {
+          const partnerId = chat.participantIds.find((id) => id !== user.userId);
+          const partner = partnerId ? chat.participantDetails?.[partnerId] : undefined;
+          title = partner?.displayName || title;
+          icon = partner?.photoURL || icon;
+        } else if (chat.lastMessageSenderId) {
+          const senderName = chat.participantDetails?.[chat.lastMessageSenderId]?.displayName;
+          if (senderName) {
+            title = `${chat.name || 'Group'} • ${senderName}`;
+          }
+        }
+
+        const body = chat.lastMessageText?.trim()
+          ? chat.lastMessageText
+          : language === 'bn'
+          ? 'নতুন মেসেজ এসেছে'
+          : 'Sent you a message';
+
+        showChatOrCallNotification({
+          id: `msg_${chat.id}`,
+          title,
+          body,
+          type: 'message',
+          chatId: chat.id,
+          icon,
+          onClick: () => {
+            setActiveChatId(chat.id);
+            setSelectedChat(chat);
+          },
+        });
+      });
     });
 
     return () => unsubscribe();
-  }, [user.userId, ghostUser]);
+  }, [user.userId, ghostUser, language]);
 
   // Listen for incoming 1-on-1 WebRTC calls across active direct chats
   useEffect(() => {
@@ -175,6 +336,29 @@ function ChatDashboard({ user }: { user: UserProfile }) {
 
     const unsubscribe = subscribeToIncomingDirectCalls(user.userId, directChats, (incoming) => {
       if (!incoming) return;
+
+      if (!callActiveRef.current && activeIncomingCallNotifRef.current !== incoming.id && isAppInBackground()) {
+        activeIncomingCallNotifRef.current = incoming.id;
+        showChatOrCallNotification({
+          id: incoming.id,
+          title: incoming.callerName || 'Anomah Chat',
+          body:
+            incoming.type === 'video'
+              ? language === 'bn'
+                ? 'ইনকামিং ভিডিও কল আসছে...'
+                : 'Incoming video call...'
+              : language === 'bn'
+              ? 'ইনকামিং অডিও কল আসছে...'
+              : 'Incoming voice call...',
+          type: 'call',
+          chatId: incoming.chatId,
+          icon: incoming.callerPhoto,
+          onClick: () => {
+            setActiveChatId(incoming.chatId);
+          },
+        });
+      }
+
       setCallSession((prev) => {
         if (prev && prev.active) return prev;
         return {
@@ -196,7 +380,7 @@ function ChatDashboard({ user }: { user: UserProfile }) {
     });
 
     return () => unsubscribe();
-  }, [chats, user.userId, user.isBanned, ghostUser]);
+  }, [chats, user.userId, user.isBanned, ghostUser, language]);
 
   // Handle mobile hardware back and Escape key while in Ghost Mode
   useEffect(() => {
@@ -296,6 +480,47 @@ function ChatDashboard({ user }: { user: UserProfile }) {
               type="button"
               onClick={() => setDismissVerifyBanner(true)}
               className="p-1 text-amber-300 hover:text-white cursor-pointer"
+              aria-label={t('close')}
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Notification Permission Opt-In Banner */}
+      {isAppNotificationSupported() && notifPermission === 'default' && !dismissNotifBanner && !ghostUser && (
+        <div className="bg-slate-900/95 border-b border-emerald-500/30 text-slate-100 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-2 z-40">
+          <div className="flex items-center gap-2 min-w-0">
+            <Bell className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="truncate">
+              {language === 'bn'
+                ? 'অ্যাপ মিনিমাইজ বা ব্যাকগ্রাউন্ডে থাকলেও মেসেজ ও কলের এলার্ট পেতে নোটিফিকেশন চালু করুন।'
+                : 'Enable notifications to receive alerts for new messages and incoming calls in the background.'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={async () => {
+                const result = await requestAppNotificationPermission();
+                setNotifPermission(result);
+              }}
+              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-[11px] cursor-pointer transition shadow-xs"
+            >
+              {language === 'bn' ? 'চালু করুন' : 'Enable Alerts'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setDismissNotifBanner(true);
+                try {
+                  sessionStorage.setItem('anomah_dismiss_notif_banner', '1');
+                } catch {
+                  // ignore
+                }
+              }}
+              className="p-1 text-slate-400 hover:text-white cursor-pointer"
               aria-label={t('close')}
             >
               <X className="w-3.5 h-3.5" />

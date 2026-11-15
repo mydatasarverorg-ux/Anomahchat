@@ -134,7 +134,7 @@ export interface AdminAuditLog {
   timestamp: string;
 }
 
-export type MessageType = 'text' | 'image' | 'audio' | 'file';
+export type MessageType = 'text' | 'image' | 'audio' | 'file' | 'call';
 
 export interface ChatMessage {
   id: string;
@@ -146,6 +146,11 @@ export interface ChatMessage {
   type: MessageType;
   mediaUrl?: string;
   audioDuration?: number;
+  callId?: string;
+  callerId?: string;
+  callType?: 'audio' | 'video';
+  callStatus?: 'completed' | 'missed' | 'declined' | 'cancelled';
+  callDuration?: number;
   readBy: string[];
   seenByDetails?: Record<string, {
     displayName: string;

@@ -1,9 +1,9 @@
-# Anomah Chat (`v1.0.7` · `Mahi A07`)
+# Anomah Chat (`v1.0.8` · `Mahi A08`)
 
 > **Developer & Owner:** Mahi Muhtasim  
 > **Package ID:** `com.mahimuhtasim.anomahchat`  
 > **Platforms:** Web (PWA) & Android Native APK (Capacitor 8)  
-> **Release Channel:** Stable (`versionCode: 107`)
+> **Release Channel:** Stable (`versionCode: 108`)
 
 Anomah Chat is a real-time cross-platform cloud messenger built with React, TypeScript, Tailwind CSS, Firebase Authentication, Cloud Firestore, WebRTC, and Capacitor Android. Users can connect worldwide via 1-on-1 direct messaging, group chats, voice notes, compressed image sharing, and peer-to-peer audio/video calls, backed by strict Zero-Trust Firestore Security Rules.
 
@@ -52,7 +52,13 @@ Anomah Chat is a real-time cross-platform cloud messenger built with React, Type
 
 ---
 
-## Changelog (`v1.0.7 · Mahi A07`)
+## Changelog (`v1.0.8 · Mahi A08`)
+- Added **Android Runtime Camera, Microphone & Notification (`POST_NOTIFICATIONS`) Permission Handling** in `MainActivity.java`, including on-demand permission prompts during WebRTC calls if initially denied.
+- Added **Native Android Notification Channels** (`anomah_messages` & `anomah_calls`) with high-importance alerts, ringtones, vibration patterns, and **Tap-to-Open Chat Deep-Linking** (both minimized and cold start).
+- Added **Real-Time Background & Inactive-Chat Notifications** (`notificationService`) across both Native Android APK and Web/PWA browsers for incoming messages and incoming WebRTC calls, with automatic dismissal on chat open or call answer/decline.
+- Added 1-click **Notification Opt-In Banner** and **Profile → Appearance** notification permission status card.
+
+### Previous (`v1.0.7 · Mahi A07`)
 - Replaced simulated call timer with real **1-on-1 WebRTC peer-to-peer audio & video calling** via Firestore signaling.
 - Hardened Firestore Security Rules for group message deletion, group room deletion, and direct chat self-leave validation.
 - Fixed custom display name & avatar overwrite bug on reload (`syncUserProfile` & `updateProfile`).
@@ -103,8 +109,8 @@ The workflow in `.github/workflows/build-apk.yml` automatically builds an Androi
    - `ANDROID_KEY_ALIAS`
    - `ANDROID_KEY_PASSWORD`
    *(Falls back to a Debug APK if keystore secrets are not set.)*
-3. Computes the APK **SHA-256** digest, uploads `AnomahChat-v1.0.7-APK` as a workflow artifact, and publishes `v1.0.7` (`AnomahChat-v1.0.7.apk` & `AnomahChat.apk`) to **GitHub Releases**.
+3. Computes the APK **SHA-256** digest, uploads `AnomahChat-v1.0.8-APK` as a workflow artifact, and publishes `v1.0.8` (`AnomahChat-v1.0.8.apk` & `AnomahChat.apk`) to **GitHub Releases**.
 
 ---
 
-*Built & maintained by **Mahi Muhtasim** · Anomah Chat `v1.0.7` (`Mahi A07`)*
+*Built & maintained by **Mahi Muhtasim** · Anomah Chat `v1.0.8` (`Mahi A08`)*

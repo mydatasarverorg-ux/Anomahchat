@@ -80,16 +80,16 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   >('overview');
 
   const [currentLiveRelease, setCurrentLiveRelease] = useState<AppReleaseInfo | null>(null);
-  const [releaseVersionName, setReleaseVersionName] = useState('1.0.7');
-  const [releaseVersionCode, setReleaseVersionCode] = useState('107');
+  const [releaseVersionName, setReleaseVersionName] = useState('1.0.8');
+  const [releaseVersionCode, setReleaseVersionCode] = useState('108');
   const [releaseApkUrl, setReleaseApkUrl] = useState('https://github.com/mydatasarverorg-ux/Anomahchat/releases/latest/download/AnomahChat.apk');
   const [releaseApkSha256, setReleaseApkSha256] = useState('');
   const [releaseFileSizeText, setReleaseFileSizeText] = useState('');
   const [releaseChangelogEn, setReleaseChangelogEn] = useState(
-    '• Real-Time 1-on-1 WebRTC Audio & Video Calling\n• Hardened Firestore Security Rules & Clean Chat Deletion\n• Profile Sync & Messaging Reliability Fixes (Mahi A07)'
+    '• Native Android Camera, Audio & Notification Runtime Permissions\n• Real-Time Background Message & Incoming Call Notifications with Tap-to-Open Chat\n• Real-Time 1-on-1 WebRTC Audio & Video Calling (Mahi A08)'
   );
   const [releaseChangelogBn, setReleaseChangelogBn] = useState(
-    '• রিয়েল-টাইম ১-অন-১ WebRTC অডিও ও ভিডিও কলিং\n• সুরক্ষিত ফায়ারস্টোর রুলস ও স্থায়ী চ্যাট ডিলিট\n• প্রোফাইল ও মেসেজিং স্থিতিশীলতা আপডেট (Mahi A07)'
+    '• অ্যান্ড্রয়েড ক্যামেরা, অডিও ও নোটিফিকেশন রানটাইম পারমিশন\n• ব্যাকগ্রাউন্ড ও অন্য চ্যাটে থাকা অবস্থায় রিয়েল-টাইম মেসেজ ও ইনকামিং কল নোটিফিকেশন\n• রিয়েল-টাইম ১-অন-১ WebRTC অডিও ও ভিডিও কলিং (Mahi A08)'
   );
   const [releaseForceUpdate, setReleaseForceUpdate] = useState(false);
   const [publishingRelease, setPublishingRelease] = useState(false);
@@ -238,7 +238,7 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     setPublishingRelease(true);
     setActionErrorMsg(null);
     try {
-      let parsedCode = parseInt(releaseVersionCode, 10) || 107;
+      let parsedCode = parseInt(releaseVersionCode, 10) || 108;
       if (parsedCode < 10) {
         parsedCode = parsedCode * 100 + (parsedCode === 2 ? 2 : 0);
       }

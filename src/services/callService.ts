@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   setDoc,
   updateDoc,
   onSnapshot,
@@ -9,7 +10,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
-import type { CallSignalData, ChatRoom, UserProfile } from '../types/chat';
+import type { CallSignalData, ChatMessage, ChatRoom, UserProfile } from '../types/chat';
 
 export const RTC_ICE_CONFIG: RTCConfiguration = {
   iceServers: [
@@ -209,4 +210,102 @@ export function subscribeToIncomingDirectCalls(
   return () => {
     unsubscribers.forEach((u) => u());
   };
+}
+
+export function formatCallDurationCompact(totalSeconds: number): string {
+  const safe = Math.max(0, Math.round(totalSeconds));
+  const hrs = Math.floor(safe / 3600);
+  const mins = Math.floor((safe % 3600) / 60);
+  const secs = safe % 60;
+  if (hrs > 0) return `${hrs}h ${mins}m ${secs}s`;
+  if (mins > 0) return `${mins}m ${secs}s`;
+  return `${secs}s`;
+}
+
+export async function logCallToChat(params: {
+  chatId: string;
+  callId: string;
+  currentUser: UserProfile;
+  callerId: string;
+  callType: 'audio' | 'video';
+  callStatus: 'completed' | 'missed' | 'declined' | 'cancelled';
+  durationSeconds: number;
+}): Promise<void> {
+  if (!params.chatId || !params.callId || !params.currentUser?.userId) return;
+  if (params.currentUser.isBanned) return;
+
+  const safeCallId = params.callId.replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!safeCallId) return;
+  const messageId = `calllog_${safeCallId}`.slice(0, 128);
+
+  try {
+    const parentChatRef = doc(db, 'chats', params.chatId);
+    const parentSnap = await getDoc(parentChatRef);
+    if (!parentSnap.exists()) return;
+    const parentData = parentSnap.data() as ChatRoom;
+    if (parentData.isSuspended) return;
+
+    const messageRef = doc(db, 'chats', params.chatId, 'messages', messageId);
+    const existingSnap = await getDoc(messageRef);
+    if (existingSnap.exists()) return;
+
+    const clientNowMs = Date.now();
+    let lastTimeMs = 0;
+    if (parentData.lastMessageTime) {
+      const parsed = new Date(parentData.lastMessageTime).getTime();
+      if (!isNaN(parsed) && parsed > 0) {
+        lastTimeMs = parsed;
+      }
+    }
+    const effectiveTimeMs = Math.max(clientNowMs, lastTimeMs + 1000);
+    const effectiveIso = new Date(effectiveTimeMs).toISOString();
+    const safeDuration = Math.max(0, Math.round(params.durationSeconds));
+
+    const icon = params.callType === 'video' ? '📹' : '📞';
+    const labelEn = params.callType === 'video' ? 'Video call' : 'Voice call';
+    let summaryText = `${icon} ${labelEn}`;
+    let inboxSnippet = summaryText;
+
+    if (params.callStatus === 'completed') {
+      const durText = formatCallDurationCompact(safeDuration);
+      summaryText = `${icon} ${labelEn} · ${durText}`;
+      inboxSnippet = summaryText;
+    } else if (params.callStatus === 'declined') {
+      summaryText = `${icon} Declined ${params.callType === 'video' ? 'video' : 'voice'} call`;
+      inboxSnippet = summaryText;
+    } else if (params.callStatus === 'missed') {
+      summaryText = `${icon} Missed ${params.callType === 'video' ? 'video' : 'voice'} call`;
+      inboxSnippet = summaryText;
+    } else {
+      summaryText = `${icon} Cancelled ${params.callType === 'video' ? 'video' : 'voice'} call`;
+      inboxSnippet = `${icon} Missed ${params.callType === 'video' ? 'video' : 'voice'} call`;
+    }
+
+    const messageData: ChatMessage = {
+      id: messageId,
+      chatId: params.chatId,
+      senderId: params.currentUser.userId,
+      senderName: (params.currentUser.displayName || 'User').slice(0, 100),
+      senderPhoto: (params.currentUser.photoURL || '').slice(0, 1000),
+      text: summaryText,
+      type: 'call',
+      callId: safeCallId,
+      callerId: params.callerId,
+      callType: params.callType,
+      callStatus: params.callStatus,
+      callDuration: safeDuration,
+      readBy: [params.currentUser.userId],
+      createdAt: effectiveIso,
+    };
+
+    await setDoc(messageRef, messageData);
+    await updateDoc(parentChatRef, {
+      lastMessageText: inboxSnippet.slice(0, 500),
+      lastMessageSenderId: params.currentUser.userId,
+      lastMessageTime: effectiveIso,
+      updatedAt: effectiveIso,
+    });
+  } catch (err) {
+    console.warn('Call log write notice:', err);
+  }
 }
