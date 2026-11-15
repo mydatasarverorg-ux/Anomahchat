@@ -81,9 +81,9 @@ jobs:
             APK_PATH=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
           fi
           if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
-            cp "$APK_PATH" build-output/AnomahChat-v1.0.6.apk
+            cp "$APK_PATH" build-output/AnomahChat-v1.0.7.apk
             cp "$APK_PATH" build-output/AnomahChat.apk
-            cp "$APK_PATH" build-output/Anomah-Chat-vMahi-A06.apk
+            cp "$APK_PATH" build-output/Anomah-Chat-vMahi-A07.apk
             SHA256=$(sha256sum build-output/AnomahChat.apk | awk '{print $1}')
             echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
             echo "Prepared APK from $APK_PATH (SHA-256: $SHA256)"
@@ -95,7 +95,7 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AnomahChat-v1.0.6-APK
+          name: AnomahChat-v1.0.7-APK
           path: build-output/*.apk
           retention-days: 30
 
@@ -103,21 +103,22 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         with:
-          tag_name: v1.0.6
-          name: Anomah Chat v1.0.6 (Mahi A06 Release)
+          tag_name: v1.0.7
+          name: Anomah Chat v1.0.7 (Mahi A07 Release)
           body: |
-            ## Anomah Chat Android APK v1.0.6 (Mahi A06)
+            ## Anomah Chat Android APK v1.0.7 (Mahi A07)
             Direct installation package for Android devices.
-            - Hardened Zero-Trust Firestore Security Rules & Owner-Only PII Protection
+            - Real-Time 1-on-1 WebRTC Peer-to-Peer Audio & Video Calling via Firestore Signaling
+            - Hardened Group & Direct Chat Security Rules + Clean Conversation History Purge
+            - Reliable Profile Sync, Error-Safe Message Sending & Automatic Username Query Fallbacks
             - Signed Release APK Pipeline + Native SHA-256 Checksum Verification
             - Client-Side Salted SHA-256 Quick App-Lock PIN
-            - Realtime Voice Notes, Media Sharing & Calling
 
             SHA-256: `${{ steps.apk.outputs.sha256 }}`
           draft: false
           prerelease: false
           files: |
-            build-output/AnomahChat-v1.0.6.apk
+            build-output/AnomahChat-v1.0.7.apk
             build-output/AnomahChat.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

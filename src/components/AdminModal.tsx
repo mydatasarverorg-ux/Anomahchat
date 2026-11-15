@@ -80,16 +80,16 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   >('overview');
 
   const [currentLiveRelease, setCurrentLiveRelease] = useState<AppReleaseInfo | null>(null);
-  const [releaseVersionName, setReleaseVersionName] = useState('1.0.6');
-  const [releaseVersionCode, setReleaseVersionCode] = useState('106');
+  const [releaseVersionName, setReleaseVersionName] = useState('1.0.7');
+  const [releaseVersionCode, setReleaseVersionCode] = useState('107');
   const [releaseApkUrl, setReleaseApkUrl] = useState('https://github.com/mydatasarverorg-ux/Anomahchat/releases/latest/download/AnomahChat.apk');
   const [releaseApkSha256, setReleaseApkSha256] = useState('');
   const [releaseFileSizeText, setReleaseFileSizeText] = useState('');
   const [releaseChangelogEn, setReleaseChangelogEn] = useState(
-    '• Hardened Firestore Zero-Trust Security Rules\n• Signed Release APK & SHA-256 Auto-Update Verification\n• Version Mahi A06 release'
+    '• Real-Time 1-on-1 WebRTC Audio & Video Calling\n• Hardened Firestore Security Rules & Clean Chat Deletion\n• Profile Sync & Messaging Reliability Fixes (Mahi A07)'
   );
   const [releaseChangelogBn, setReleaseChangelogBn] = useState(
-    '• সুরক্ষিত ফায়ারস্টোর ডাটাবেজ ও অ্যাকাউন্ট প্রটেকশন\n• SHA-256 ভেরিফাইড রিলিজ APK অটো-আপডেট\n• সংস্করণ মাহি A06 রিলিজ'
+    '• রিয়েল-টাইম ১-অন-১ WebRTC অডিও ও ভিডিও কলিং\n• সুরক্ষিত ফায়ারস্টোর রুলস ও স্থায়ী চ্যাট ডিলিট\n• প্রোফাইল ও মেসেজিং স্থিতিশীলতা আপডেট (Mahi A07)'
   );
   const [releaseForceUpdate, setReleaseForceUpdate] = useState(false);
   const [publishingRelease, setPublishingRelease] = useState(false);
@@ -238,7 +238,7 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     setPublishingRelease(true);
     setActionErrorMsg(null);
     try {
-      let parsedCode = parseInt(releaseVersionCode, 10) || 106;
+      let parsedCode = parseInt(releaseVersionCode, 10) || 107;
       if (parsedCode < 10) {
         parsedCode = parsedCode * 100 + (parsedCode === 2 ? 2 : 0);
       }

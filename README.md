@@ -1,58 +1,110 @@
-# Anomah Chat (Version: v1.0.6 · Mahi A06)
-> **Owner & Developer:** Mahi Muhtasim  
-> **Platform:** Web & Android (APK)
+# Anomah Chat (`v1.0.7` · `Mahi A07`)
 
-A real-time messaging application like WhatsApp and Messenger with worldwide connectivity, persistent Firebase Firestore cloud database, voice notes, media sharing, and call interface.
+> **Developer & Owner:** Mahi Muhtasim  
+> **Package ID:** `com.mahimuhtasim.anomahchat`  
+> **Platforms:** Web (PWA) & Android Native APK (Capacitor 8)  
+> **Release Channel:** Stable (`versionCode: 107`)
 
----
-
-## 📱 How to Build Android APK (GitHub Actions)
-
-This repository is pre-configured with **Capacitor** and a **GitHub Actions Workflow** (`.github/workflows/build-apk.yml`) to automatically compile and generate an Android APK directly on GitHub without requiring you to install Android Studio or the Android SDK on your personal computer!
-
-### Steps to generate your APK:
-
-1. **Push this project to your GitHub Repository:**
-   ```bash
-   git init
-   git add .
-   git commit -m "Anomah Chat v1.0.6 (Mahi A06) release"
-   git branch -M main
-   git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git
-   git push -u origin main
-   ```
-
-2. **Wait for GitHub Actions to build the APK:**
-   * Open your repository on [GitHub.com](https://github.com).
-   * Click on the **Actions** tab at the top.
-   * You will see the workflow **"Build Android APK - Anomah Chat"** running automatically!
-   * It takes about 2 to 3 minutes to build.
-
-3. **Download your APK:**
-   * Once the workflow run shows a green checkmark (Succeeded), click on it.
-   * Scroll down to the **Artifacts** section at the bottom.
-   * Click on **`AnomahChat-v1.0.6-APK`** to download your Android APK file (`AnomahChat-v1.0.6.apk`).
-
-4. **Install on your Android Phone:**
-   * Transfer the `.apk` file to your Android phone (or download it directly from your phone's browser).
-   * Tap on the file to install and start chatting with anyone around the world!
+Anomah Chat is a real-time cross-platform cloud messenger built with React, TypeScript, Tailwind CSS, Firebase Authentication, Cloud Firestore, WebRTC, and Capacitor Android. Users can connect worldwide via 1-on-1 direct messaging, group chats, voice notes, compressed image sharing, and peer-to-peer audio/video calls, backed by strict Zero-Trust Firestore Security Rules.
 
 ---
 
-## 💻 Local Development
+## Key Features
+
+### Real-Time Messaging & Media
+- **Direct & Group Conversations:** Instant message delivery with read receipts (`seenByDetails`), message replies, emoji reactions, message editing, and full history deletion.
+- **Voice Notes:** Built-in browser/WebView audio recording with duration tracking and playback controls.
+- **Image Sharing:** Client-side image compression (`imageCompressor`) optimized for Cloud Firestore document limits.
+- **Live Presence:** Real-time online indicator, last-seen timestamps, and offline status banner.
+- **Bilingual Interface:** Instant language switching between **English** and **বাংলা (Bengali)** plus 3 UI themes (`Deep Slate`, `Minimal Light`, `Telegram Blue`).
+
+### Real-Time 1-on-1 WebRTC Audio & Video Calls
+- Peer-to-peer audio and video calling powered by **WebRTC (`RTCPeerConnection`)** with **Firestore SDP/ICE signaling** (`chats/{chatId}/calls`).
+- Supports live camera preview, microphone mute/unmute, camera toggle, incoming call ringing/accept/decline controls, and automatic 45-second unanswered call timeout.
+
+### Security & Privacy Architecture
+- **Zero-Trust Firestore Security Rules (`firestore.rules`):**
+  - Default-deny catch-all rule (`match /{document=**}`).
+  - Strict separation between private user PII (`users/{uid}`) and public non-PII discovery profiles (`directory/{uid}`).
+  - Group permissions enforce creator/admin privileges for group management, message moderation, and room deletion.
+  - Suspension enforcement blocks banned accounts from sending messages or creating/updating chats, with server-time (`request.time`) verified temporary ban expiry.
+- **Quick App-Lock PIN:** Optional 4–6 digit lock screen protected with client-side salted **SHA-256** digests stored in owner-private `users/{uid}/private/security` documents and brute-force lockout protection.
+- **15-Day Account Deletion Grace Period:** Scheduled account deactivation with self-service recovery within 15 days.
+
+### Super Admin Control Panel
+- Restricted exclusively to the verified Super Admin account (`email_verified == true`) at both UI and Firestore Rules layers.
+- Includes live overview metrics, user dossier & 7-day activity insights, temporary/permanent ban & official warning tools, read-only Ghost DM audit mode, abuse report resolution, recovery ticket desk, global announcements, immutable audit logs, and **APK Release publishing**.
+
+### Native Android APK & In-App Auto-Updater
+- **Native Updater Bridge (`MainActivity.java`):** Downloads release APKs strictly from the allowlisted GitHub Releases repository prefix, verifies optional **SHA-256 checksums**, and launches the Android package installer directly.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+| :--- | :--- |
+| **Frontend** | React 19, TypeScript, Vite 8, Tailwind CSS v4, Lucide Icons |
+| **Authentication & Database** | Firebase Auth (Google + Email/Password), Cloud Firestore |
+| **Calling** | WebRTC (`RTCPeerConnection` + Google STUN + Firestore Signaling) |
+| **Mobile Wrapper** | Capacitor 8 (Android), Java 21, Gradle |
+| **Rules Validation** | `@firebase/eslint-plugin-security-rules` |
+
+---
+
+## Changelog (`v1.0.7 · Mahi A07`)
+- Replaced simulated call timer with real **1-on-1 WebRTC peer-to-peer audio & video calling** via Firestore signaling.
+- Hardened Firestore Security Rules for group message deletion, group room deletion, and direct chat self-leave validation.
+- Fixed custom display name & avatar overwrite bug on reload (`syncUserProfile` & `updateProfile`).
+- Fixed direct chat deletion so old messages are purged cleanly instead of reappearing in new deterministic `dm_*` rooms.
+- Added error recovery and inline feedback for failed message/photo sends in `ChatArea`.
+- Added single-field query fallback for username availability & directory lookups when composite indexes are absent.
+- Fixed `AdminModal` user listener resubscription loop, `BannedScreen` clock-skew retry lockup, semver `isUpdateAvailable` ordering, and unified group fallback avatars.
+
+---
+
+## Local Development
+
+### Prerequisites
+- Node.js 22+
+- Firebase project configured in `firebase-applet-config.json`
+
+### Commands
 ```bash
-# Install dependencies
+# 1. Install dependencies
 npm install
 
-# Start Vite dev server
+# 2. Start Vite development server (port 3000)
 npm run dev
 
-# Build web distribution
+# 3. Type-check TypeScript
+npm run lint
+
+# 4. Validate Firestore security rules
+npx eslint firestore.rules
+
+# 5. Build production web bundle
 npm run build
 
-# Sync with Capacitor Android (optional if building locally)
-npm run build:apk
+# 6. Sync web bundle into Android Capacitor project
+npx cap sync android
 ```
 
 ---
-*Built with ❤️ by Mahi Muhtasim • Version: v1.0.6 (Mahi A06)*
+
+## Automated Android APK Build (GitHub Actions)
+
+The workflow in `.github/workflows/build-apk.yml` automatically builds an Android APK on every push to `main` or `master` (or manual dispatch):
+
+1. Builds the Vite bundle (`npm run build`) and syncs Capacitor (`npx cap sync android`).
+2. Compiles a **Signed Release APK** using Gradle when these repository secrets are configured:
+   - `ANDROID_KEYSTORE_BASE64`
+   - `ANDROID_KEYSTORE_PASSWORD`
+   - `ANDROID_KEY_ALIAS`
+   - `ANDROID_KEY_PASSWORD`
+   *(Falls back to a Debug APK if keystore secrets are not set.)*
+3. Computes the APK **SHA-256** digest, uploads `AnomahChat-v1.0.7-APK` as a workflow artifact, and publishes `v1.0.7` (`AnomahChat-v1.0.7.apk` & `AnomahChat.apk`) to **GitHub Releases**.
+
+---
+
+*Built & maintained by **Mahi Muhtasim** · Anomah Chat `v1.0.7` (`Mahi A07`)*
