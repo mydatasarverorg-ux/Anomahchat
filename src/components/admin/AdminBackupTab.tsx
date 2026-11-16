@@ -17,6 +17,8 @@ import {
   Image as ImageIcon,
   MessageSquare,
   PhoneCall,
+  RotateCcw,
+  Upload,
 } from 'lucide-react';
 import {
   PREFERRED_BACKUP_DRIVE_EMAIL,
@@ -31,6 +33,8 @@ import {
   deleteDriveBackupFile,
   triggerLocalBackupDownload,
   cleanupFirestoreAfterBackup,
+  parseLocalBackupFile,
+  restoreBackupToFirestore,
   type DriveConnectionInfo,
   type StorageScanReport,
   type BackupScopeMode,
@@ -38,6 +42,7 @@ import {
   type DriveBackupFileItem,
   type ChatBackupPayload,
   type CleanupResult,
+  type RestoreResult,
 } from '../../services/driveBackupService';
 import type { ChatRoom } from '../../types/chat';
 
@@ -97,6 +102,13 @@ export function AdminBackupTab({
   const [previewPayload, setPreviewPayload] = useState<ChatBackupPayload | null>(null);
   const [previewChatIndex, setPreviewChatIndex] = useState<number>(0);
   const [loadingPreviewId, setLoadingPreviewId] = useState<string | null>(null);
+
+  const [restoreTargetPayload, setRestoreTargetPayload] = useState<{
+    label: string;
+    payload: ChatBackupPayload;
+  } | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const [lastRestoreResult, setLastRestoreResult] = useState<RestoreResult | null>(null);
 
   useEffect(() => {
     if (allChats.length > 0 && !selectedChatId) {
@@ -303,6 +315,56 @@ export function AdminBackupTab({
       onError(err instanceof Error ? err.message : 'Download failed.');
     } finally {
       setLoadingPreviewId(null);
+    }
+  };
+
+  const handlePrepareRestoreFromDrive = async (file: DriveBackupFileItem) => {
+    setLoadingPreviewId(file.id);
+    try {
+      const payload = await downloadDriveBackupContent(file.id);
+      setRestoreTargetPayload({ label: file.name, payload });
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Unable to load Drive backup for restore.');
+    } finally {
+      setLoadingPreviewId(null);
+    }
+  };
+
+  const handleLocalRestoreFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const payload = await parseLocalBackupFile(file);
+      setRestoreTargetPayload({ label: file.name, payload });
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Invalid JSON backup file.');
+    }
+  };
+
+  const handleConfirmRestore = async () => {
+    if (!restoreTargetPayload) return;
+    setRestoring(true);
+    setProgressLabel(bn ? 'ব্যাকআপ Firebase-এ রিস্টোর হচ্ছে...' : 'Restoring backup to Firestore...');
+    try {
+      const res = await restoreBackupToFirestore(restoreTargetPayload.payload, (label) =>
+        setProgressLabel(label)
+      );
+      setLastRestoreResult(res);
+      setRestoreTargetPayload(null);
+      onSuccess(
+        bn
+          ? `রিস্টোর সম্পন্ন! ${res.restoredRooms}টি চ্যাট রুম ও ${res.restoredMessages}টি মেসেজ Firebase-এ ফিরিয়ে আনা হয়েছে (${res.skippedMessages}টি আগে থেকেই ছিল)।`
+          : `Restore complete: ${res.restoredRooms} rooms and ${res.restoredMessages} messages restored (${res.skippedMessages} skipped).`
+      );
+      scanFirestoreChatStorage()
+        .then((r) => setScanReport(r))
+        .catch(() => {});
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Restore failed.');
+    } finally {
+      setRestoring(false);
+      setProgressLabel('');
     }
   };
 
@@ -798,23 +860,56 @@ export function AdminBackupTab({
             </div>
           </div>
 
-          {driveStatus.connected && (
-            <button
-              onClick={refreshDriveFiles}
-              disabled={loadingDriveFiles}
-              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loadingDriveFiles ? 'animate-spin' : ''}`} />
-              <span>{bn ? 'রিফ্রেশ' : 'Refresh'}</span>
-            </button>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="px-3.5 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer">
+              <Upload className="w-3.5 h-3.5" />
+              <span>{bn ? 'লোকাল .json রিস্টোর' : 'Restore Local .json'}</span>
+              <input
+                type="file"
+                accept=".json,application/json"
+                onChange={handleLocalRestoreFileChange}
+                className="hidden"
+              />
+            </label>
+
+            {driveStatus.connected && (
+              <button
+                onClick={refreshDriveFiles}
+                disabled={loadingDriveFiles}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingDriveFiles ? 'animate-spin' : ''}`} />
+                <span>{bn ? 'রিফ্রেশ' : 'Refresh'}</span>
+              </button>
+            )}
+          </div>
         </div>
+
+        {lastRestoreResult && (
+          <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-xl p-3 text-xs text-emerald-200 space-y-1">
+            <div className="font-bold text-emerald-300">
+              {bn ? 'সর্বশেষ রিস্টোর ফলাফল:' : 'Last Restore Summary:'}
+            </div>
+            <div>
+              {bn
+                ? `নতুন রুম: ${lastRestoreResult.restoredRooms} · পুনরুদ্ধারকৃত মেসেজ: ${lastRestoreResult.restoredMessages} · আগে থেকেই ছিল: ${lastRestoreResult.skippedMessages}`
+                : `Rooms created: ${lastRestoreResult.restoredRooms} · Messages restored: ${lastRestoreResult.restoredMessages} · Already existed: ${lastRestoreResult.skippedMessages}`}
+            </div>
+            {lastRestoreResult.quotaHit && (
+              <div className="text-amber-300">
+                {bn
+                  ? 'দৈনিক ২০,০০০ রাইট কোটা পূর্ণ হয়েছে — বাকি অংশ আগামীকাল আবার চালালে হয়ে যাবে।'
+                  : 'Daily 20,000 write quota reached — run again tomorrow to finish remaining items.'}
+              </div>
+            )}
+          </div>
+        )}
 
         {!driveStatus.connected ? (
           <div className="py-8 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
             {bn
-              ? 'আর্কাইভ তালিকা দেখতে ধাপ ১ থেকে Google Drive যুক্ত করুন।'
-              : 'Connect Google Drive in Step 1 to view your saved backups.'}
+              ? 'Google Drive-এর আর্কাইভ তালিকা দেখতে ধাপ ১ থেকে ড্রাইভ যুক্ত করুন (অথবা ওপরে থেকে লোকাল .json রিস্টোর করুন)।'
+              : 'Connect Google Drive in Step 1 to browse Drive backups (or use "Restore Local .json" above).'}
           </div>
         ) : driveFiles.length === 0 ? (
           <div className="py-8 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
@@ -844,7 +939,7 @@ export function AdminBackupTab({
                   )}
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
                   <button
                     onClick={() => handlePreviewBackupFile(file)}
                     disabled={loadingPreviewId === file.id}
@@ -852,6 +947,15 @@ export function AdminBackupTab({
                   >
                     <Eye className="w-3.5 h-3.5" />
                     <span>{loadingPreviewId === file.id ? '...' : bn ? 'পড়ুন' : 'Inspect'}</span>
+                  </button>
+                  <button
+                    onClick={() => handlePrepareRestoreFromDrive(file)}
+                    disabled={loadingPreviewId === file.id || restoring}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                    title={bn ? 'Firebase-এ ফিরিয়ে আনুন' : 'Restore back to Firebase'}
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>{bn ? 'রিস্টোর' : 'Restore'}</span>
                   </button>
                   <button
                     onClick={() => handleDownloadDriveFileToDevice(file)}
@@ -970,6 +1074,73 @@ export function AdminBackupTab({
                 className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer disabled:opacity-50"
               >
                 {deletingDriveFile ? (bn ? 'মুছছে...' : 'Deleting...') : (bn ? 'হ্যাঁ, ডিলিট করুন' : 'Delete File')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Explicit Confirmation Modal: Restore Backup into Firebase */}
+      {restoreTargetPayload && (
+        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-emerald-500/40 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                <RotateCcw className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-sm font-bold text-white">
+                  {bn ? 'Firebase-এ চ্যাট রিস্টোর নিশ্চিত করুন' : 'Confirm Restore to Firebase'}
+                </h4>
+                <p className="text-xs text-slate-300 mt-1 break-all">
+                  {restoreTargetPayload.label}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3 text-xs text-slate-300 space-y-1">
+              <div>
+                {bn ? 'চ্যাট রুম:' : 'Chat rooms:'}{' '}
+                <strong className="text-white">{restoreTargetPayload.payload.stats.chatCount}</strong>
+              </div>
+              <div>
+                {bn ? 'মেসেজ:' : 'Messages:'}{' '}
+                <strong className="text-white">{restoreTargetPayload.payload.stats.messageCount}</strong>
+              </div>
+              <div>
+                {bn ? 'আনুমানিক সাইজ:' : 'Estimated size:'}{' '}
+                <strong className="text-white">
+                  {formatBytes(restoreTargetPayload.payload.stats.estimatedBytes)}
+                </strong>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              {bn
+                ? 'এই ব্যাকআপের চ্যাট ও মেসেজগুলো পুনরায় Firebase-এ ফিরিয়ে আনা হবে যেন ইউজাররা লাইভ চ্যাটে আবার দেখতে পান। যেগুলো আগে থেকেই Firebase-এ আছে সেগুলো বাদ দেওয়া হবে।'
+                : 'Chats and messages from this backup will be written back to Firestore so users can see them again. Existing messages will be skipped automatically.'}
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                onClick={() => setRestoreTargetPayload(null)}
+                disabled={restoring}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer"
+              >
+                {bn ? 'বাতিল' : 'Cancel'}
+              </button>
+              <button
+                onClick={handleConfirmRestore}
+                disabled={restoring}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+              >
+                {restoring
+                  ? bn
+                    ? 'রিস্টোর হচ্ছে...'
+                    : 'Restoring...'
+                  : bn
+                    ? 'হ্যাঁ, রিস্টোর করুন'
+                    : 'Confirm Restore'}
               </button>
             </div>
           </div>

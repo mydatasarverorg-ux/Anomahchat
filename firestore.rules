@@ -400,9 +400,12 @@ service cloud.firestore {
 
       allow list: if isAdmin() || (isSignedIn() && request.auth.uid in existing().participantIds);
 
-      allow create: if isSignedIn() && isValidId(chatId) && isValidChat(incoming()) && isCallerNotBanned()
-        && request.auth.uid in incoming().participantIds
-        && (!('isSuspended' in incoming()) || incoming().isSuspended == false);
+      allow create: if isValidId(chatId) && isValidChat(incoming()) && (
+        isAdmin() ||
+        (isSignedIn() && isCallerNotBanned()
+          && request.auth.uid in incoming().participantIds
+          && (!('isSuspended' in incoming()) || incoming().isSuspended == false))
+      );
 
       allow update: if isSignedIn() && isValidId(chatId) && isValidChat(incoming()) && (
         isAdmin() ||
@@ -461,26 +464,34 @@ service cloud.firestore {
           (isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds)
         );
 
-        allow create: if isSignedIn() && isValidId(chatId) && isValidId(messageId)
+        allow create: if isValidId(chatId) && isValidId(messageId)
           && isValidMessage(incoming(), chatId, messageId)
-          && incoming().senderId == request.auth.uid
-          && isCallerNotBanned()
-          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
-          && (!('isSuspended' in get(/databases/$(database)/documents/chats/$(chatId)).data) ||
-              get(/databases/$(database)/documents/chats/$(chatId)).data.isSuspended != true);
+          && (
+            isAdmin() ||
+            (isSignedIn()
+              && incoming().senderId == request.auth.uid
+              && isCallerNotBanned()
+              && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
+              && (!('isSuspended' in get(/databases/$(database)/documents/chats/$(chatId)).data) ||
+                  get(/databases/$(database)/documents/chats/$(chatId)).data.isSuspended != true))
+          );
 
-        allow update: if isSignedIn() && isValidId(chatId) && isValidId(messageId)
+        allow update: if isValidId(chatId) && isValidId(messageId)
           && isValidMessage(incoming(), chatId, messageId)
           && incoming().senderId == existing().senderId
           && incoming().chatId == existing().chatId
           && incoming().createdAt == existing().createdAt
-          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
           && (
-            incoming().diff(existing()).affectedKeys().hasOnly(['readBy', 'seenByDetails']) ||
-            (isCallerNotBanned() && incoming().diff(existing()).affectedKeys().hasOnly(['reactions'])) ||
-            (isCallerNotBanned() && existing().senderId == request.auth.uid &&
-              incoming().diff(existing()).affectedKeys().hasOnly(['text', 'isEdited', 'editedAt']) &&
-              incoming().isEdited == true)
+            isAdmin() ||
+            (isSignedIn()
+              && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
+              && (
+                incoming().diff(existing()).affectedKeys().hasOnly(['readBy', 'seenByDetails']) ||
+                (isCallerNotBanned() && incoming().diff(existing()).affectedKeys().hasOnly(['reactions'])) ||
+                (isCallerNotBanned() && existing().senderId == request.auth.uid &&
+                  incoming().diff(existing()).affectedKeys().hasOnly(['text', 'isEdited', 'editedAt']) &&
+                  incoming().isEdited == true)
+              ))
           );
 
         allow delete: if isValidId(chatId) && isValidId(messageId) && (

@@ -129,7 +129,8 @@ export interface AdminAuditLog {
     | 'toggle_announcement'
     | 'delete_announcement'
     | 'backup_chats'
-    | 'cleanup_storage';
+    | 'cleanup_storage'
+    | 'restore_chats';
   targetId?: string;
   targetName?: string;
   details: string;

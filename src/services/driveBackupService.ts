@@ -13,8 +13,10 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   query,
+  setDoc,
   where,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
@@ -92,6 +94,13 @@ export interface CleanupResult {
   deletedCallDocs: number;
   deletedIceDocs: number;
   deletedChatRooms: number;
+  quotaHit: boolean;
+}
+
+export interface RestoreResult {
+  restoredRooms: number;
+  restoredMessages: number;
+  skippedMessages: number;
   quotaHit: boolean;
 }
 
@@ -820,3 +829,193 @@ export async function cleanupFirestoreAfterBackup(
 
   return result;
 }
+
+const VALID_ID_REGEX = /^[a-zA-Z0-9_-]{1,128}$/;
+
+function sanitizeChatRoomForRestore(raw: ChatRoom): Record<string, unknown> | null {
+  if (!raw?.id || !VALID_ID_REGEX.test(raw.id)) return null;
+  const participantIds = Array.isArray(raw.participantIds)
+    ? raw.participantIds.filter((id): id is string => typeof id === 'string' && id.length > 0).slice(0, 100)
+    : [];
+  if (participantIds.length === 0) return null;
+
+  const nowIso = new Date().toISOString();
+  const clean: Record<string, unknown> = {
+    id: raw.id,
+    type: raw.type === 'group' ? 'group' : 'direct',
+    participantIds,
+    createdAt: typeof raw.createdAt === 'string' && raw.createdAt.length <= 64 ? raw.createdAt : nowIso,
+    updatedAt: typeof raw.updatedAt === 'string' && raw.updatedAt.length <= 64 ? raw.updatedAt : nowIso,
+  };
+
+  if (typeof raw.name === 'string') clean.name = raw.name.slice(0, 100);
+  if (typeof raw.creatorId === 'string') clean.creatorId = raw.creatorId.slice(0, 128);
+  if (Array.isArray(raw.adminIds)) {
+    clean.adminIds = raw.adminIds.filter((id): id is string => typeof id === 'string').slice(0, 50);
+  }
+  if (typeof raw.groupPhoto === 'string') clean.groupPhoto = raw.groupPhoto.slice(0, 1000);
+  if (raw.participantDetails && typeof raw.participantDetails === 'object') {
+    clean.participantDetails = raw.participantDetails;
+  }
+  if (typeof raw.isSuspended === 'boolean') clean.isSuspended = raw.isSuspended;
+  if (raw.suspendedUserId !== undefined) {
+    clean.suspendedUserId = typeof raw.suspendedUserId === 'string' ? raw.suspendedUserId.slice(0, 128) : null;
+  }
+  if (raw.suspendedUserName !== undefined) {
+    clean.suspendedUserName = typeof raw.suspendedUserName === 'string' ? raw.suspendedUserName.slice(0, 150) : null;
+  }
+  if (typeof raw.lastMessageText === 'string') clean.lastMessageText = raw.lastMessageText.slice(0, 500);
+  if (typeof raw.lastMessageSenderId === 'string') clean.lastMessageSenderId = raw.lastMessageSenderId.slice(0, 128);
+  if (typeof raw.lastMessageTime === 'string') clean.lastMessageTime = raw.lastMessageTime.slice(0, 64);
+
+  return clean;
+}
+
+function sanitizeMessageForRestore(raw: ChatMessage, chatId: string): Record<string, unknown> | null {
+  if (!raw?.id || !VALID_ID_REGEX.test(raw.id)) return null;
+  const senderId = typeof raw.senderId === 'string' && raw.senderId.length > 0 ? raw.senderId.slice(0, 128) : 'restored_user';
+  const senderName = typeof raw.senderName === 'string' && raw.senderName.length > 0 ? raw.senderName.slice(0, 100) : 'User';
+  const readBy =
+    Array.isArray(raw.readBy) && raw.readBy.length > 0
+      ? raw.readBy.filter((id): id is string => typeof id === 'string').slice(0, 100)
+      : [senderId];
+  if (readBy.length === 0) readBy.push(senderId);
+
+  const validTypes = ['text', 'image', 'audio', 'file', 'call'];
+  const msgType = validTypes.includes(raw.type) ? raw.type : 'text';
+
+  const clean: Record<string, unknown> = {
+    id: raw.id,
+    chatId,
+    senderId,
+    senderName,
+    text: typeof raw.text === 'string' ? raw.text.slice(0, 5000) : '',
+    type: msgType,
+    readBy,
+    createdAt: typeof raw.createdAt === 'string' && raw.createdAt.length <= 64 ? raw.createdAt : new Date().toISOString(),
+  };
+
+  if (typeof raw.senderPhoto === 'string') clean.senderPhoto = raw.senderPhoto.slice(0, 1000);
+  if (typeof raw.mediaUrl === 'string' && raw.mediaUrl.length <= 950000) clean.mediaUrl = raw.mediaUrl;
+  if (typeof raw.audioDuration === 'number') clean.audioDuration = raw.audioDuration;
+  if (typeof raw.callId === 'string') clean.callId = raw.callId.slice(0, 128);
+  if (typeof raw.callerId === 'string') clean.callerId = raw.callerId.slice(0, 128);
+  if (raw.callType === 'audio' || raw.callType === 'video') clean.callType = raw.callType;
+  if (raw.callStatus && ['completed', 'missed', 'declined', 'cancelled'].includes(raw.callStatus)) {
+    clean.callStatus = raw.callStatus;
+  }
+  if (typeof raw.callDuration === 'number' && raw.callDuration >= 0 && raw.callDuration <= 86400) {
+    clean.callDuration = raw.callDuration;
+  }
+  if (raw.seenByDetails && typeof raw.seenByDetails === 'object') clean.seenByDetails = raw.seenByDetails;
+  if (typeof raw.replyToId === 'string') clean.replyToId = raw.replyToId.slice(0, 128);
+  if (typeof raw.replyToText === 'string') clean.replyToText = raw.replyToText.slice(0, 300);
+  if (typeof raw.replyToSender === 'string') clean.replyToSender = raw.replyToSender.slice(0, 100);
+  if (raw.replyToType && validTypes.includes(raw.replyToType)) clean.replyToType = raw.replyToType;
+  if (raw.reactions && typeof raw.reactions === 'object') clean.reactions = raw.reactions;
+  if (typeof raw.isEdited === 'boolean') clean.isEdited = raw.isEdited;
+  if (typeof raw.editedAt === 'string') clean.editedAt = raw.editedAt.slice(0, 64);
+
+  return clean;
+}
+
+export async function parseLocalBackupFile(file: File): Promise<ChatBackupPayload> {
+  const text = await file.text();
+  const parsed = JSON.parse(text) as ChatBackupPayload;
+  if (!parsed || parsed.schema !== 'anomah-chat-backup-v1' || !Array.isArray(parsed.chats)) {
+    throw new Error('Invalid Anomah Chat backup JSON file.');
+  }
+  return parsed;
+}
+
+/**
+ * Restores backed-up chat rooms and messages from Google Drive or local JSON back into Cloud Firestore.
+ * Skips messages that already exist in Firestore so repeated restores are safe and idempotent.
+ */
+export async function restoreBackupToFirestore(
+  payload: ChatBackupPayload,
+  onProgress?: (label: string) => void
+): Promise<RestoreResult> {
+  const adminEmail = assertVerifiedSuperAdmin();
+
+  if (!payload || !Array.isArray(payload.chats)) {
+    throw new Error('Invalid backup payload.');
+  }
+
+  const result: RestoreResult = {
+    restoredRooms: 0,
+    restoredMessages: 0,
+    skippedMessages: 0,
+    quotaHit: false,
+  };
+
+  let roomIdx = 0;
+  for (const entry of payload.chats) {
+    if (result.quotaHit) break;
+    roomIdx += 1;
+
+    const cleanRoom = sanitizeChatRoomForRestore(entry.room);
+    if (!cleanRoom) continue;
+
+    const chatId = entry.room.id;
+    onProgress?.(`Restoring room ${roomIdx} / ${payload.chats.length}...`);
+
+    try {
+      const roomRef = doc(db, 'chats', chatId);
+      const roomSnap = await getDoc(roomRef);
+      if (!roomSnap.exists()) {
+        await setDoc(roomRef, cleanRoom);
+        result.restoredRooms += 1;
+      }
+
+      // Check existing messages so we don't duplicate or waste writes
+      const existingMsgsSnap = await getDocs(collection(db, 'chats', chatId, 'messages'));
+      const existingIds = new Set<string>();
+      existingMsgsSnap.forEach((d) => existingIds.add(d.id));
+
+      const toRestore: Array<{ id: string; data: Record<string, unknown> }> = [];
+      for (const rawMsg of entry.messages || []) {
+        if (!rawMsg?.id) continue;
+        if (existingIds.has(rawMsg.id)) {
+          result.skippedMessages += 1;
+          continue;
+        }
+        const cleanMsg = sanitizeMessageForRestore(rawMsg, chatId);
+        if (cleanMsg) {
+          toRestore.push({ id: rawMsg.id, data: cleanMsg });
+        }
+      }
+
+      const BATCH_SIZE = 20;
+      for (let i = 0; i < toRestore.length; i += BATCH_SIZE) {
+        const slice = toRestore.slice(i, i + BATCH_SIZE);
+        await Promise.all(
+          slice.map((item) =>
+            setDoc(doc(db, 'chats', chatId, 'messages', item.id), item.data)
+          )
+        );
+        result.restoredMessages += slice.length;
+        onProgress?.(
+          `Room ${roomIdx}/${payload.chats.length}: restored ${result.restoredMessages} messages...`
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+      if (msg.includes('resource-exhausted') || msg.includes('quota')) {
+        result.quotaHit = true;
+        break;
+      }
+      throw err;
+    }
+  }
+
+  await logAdminAction(
+    'restore_chats',
+    `Restored backup from ${payload.exportedAt}: ${result.restoredRooms} rooms, ${result.restoredMessages} messages restored (${result.skippedMessages} skipped).${result.quotaHit ? ' (Stopped at daily free quota)' : ''}`,
+    adminEmail,
+    'all_chats'
+  );
+
+  return result;
+}
+
