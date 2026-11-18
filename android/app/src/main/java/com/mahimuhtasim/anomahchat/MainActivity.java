@@ -274,6 +274,7 @@ public class MainActivity extends BridgeActivity {
                 webView.addJavascriptInterface(new AndroidNotificationInterface(), "AndroidNotifications");
             }
             handleNotificationIntent(getIntent());
+            handleDeepLinkIntent(getIntent());
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -284,6 +285,59 @@ public class MainActivity extends BridgeActivity {
         super.onNewIntent(intent);
         setIntent(intent);
         handleNotificationIntent(intent);
+        handleDeepLinkIntent(intent);
+    }
+
+    private void handleDeepLinkIntent(Intent intent) {
+        if (intent == null) return;
+        Uri data = intent.getData();
+        if (data == null) return;
+        if (!Intent.ACTION_VIEW.equals(intent.getAction())) return;
+
+        String scheme = data.getScheme() != null ? data.getScheme().toLowerCase() : "";
+        String host = data.getHost() != null ? data.getHost().toLowerCase() : "";
+        boolean isAllowed = ("anomahchat".equals(scheme) && "open".equals(host))
+                || ("https".equals(scheme) && "mydatasarverorg-ux.github.io".equals(host));
+        if (!isAllowed) return;
+
+        final String chatParam = data.getQueryParameter("chat");
+        final String groupParam = data.getQueryParameter("group");
+        final String qrParam = data.getQueryParameter("qr");
+        if ((chatParam == null || chatParam.trim().isEmpty()) && (groupParam == null || groupParam.trim().isEmpty())) {
+            return;
+        }
+
+        intent.setData(null);
+
+        try {
+            org.json.JSONObject payload = new org.json.JSONObject();
+            if (groupParam != null && !groupParam.trim().isEmpty()) {
+                payload.put("type", "group");
+                payload.put("value", groupParam.trim());
+            } else {
+                payload.put("type", "chat");
+                payload.put("value", chatParam.trim());
+            }
+            payload.put("isQr", "1".equals(qrParam) || "true".equalsIgnoreCase(qrParam));
+            final String jsonPayload = payload.toString();
+
+            runOnUiThread(() -> {
+                try {
+                    WebView webView = getBridge().getWebView();
+                    if (webView != null) {
+                        webView.postDelayed(() -> {
+                            String script = "window.__pendingDeepLink=" + jsonPayload + ";"
+                                    + "window.dispatchEvent(new CustomEvent('anomah_deep_link',{detail:" + jsonPayload + "}));";
+                            webView.evaluateJavascript(script, null);
+                        }, 450);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     private void handleNotificationIntent(Intent intent) {

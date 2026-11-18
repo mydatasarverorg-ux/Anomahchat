@@ -12,15 +12,60 @@ import {
   updateDoc,
   deleteDoc,
   arrayUnion,
+  increment,
   writeBatch,
   type DocumentReference,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { handleFirestoreError, OperationType } from '../firebase/errorHandler';
-import type { UserProfile, DirectoryUser, UserSecurityLock, ChatRoom, ChatMessage, MessageType } from '../types/chat';
+import { extractChatTargetFromInput } from '../utils/accountShortcut';
+import type {
+  UserProfile,
+  DirectoryUser,
+  UserSecurityLock,
+  ChatRoom,
+  ChatMessage,
+  MessageType,
+  Friendship,
+  FriendshipPartyPreview,
+  GroupVisibility,
+  GroupJoinPolicy,
+  PublicGroupSummary,
+  GroupJoinRequest,
+} from '../types/chat';
 
-function toDirectoryPayload(fields: Partial<UserProfile> & { userId: string }): Record<string, unknown> {
+export async function hashPhoneForDirectory(phone?: string | null): Promise<string | null> {
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length < 7) return null;
+  const canonical = digits.length >= 10 ? digits.slice(-10) : digits;
+  const data = new TextEncoder().encode(`anomah_dir_phone_v1:${canonical}`);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+export function directoryUserToUserProfile(u: DirectoryUser): UserProfile {
+  return {
+    userId: u.userId,
+    displayName: u.displayName,
+    email: '',
+    photoURL: u.photoURL,
+    about: u.about,
+    username: u.username,
+    isOnline: u.isOnline,
+    lastSeen: u.lastSeen,
+    status: u.status,
+    isBanned: u.isBanned,
+    createdAt: u.lastSeen || new Date().toISOString(),
+  };
+}
+
+function toDirectoryPayload(
+  fields: Partial<UserProfile> & { userId: string; phoneLookupHash?: string | null }
+): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     userId: fields.userId,
     displayName: (fields.displayName || 'User').slice(0, 100),
@@ -33,6 +78,9 @@ function toDirectoryPayload(fields: Partial<UserProfile> & { userId: string }): 
   };
   if (fields.username) {
     payload.username = fields.username.toLowerCase();
+  }
+  if (fields.phoneLookupHash !== undefined) {
+    payload.phoneLookupHash = fields.phoneLookupHash;
   }
   return payload;
 }
@@ -52,6 +100,7 @@ export async function syncUserProfile(user: {
   displayName: string | null;
   email: string | null;
   photoURL: string | null;
+  phoneNumber?: string | null;
 }): Promise<UserProfile> {
   const path = `users/${user.uid}`;
   try {
@@ -62,6 +111,7 @@ export async function syncUserProfile(user: {
     const fallbackPhoto = user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.uid}`;
     const nowIso = new Date().toISOString();
     const cleanEmail = (user.email || '').trim().toLowerCase().slice(0, 150);
+    const cleanPhone = (user.phoneNumber || '').trim().replace(/\s+/g, ' ').slice(0, 50);
 
     if (existingSnap.exists()) {
       const data = existingSnap.data() as UserProfile;
@@ -76,9 +126,18 @@ export async function syncUserProfile(user: {
       if (cleanEmail && data.email !== cleanEmail) {
         updated.email = cleanEmail;
       }
+      if (cleanPhone.length >= 6 && !data.phoneNumber) {
+        updated.phoneNumber = cleanPhone;
+      }
       await updateDoc(userRef, updated);
 
       const merged = { ...data, ...updated } as UserProfile;
+      const resolvedPhoneHash =
+        merged.discoverableByPhone === false
+          ? null
+          : merged.phoneNumber
+          ? await hashPhoneForDirectory(merged.phoneNumber)
+          : undefined;
       await syncDirectoryEntry(
         user.uid,
         toDirectoryPayload({
@@ -87,6 +146,7 @@ export async function syncUserProfile(user: {
           photoURL: merged.photoURL,
           about: merged.about,
           username: merged.username,
+          phoneLookupHash: resolvedPhoneHash,
           status: merged.status || 'active',
           isOnline: true,
           lastSeen: nowIso,
@@ -95,10 +155,12 @@ export async function syncUserProfile(user: {
       );
       return merged;
     } else {
+      const initialPhoneHash = cleanPhone.length >= 6 ? await hashPhoneForDirectory(cleanPhone) : null;
       const newProfile: UserProfile = {
         userId: user.uid,
         displayName: fallbackName.slice(0, 100),
         email: cleanEmail,
+        ...(cleanPhone.length >= 6 ? { phoneNumber: cleanPhone, discoverableByPhone: true } : {}),
         photoURL: fallbackPhoto.slice(0, 1000),
         about: 'Available | Using Anomah Chat',
         status: 'active',
@@ -107,7 +169,13 @@ export async function syncUserProfile(user: {
         createdAt: nowIso,
       };
       await setDoc(userRef, newProfile);
-      await syncDirectoryEntry(user.uid, toDirectoryPayload(newProfile));
+      await syncDirectoryEntry(
+        user.uid,
+        toDirectoryPayload({
+          ...newProfile,
+          ...(initialPhoneHash ? { phoneLookupHash: initialPhoneHash } : {}),
+        })
+      );
       return newProfile;
     }
   } catch (error) {
@@ -252,25 +320,100 @@ export async function getAllUsers(currentUserId: string): Promise<UserProfile[]>
     snap.forEach((docItem) => {
       const u = docItem.data() as DirectoryUser;
       if (u.userId !== currentUserId) {
-        list.push({
-          userId: u.userId,
-          displayName: u.displayName,
-          email: '',
-          photoURL: u.photoURL,
-          about: u.about,
-          username: u.username,
-          isOnline: u.isOnline,
-          lastSeen: u.lastSeen,
-          status: u.status,
-          isBanned: u.isBanned,
-          createdAt: u.lastSeen || new Date().toISOString(),
-        });
+        list.push(directoryUserToUserProfile(u));
       }
     });
     return list;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path);
     return [];
+  }
+}
+
+// Search-first privacy-safe discovery by @username, exact mobile hash, personal link, or name
+export async function searchDirectoryUsers(
+  currentUserId: string,
+  rawQuery: string
+): Promise<UserProfile[]> {
+  const extractedLinkTarget = extractChatTargetFromInput(rawQuery);
+  const trimmed = (extractedLinkTarget || rawQuery).trim();
+  if (trimmed.length < 2) return [];
+
+  const resultsMap = new Map<string, UserProfile>();
+  const addResult = (u: DirectoryUser) => {
+    if (u.userId === currentUserId) return;
+    if (u.status !== 'active') return;
+    if (!resultsMap.has(u.userId)) {
+      resultsMap.set(u.userId, directoryUserToUserProfile(u));
+    }
+  };
+
+  try {
+    // 1. Exact uid:... deep-link lookup
+    if (trimmed.toLowerCase().startsWith('uid:')) {
+      const uidTarget = trimmed.slice(4).trim();
+      if (uidTarget) {
+        const snapDoc = await getDoc(doc(db, 'directory', uidTarget));
+        if (snapDoc.exists()) {
+          addResult(snapDoc.data() as DirectoryUser);
+        }
+      }
+      return Array.from(resultsMap.values());
+    }
+
+    // 2. Exact privacy-preserving mobile number lookup (requires >= 7 digits, no letters)
+    const digitsOnly = trimmed.replace(/\D/g, '');
+    const looksLikePhone = !/[a-zA-Z@]/.test(trimmed) && digitsOnly.length >= 7;
+    if (looksLikePhone) {
+      const phoneHash = await hashPhoneForDirectory(trimmed);
+      if (phoneHash) {
+        const qPhone = query(
+          collection(db, 'directory'),
+          where('phoneLookupHash', '==', phoneHash),
+          limit(5)
+        );
+        const snapPhone = await getDocs(qPhone);
+        snapPhone.forEach((d) => addResult(d.data() as DirectoryUser));
+      }
+      return Array.from(resultsMap.values());
+    }
+
+    // 3. Exact @username lookup (works with single-field index)
+    const cleanHandle = trimmed.toLowerCase().replace(/^@/, '');
+    if (cleanHandle.length >= 3 && !cleanHandle.includes(' ')) {
+      const qUsername = query(
+        collection(db, 'directory'),
+        where('username', '==', cleanHandle),
+        limit(5)
+      );
+      const snapUser = await getDocs(qUsername);
+      snapUser.forEach((d) => addResult(d.data() as DirectoryUser));
+    }
+
+    // 4. Bounded active directory name/handle match when not strictly searching with a full link
+    if (!extractedLinkTarget && resultsMap.size < 15) {
+      const qActive = query(
+        collection(db, 'directory'),
+        where('status', '==', 'active'),
+        limit(50)
+      );
+      const snapActive = await getDocs(qActive);
+      const needle = cleanHandle || trimmed.toLowerCase();
+      snapActive.forEach((d) => {
+        const u = d.data() as DirectoryUser;
+        if (u.userId === currentUserId || u.status !== 'active') return;
+        const nameMatch = u.displayName?.toLowerCase().includes(needle);
+        const userMatch = Boolean(u.username && u.username.toLowerCase().includes(needle));
+        if (nameMatch || userMatch) {
+          addResult(u);
+        }
+      });
+    }
+
+    return Array.from(resultsMap.values()).slice(0, 20);
+  } catch (error) {
+    console.warn('Directory search notice:', error);
+    return Array.from(resultsMap.values());
   }
 }
 
@@ -354,18 +497,39 @@ export async function getOrCreateDirectChat(
   }
 }
 
-// Create a group chat
+// Create a group chat (supports Private Invite-Only and Public Direct/Approval groups)
 export async function createGroupChat(
   currentUser: UserProfile,
   groupName: string,
-  selectedMembers: UserProfile[]
+  selectedMembers: UserProfile[],
+  options?: {
+    visibility?: GroupVisibility;
+    joinPolicy?: GroupJoinPolicy;
+    description?: string;
+  }
 ): Promise<ChatRoom> {
   const path = 'chats';
   try {
-    const allMembers = [currentUser, ...selectedMembers];
+    const dedupMap = new Map<string, UserProfile>();
+    dedupMap.set(currentUser.userId, currentUser);
+    selectedMembers.forEach((m) => {
+      if (m.userId && m.userId !== currentUser.userId) {
+        dedupMap.set(m.userId, m);
+      }
+    });
+    const allMembers = Array.from(dedupMap.values());
     const participantIds = allMembers.map((m) => m.userId);
     const chatId = `group_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const nowIso = new Date().toISOString();
+    const cleanName = groupName.trim().slice(0, 100);
+    const cleanDescription = options?.description?.trim().slice(0, 300) || '';
+    const visibility: GroupVisibility = options?.visibility === 'public' ? 'public' : 'private';
+    const joinPolicy: GroupJoinPolicy =
+      visibility === 'public'
+        ? options?.joinPolicy === 'approval'
+          ? 'approval'
+          : 'direct'
+        : 'invite_only';
 
     const participantDetails: Record<string, { displayName: string; photoURL?: string; email?: string }> = {};
     allMembers.forEach((m) => {
@@ -378,13 +542,17 @@ export async function createGroupChat(
 
     const newChat: Omit<ChatRoom, 'id'> = {
       type: 'group',
-      name: groupName.trim().slice(0, 100),
+      name: cleanName,
+      ...(cleanDescription ? { description: cleanDescription } : {}),
       creatorId: currentUser.userId,
       adminIds: [currentUser.userId],
+      visibility,
+      joinPolicy,
+      bannedUserIds: [],
       participantIds,
       participantDetails,
       lastMessageId: '',
-      lastMessageText: `${currentUser.displayName} created group "${groupName}"`,
+      lastMessageText: `${currentUser.displayName} created ${visibility === 'public' ? 'public ' : ''}group "${cleanName}"`,
       lastMessageSenderId: 'system',
       lastMessageTime: nowIso,
       lastMessageReadBy: [],
@@ -392,8 +560,27 @@ export async function createGroupChat(
       updatedAt: nowIso,
     };
 
+    const batch = writeBatch(db);
     const chatRef = doc(db, 'chats', chatId);
-    await setDoc(chatRef, newChat);
+    batch.set(chatRef, newChat);
+
+    if (visibility === 'public') {
+      const publicSummary: PublicGroupSummary = {
+        groupId: chatId,
+        name: cleanName,
+        ...(cleanDescription ? { description: cleanDescription } : {}),
+        creatorId: currentUser.userId,
+        adminIds: [currentUser.userId],
+        joinPolicy: joinPolicy === 'approval' ? 'approval' : 'direct',
+        memberCount: Math.max(1, Math.min(100, participantIds.length)),
+        status: 'active',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      batch.set(doc(db, 'public_groups', chatId), publicSummary);
+    }
+
+    await batch.commit();
     return { id: chatId, ...newChat };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -813,7 +1000,7 @@ export async function deleteChatRoom(chatId: string, currentUserId: string) {
   }
 }
 
-// Add new members to an existing group
+// Add new members to an existing group (also unbans if admin explicitly re-adds)
 export async function addGroupMembers(
   chatId: string,
   newMembers: UserProfile[],
@@ -828,9 +1015,11 @@ export async function addGroupMembers(
 
     const currentIds = new Set(data.participantIds || []);
     const details = { ...(data.participantDetails || {}) };
+    const addedSet = new Set<string>();
 
     newMembers.forEach((m) => {
       currentIds.add(m.userId);
+      addedSet.add(m.userId);
       details[m.userId] = {
         displayName: m.displayName,
         photoURL: m.photoURL || '',
@@ -838,30 +1027,41 @@ export async function addGroupMembers(
       };
     });
 
+    const nextIds = Array.from(currentIds);
+    const nextBanned = (data.bannedUserIds || []).filter((id) => !addedSet.has(id));
     const nowIso = new Date().toISOString();
     const addedNames = newMembers.map((m) => m.displayName).join(', ');
 
     await updateDoc(chatRef, {
-      participantIds: Array.from(currentIds),
+      participantIds: nextIds,
       participantDetails: details,
+      bannedUserIds: nextBanned,
       lastMessageId: '',
-      lastMessageText: `${addedByName} added ${addedNames}`,
+      lastMessageText: `${addedByName} added ${addedNames}`.slice(0, 500),
       lastMessageSenderId: 'system',
       lastMessageTime: nowIso,
       lastMessageReadBy: [],
       updatedAt: nowIso,
     });
+
+    if (data.visibility === 'public') {
+      await updateDoc(doc(db, 'public_groups', chatId), {
+        memberCount: Math.max(1, Math.min(100, nextIds.length)),
+        updatedAt: nowIso,
+      }).catch(() => {});
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
   }
 }
 
-// Remove a member from a group (Admin only)
+// Remove (or optionally ban from re-joining public group) a member from a group (Admin only)
 export async function removeGroupMember(
   chatId: string,
   memberId: string,
-  removedByName?: string
+  removedByName?: string,
+  alsoBanFromRejoin = false
 ): Promise<void> {
   const path = `chats/${chatId}`;
   try {
@@ -876,19 +1076,31 @@ export async function removeGroupMember(
 
     const remainingIds = (data.participantIds || []).filter((id) => id !== memberId);
     const remainingAdmins = (data.adminIds || []).filter((id) => id !== memberId);
+    const nextBanned = alsoBanFromRejoin
+      ? Array.from(new Set([...(data.bannedUserIds || []), memberId]))
+      : (data.bannedUserIds || []);
     const memberName = data.participantDetails?.[memberId]?.displayName || 'Member';
     const nowIso = new Date().toISOString();
 
     await updateDoc(chatRef, {
       participantIds: remainingIds,
       adminIds: remainingAdmins,
+      bannedUserIds: nextBanned,
       lastMessageId: '',
-      lastMessageText: `${removedByName || 'Admin'} removed ${memberName}`,
+      lastMessageText: `${removedByName || 'Admin'} removed ${memberName}${alsoBanFromRejoin ? ' (banned)' : ''}`.slice(0, 500),
       lastMessageSenderId: 'system',
       lastMessageTime: nowIso,
       lastMessageReadBy: [],
       updatedAt: nowIso,
     });
+
+    if (data.visibility === 'public') {
+      await updateDoc(doc(db, 'public_groups', chatId), {
+        memberCount: Math.max(1, Math.min(100, remainingIds.length)),
+        adminIds: remainingAdmins.length > 0 ? remainingAdmins : [data.creatorId || remainingIds[0]].filter(Boolean),
+        updatedAt: nowIso,
+      }).catch(() => {});
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
@@ -906,11 +1118,20 @@ export async function makeGroupAdmin(chatId: string, targetUserId: string): Prom
 
     const currentAdmins = new Set(data.adminIds || (data.creatorId ? [data.creatorId] : []));
     currentAdmins.add(targetUserId);
+    const nextAdmins = Array.from(currentAdmins);
+    const nowIso = new Date().toISOString();
 
     await updateDoc(chatRef, {
-      adminIds: Array.from(currentAdmins),
-      updatedAt: new Date().toISOString(),
+      adminIds: nextAdmins,
+      updatedAt: nowIso,
     });
+
+    if (data.visibility === 'public') {
+      await updateDoc(doc(db, 'public_groups', chatId), {
+        adminIds: nextAdmins,
+        updatedAt: nowIso,
+      }).catch(() => {});
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
@@ -931,11 +1152,19 @@ export async function dismissGroupAdmin(chatId: string, targetUserId: string): P
     }
 
     const currentAdmins = (data.adminIds || []).filter((id) => id !== targetUserId);
+    const nowIso = new Date().toISOString();
 
     await updateDoc(chatRef, {
       adminIds: currentAdmins,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
     });
+
+    if (data.visibility === 'public') {
+      await updateDoc(doc(db, 'public_groups', chatId), {
+        adminIds: currentAdmins.length > 0 ? currentAdmins : [data.creatorId].filter(Boolean),
+        updatedAt: nowIso,
+      }).catch(() => {});
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
@@ -972,12 +1201,20 @@ export async function leaveGroupChat(
       participantIds: remainingIds,
       adminIds: remainingAdmins,
       lastMessageId: '',
-      lastMessageText: `${userName || 'A member'} left the group`,
+      lastMessageText: `${userName || 'A member'} left the group`.slice(0, 500),
       lastMessageSenderId: 'system',
       lastMessageTime: nowIso,
       lastMessageReadBy: [],
       updatedAt: nowIso,
     });
+
+    if (data.visibility === 'public') {
+      await updateDoc(doc(db, 'public_groups', chatId), {
+        memberCount: Math.max(1, Math.min(100, remainingIds.length)),
+        adminIds: remainingAdmins,
+        updatedAt: nowIso,
+      }).catch(() => {});
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
@@ -994,7 +1231,13 @@ export async function deleteGroupChatPermanently(chatId: string): Promise<void> 
       await deleteDocRefsInChunks(msgsSnap.docs.map((docItem) => docItem.ref));
     }
 
+    const joinReqSnap = await getDocs(collection(db, 'chats', chatId, 'join_requests')).catch(() => null);
+    if (joinReqSnap && !joinReqSnap.empty) {
+      await deleteDocRefsInChunks(joinReqSnap.docs.map((docItem) => docItem.ref)).catch(() => {});
+    }
+
     await deleteCallsAndCandidates(chatId);
+    await deleteDoc(doc(db, 'public_groups', chatId)).catch(() => {});
 
     const chatRef = doc(db, 'chats', chatId);
     await deleteDoc(chatRef);
@@ -1008,12 +1251,17 @@ export async function deleteGroupChatPermanently(chatId: string): Promise<void> 
 export async function updateGroupTitle(chatId: string, newTitle: string): Promise<void> {
   const path = `chats/${chatId}`;
   try {
+    const cleanTitle = newTitle.trim().slice(0, 100);
     const chatRef = doc(db, 'chats', chatId);
     const nowIso = new Date().toISOString();
     await updateDoc(chatRef, {
-      name: newTitle.trim().slice(0, 100),
+      name: cleanTitle,
       updatedAt: nowIso,
     });
+    await updateDoc(doc(db, 'public_groups', chatId), {
+      name: cleanTitle,
+      updatedAt: nowIso,
+    }).catch(() => {});
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
@@ -1059,35 +1307,28 @@ export async function isUsernameAvailable(username: string, currentUserId?: stri
   }
 }
 
-// Indexed lookup in directory by username or UID
+// Indexed lookup in directory by username, uid:..., or UID
 export async function findDirectoryUserByIdentifier(identifier: string): Promise<DirectoryUser | null> {
-  const raw = identifier.trim().replace(/^@/, '');
+  const extracted = extractChatTargetFromInput(identifier);
+  const rawInput = (extracted || identifier).trim();
+  const isUidPrefix = rawInput.toLowerCase().startsWith('uid:');
+  const raw = isUidPrefix ? rawInput.slice(4).trim() : rawInput.replace(/^@/, '');
   const clean = raw.toLowerCase();
   if (!clean) return null;
 
   try {
-    try {
+    if (!isUidPrefix) {
       const qUsername = query(
         collection(db, 'directory'),
         where('username', '==', clean),
-        where('status', '==', 'active')
+        limit(3)
       );
       const snapUser = await getDocs(qUsername);
-      if (!snapUser.empty) {
-        return snapUser.docs[0].data() as DirectoryUser;
-      }
-    } catch {
-      // Fallback if composite index on (username, status) is not provisioned yet
-      const qFallback = query(
-        collection(db, 'directory'),
-        where('status', '==', 'active')
-      );
-      const snapFallback = await getDocs(qFallback);
-      const match = snapFallback.docs.find(
-        (d) => ((d.data() as DirectoryUser).username || '').toLowerCase() === clean
-      );
-      if (match) {
-        return match.data() as DirectoryUser;
+      const activeMatch = snapUser.docs
+        .map((d) => d.data() as DirectoryUser)
+        .find((u) => u.status === 'active');
+      if (activeMatch) {
+        return activeMatch;
       }
     }
 
@@ -1294,4 +1535,544 @@ export function checkAccountDeletionStatus(user: UserProfile): {
 
   const daysRemaining = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
   return { isScheduled: true, isExpired: false, daysRemaining };
+}
+
+// ------------------------------------------------------------------
+// FRIEND REQUESTS & ACCEPTED FRIENDSHIP GATE
+// ------------------------------------------------------------------
+
+export function getFriendshipId(uidA: string, uidB: string): string {
+  const [minId, maxId] = [uidA, uidB].sort();
+  return `pair_${minId}_${maxId}`;
+}
+
+function toFriendshipPreview(user: {
+  displayName?: string;
+  photoURL?: string;
+  username?: string;
+}): FriendshipPartyPreview {
+  const preview: FriendshipPartyPreview = {
+    displayName: (user.displayName || 'User').slice(0, 100),
+    photoURL: (user.photoURL || '').slice(0, 1000),
+  };
+  if (user.username && user.username.trim()) {
+    preview.username = user.username.trim().toLowerCase().slice(0, 50);
+  }
+  return preview;
+}
+
+export function subscribeToUserFriendships(
+  userId: string,
+  onUpdate: (friendships: Friendship[]) => void
+): Unsubscribe {
+  const q = query(collection(db, 'friendships'), where('userIds', 'array-contains', userId));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list: Friendship[] = [];
+      snapshot.forEach((docItem) => {
+        list.push(docItem.data() as Friendship);
+      });
+      list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      onUpdate(list);
+    },
+    (error) => {
+      console.warn('Friendships subscribe notice:', error);
+    }
+  );
+}
+
+export async function getFriendshipBetween(uidA: string, uidB: string): Promise<Friendship | null> {
+  if (!uidA || !uidB || uidA === uidB) return null;
+  try {
+    const pairId = getFriendshipId(uidA, uidB);
+    const snap = await getDoc(doc(db, 'friendships', pairId));
+    if (!snap.exists()) return null;
+    return snap.data() as Friendship;
+  } catch (error) {
+    console.warn('Get friendship notice:', error);
+    return null;
+  }
+}
+
+export async function sendFriendRequest(
+  currentUser: UserProfile,
+  partner: Pick<UserProfile, 'userId' | 'displayName' | 'photoURL' | 'username' | 'isBanned'>,
+  source: 'search' | 'qr' | 'link' = 'search'
+): Promise<Friendship> {
+  if (currentUser.userId === partner.userId) {
+    throw new Error('Cannot send friend request to yourself.');
+  }
+  if (partner.isBanned) {
+    throw new Error('This user account is currently suspended.');
+  }
+
+  const pairId = getFriendshipId(currentUser.userId, partner.userId);
+  const path = `friendships/${pairId}`;
+  const ref = doc(db, 'friendships', pairId);
+  const nowIso = new Date().toISOString();
+
+  try {
+    const existingSnap = await getDoc(ref);
+    if (existingSnap.exists()) {
+      const existing = existingSnap.data() as Friendship;
+      if (existing.status === 'blocked') {
+        throw new Error(
+          existing.blockedBy === currentUser.userId
+            ? 'You have blocked this user. Unblock them first from your Friends & Requests list.'
+            : 'You cannot send a friend request to this user.'
+        );
+      }
+      if (existing.status === 'accepted' || existing.status === 'pending') {
+        return existing;
+      }
+      // status === 'declined': resend fresh request
+      await updateDoc(ref, {
+        requesterId: currentUser.userId,
+        receiverId: partner.userId,
+        status: 'pending',
+        source,
+        requesterProfile: toFriendshipPreview(currentUser),
+        receiverProfile: toFriendshipPreview(partner),
+        updatedAt: nowIso,
+      });
+      return {
+        ...existing,
+        requesterId: currentUser.userId,
+        receiverId: partner.userId,
+        status: 'pending',
+        source,
+        requesterProfile: toFriendshipPreview(currentUser),
+        receiverProfile: toFriendshipPreview(partner),
+        updatedAt: nowIso,
+      };
+    }
+
+    const sortedIds = [currentUser.userId, partner.userId].sort();
+    const payload: Friendship = {
+      id: pairId,
+      userIds: sortedIds,
+      requesterId: currentUser.userId,
+      receiverId: partner.userId,
+      status: 'pending',
+      blockedBy: null,
+      source,
+      requesterProfile: toFriendshipPreview(currentUser),
+      receiverProfile: toFriendshipPreview(partner),
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    await setDoc(ref, payload);
+    return payload;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+export async function acceptFriendRequest(
+  friendshipId: string,
+  acceptor: Pick<UserProfile, 'userId' | 'displayName' | 'photoURL' | 'username'>
+): Promise<void> {
+  const path = `friendships/${friendshipId}`;
+  try {
+    const nowIso = new Date().toISOString();
+    await updateDoc(doc(db, 'friendships', friendshipId), {
+      status: 'accepted',
+      receiverProfile: toFriendshipPreview(acceptor),
+      updatedAt: nowIso,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+    throw error;
+  }
+}
+
+export async function declineFriendRequest(friendshipId: string): Promise<void> {
+  const path = `friendships/${friendshipId}`;
+  try {
+    await updateDoc(doc(db, 'friendships', friendshipId), {
+      status: 'declined',
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+    throw error;
+  }
+}
+
+export async function cancelFriendRequest(friendshipId: string): Promise<void> {
+  const path = `friendships/${friendshipId}`;
+  try {
+    await deleteDoc(doc(db, 'friendships', friendshipId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+    throw error;
+  }
+}
+
+export async function unfriendUser(friendshipId: string): Promise<void> {
+  const path = `friendships/${friendshipId}`;
+  try {
+    await updateDoc(doc(db, 'friendships', friendshipId), {
+      status: 'declined',
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+    throw error;
+  }
+}
+
+export async function blockUser(
+  currentUser: UserProfile,
+  partner: Pick<UserProfile, 'userId' | 'displayName' | 'photoURL' | 'username'>
+): Promise<void> {
+  const pairId = getFriendshipId(currentUser.userId, partner.userId);
+  const path = `friendships/${pairId}`;
+  const ref = doc(db, 'friendships', pairId);
+  const nowIso = new Date().toISOString();
+
+  try {
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      const sortedIds = [currentUser.userId, partner.userId].sort();
+      const pendingPayload: Friendship = {
+        id: pairId,
+        userIds: sortedIds,
+        requesterId: currentUser.userId,
+        receiverId: partner.userId,
+        status: 'pending',
+        blockedBy: null,
+        source: 'search',
+        requesterProfile: toFriendshipPreview(currentUser),
+        receiverProfile: toFriendshipPreview(partner),
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      await setDoc(ref, pendingPayload);
+    }
+    await updateDoc(ref, {
+      status: 'blocked',
+      blockedBy: currentUser.userId,
+      updatedAt: nowIso,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+export async function unblockUser(friendshipId: string): Promise<void> {
+  const path = `friendships/${friendshipId}`;
+  try {
+    await updateDoc(doc(db, 'friendships', friendshipId), {
+      status: 'declined',
+      blockedBy: null,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+    throw error;
+  }
+}
+
+// ------------------------------------------------------------------
+// PUBLIC & PRIVATE GROUP DISCOVERY, DIRECT JOIN & APPROVAL REQUESTS
+// ------------------------------------------------------------------
+
+export async function searchPublicGroups(rawQuery = ''): Promise<PublicGroupSummary[]> {
+  try {
+    const q = query(
+      collection(db, 'public_groups'),
+      where('status', '==', 'active'),
+      limit(50)
+    );
+    const snap = await getDocs(q);
+    const all = snap.docs.map((d) => d.data() as PublicGroupSummary);
+    const needle = rawQuery.trim().toLowerCase();
+    const filtered = needle
+      ? all.filter(
+          (g) =>
+            g.name.toLowerCase().includes(needle) ||
+            (g.description || '').toLowerCase().includes(needle) ||
+            g.groupId.toLowerCase() === needle
+        )
+      : all;
+    return filtered.sort((a, b) => (b.memberCount || 0) - (a.memberCount || 0));
+  } catch (error) {
+    console.warn('Public groups search notice:', error);
+    return [];
+  }
+}
+
+export async function getPublicGroupSummary(groupId: string): Promise<PublicGroupSummary | null> {
+  const cleanId = groupId.trim();
+  if (!cleanId) return null;
+  try {
+    const snap = await getDoc(doc(db, 'public_groups', cleanId));
+    if (!snap.exists()) return null;
+    const data = snap.data() as PublicGroupSummary;
+    return data.status === 'active' ? data : null;
+  } catch (error) {
+    console.warn('Public group lookup notice:', error);
+    return null;
+  }
+}
+
+export async function joinPublicGroupDirect(groupId: string, user: UserProfile): Promise<ChatRoom> {
+  const path = `chats/${groupId}`;
+  try {
+    const pubRef = doc(db, 'public_groups', groupId);
+    const pubSnap = await getDoc(pubRef);
+    if (!pubSnap.exists()) {
+      throw new Error('This group is private or no longer exists.');
+    }
+    const pub = pubSnap.data() as PublicGroupSummary;
+    if (pub.status !== 'active') {
+      throw new Error('This public group is no longer active.');
+    }
+    if (pub.joinPolicy !== 'direct') {
+      throw new Error('This group requires admin approval to join.');
+    }
+
+    const nowIso = new Date().toISOString();
+    const chatRef = doc(db, 'chats', groupId);
+    await updateDoc(chatRef, {
+      participantIds: arrayUnion(user.userId),
+      [`participantDetails.${user.userId}`]: {
+        displayName: user.displayName,
+        photoURL: user.photoURL || '',
+        email: user.email || '',
+      },
+      updatedAt: nowIso,
+    });
+
+    await updateDoc(pubRef, {
+      memberCount: increment(1),
+      updatedAt: nowIso,
+    }).catch(() => {});
+
+    const updatedChatSnap = await getDoc(chatRef);
+    if (updatedChatSnap.exists()) {
+      return { id: groupId, ...(updatedChatSnap.data() as Omit<ChatRoom, 'id'>) };
+    }
+    throw new Error('Joined group, please refresh your chat list.');
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+export async function requestToJoinPublicGroup(
+  groupId: string,
+  user: UserProfile,
+  message?: string
+): Promise<GroupJoinRequest> {
+  const path = `chats/${groupId}/join_requests/${user.userId}`;
+  const reqRef = doc(db, 'chats', groupId, 'join_requests', user.userId);
+  const nowIso = new Date().toISOString();
+  try {
+    const existingSnap = await getDoc(reqRef);
+    const cleanMsg = (message || '').trim().slice(0, 200);
+    if (existingSnap.exists()) {
+      const existing = existingSnap.data() as GroupJoinRequest;
+      if (existing.status === 'pending') return existing;
+      if (existing.status === 'declined') {
+        await updateDoc(reqRef, {
+          status: 'pending',
+          ...(cleanMsg ? { message: cleanMsg } : {}),
+          updatedAt: nowIso,
+        });
+        return {
+          ...existing,
+          status: 'pending',
+          ...(cleanMsg ? { message: cleanMsg } : {}),
+          updatedAt: nowIso,
+        };
+      }
+    }
+
+    const payload: GroupJoinRequest = {
+      userId: user.userId,
+      chatId: groupId,
+      displayName: (user.displayName || 'User').slice(0, 100),
+      ...(user.photoURL ? { photoURL: user.photoURL.slice(0, 1000) } : {}),
+      ...(user.username ? { username: user.username.slice(0, 50) } : {}),
+      ...(cleanMsg ? { message: cleanMsg } : {}),
+      status: 'pending',
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+    await setDoc(reqRef, payload);
+    return payload;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+export async function getMyGroupJoinRequest(
+  groupId: string,
+  userId: string
+): Promise<GroupJoinRequest | null> {
+  if (!groupId || !userId) return null;
+  try {
+    const snap = await getDoc(doc(db, 'chats', groupId, 'join_requests', userId));
+    return snap.exists() ? (snap.data() as GroupJoinRequest) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function subscribeToGroupJoinRequests(
+  groupId: string,
+  onUpdate: (requests: GroupJoinRequest[]) => void
+): Unsubscribe {
+  const q = query(
+    collection(db, 'chats', groupId, 'join_requests'),
+    where('status', '==', 'pending')
+  );
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list = snapshot.docs.map((d) => d.data() as GroupJoinRequest);
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      onUpdate(list);
+    },
+    (error) => {
+      console.warn('Join requests subscribe notice:', error);
+    }
+  );
+}
+
+export async function approveGroupJoinRequest(
+  chatId: string,
+  request: GroupJoinRequest,
+  adminName: string
+): Promise<void> {
+  const path = `chats/${chatId}`;
+  try {
+    const chatRef = doc(db, 'chats', chatId);
+    const snap = await getDoc(chatRef);
+    if (!snap.exists()) throw new Error('Group not found');
+    const data = snap.data() as ChatRoom;
+
+    const currentIds = new Set(data.participantIds || []);
+    currentIds.add(request.userId);
+    const nextIds = Array.from(currentIds);
+    const details = { ...(data.participantDetails || {}) };
+    details[request.userId] = {
+      displayName: request.displayName,
+      photoURL: request.photoURL || '',
+      email: '',
+    };
+    const nextBanned = (data.bannedUserIds || []).filter((id) => id !== request.userId);
+    const nowIso = new Date().toISOString();
+
+    await updateDoc(chatRef, {
+      participantIds: nextIds,
+      participantDetails: details,
+      bannedUserIds: nextBanned,
+      lastMessageId: '',
+      lastMessageText: `${adminName} approved ${request.displayName} to join`.slice(0, 500),
+      lastMessageSenderId: 'system',
+      lastMessageTime: nowIso,
+      lastMessageReadBy: [],
+      updatedAt: nowIso,
+    });
+
+    await updateDoc(doc(db, 'chats', chatId, 'join_requests', request.userId), {
+      status: 'approved',
+      updatedAt: nowIso,
+    });
+
+    if (data.visibility === 'public') {
+      await updateDoc(doc(db, 'public_groups', chatId), {
+        memberCount: Math.max(1, Math.min(100, nextIds.length)),
+        updatedAt: nowIso,
+      }).catch(() => {});
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+export async function declineGroupJoinRequest(chatId: string, reqUserId: string): Promise<void> {
+  const path = `chats/${chatId}/join_requests/${reqUserId}`;
+  try {
+    await updateDoc(doc(db, 'chats', chatId, 'join_requests', reqUserId), {
+      status: 'declined',
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+export async function updateGroupSettings(
+  chatId: string,
+  updates: {
+    name?: string;
+    description?: string;
+    visibility: GroupVisibility;
+    joinPolicy: GroupJoinPolicy;
+  }
+): Promise<void> {
+  const path = `chats/${chatId}`;
+  try {
+    const chatRef = doc(db, 'chats', chatId);
+    const snap = await getDoc(chatRef);
+    if (!snap.exists()) throw new Error('Group not found');
+    const data = snap.data() as ChatRoom;
+
+    const nowIso = new Date().toISOString();
+    const resolvedName = (updates.name?.trim() || data.name || 'Group').slice(0, 100);
+    const resolvedDesc = (updates.description !== undefined ? updates.description : (data.description || ''))
+      .trim()
+      .slice(0, 300);
+    const resolvedJoinPolicy: GroupJoinPolicy =
+      updates.visibility === 'public'
+        ? updates.joinPolicy === 'approval'
+          ? 'approval'
+          : 'direct'
+        : 'invite_only';
+
+    await updateDoc(chatRef, {
+      name: resolvedName,
+      description: resolvedDesc,
+      visibility: updates.visibility,
+      joinPolicy: resolvedJoinPolicy,
+      updatedAt: nowIso,
+    });
+
+    const pubRef = doc(db, 'public_groups', chatId);
+    if (updates.visibility === 'public') {
+      const creatorId = data.creatorId || data.participantIds?.[0] || '';
+      const adminIds =
+        data.adminIds && data.adminIds.length > 0 ? data.adminIds : creatorId ? [creatorId] : [];
+      const summary: PublicGroupSummary = {
+        groupId: chatId,
+        name: resolvedName,
+        ...(resolvedDesc ? { description: resolvedDesc } : {}),
+        ...(data.groupPhoto ? { groupPhoto: data.groupPhoto } : {}),
+        creatorId,
+        adminIds,
+        joinPolicy: resolvedJoinPolicy === 'approval' ? 'approval' : 'direct',
+        memberCount: Math.max(1, Math.min(100, (data.participantIds || []).length)),
+        status: 'active',
+        createdAt: data.createdAt || nowIso,
+        updatedAt: nowIso,
+      };
+      await setDoc(pubRef, summary, { merge: true });
+    } else {
+      await deleteDoc(pubRef).catch(() => {});
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
 }

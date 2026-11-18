@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -22,6 +22,8 @@ import {
   MoreVertical,
   X,
   ArrowLeft,
+  UserCheck,
+  ScanLine,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -31,6 +33,9 @@ interface SidebarProps {
   onOpenNewChat: () => void;
   onOpenProfile: () => void;
   onOpenShare: () => void;
+  onOpenRequests?: () => void;
+  onOpenQrScanner?: () => void;
+  pendingRequestsCount?: number;
   onOpenAdmin?: () => void;
   ghostUser?: UserProfile | null;
   onExitGhostMode?: () => void;
@@ -43,6 +48,9 @@ export function Sidebar({
   onOpenNewChat,
   onOpenProfile,
   onOpenShare,
+  onOpenRequests,
+  onOpenQrScanner,
+  pendingRequestsCount = 0,
   onOpenAdmin,
   ghostUser,
   onExitGhostMode,
@@ -71,27 +79,43 @@ export function Sidebar({
     };
   }, [showMenu]);
 
-  // Real-time live presence listener for public non-PII directory
-  useEffect(() => {
-    const q = query(
-      collection(db, 'directory'),
-      where('status', 'in', ['active', 'scheduled_for_deletion'])
-    );
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const map: Record<string, DirectoryUser> = {};
-        snapshot.forEach((docItem) => {
-          map[docItem.id] = docItem.data() as DirectoryUser;
-        });
-        setLiveUsersMap(map);
-      },
-      (error) => {
-        console.warn('Directory presence listener warning:', error);
+  // Real-time live presence listener strictly for current direct chat partners (privacy-first, no global directory dump)
+  const directPartnerIdsKey = useMemo(() => {
+    const effectiveUid = (ghostUser || user)?.userId;
+    const ids = new Set<string>();
+    chats.forEach((c) => {
+      if (c.type === 'direct') {
+        const pid = c.participantIds.find((id) => id !== effectiveUid);
+        if (pid) ids.add(pid);
       }
+    });
+    return Array.from(ids).sort().join(',');
+  }, [chats, ghostUser, user]);
+
+  useEffect(() => {
+    if (!directPartnerIdsKey) {
+      setLiveUsersMap({});
+      return;
+    }
+    const partnerIds = directPartnerIdsKey.split(',').filter(Boolean);
+    const unsubs = partnerIds.map((pid) =>
+      onSnapshot(
+        doc(db, 'directory', pid),
+        (snap) => {
+          if (snap.exists()) {
+            const data = snap.data() as DirectoryUser;
+            setLiveUsersMap((prev) => ({ ...prev, [pid]: data }));
+          }
+        },
+        (error) => {
+          console.warn('Partner presence listener warning:', error);
+        }
+      )
     );
-    return () => unsubscribe();
-  }, []);
+    return () => {
+      unsubs.forEach((unsub) => unsub());
+    };
+  }, [directPartnerIdsKey]);
 
   const getChatDisplay = (chat: ChatRoom) => {
     if (chat.type === 'group') {
@@ -212,8 +236,33 @@ export function Sidebar({
           </div>
         </div>
 
-        {/* Right Action Icons: Exactly 2 clean icons (New Chat + More Menu) */}
-        <div className="flex items-center gap-1 relative" ref={menuRef}>
+        {/* Right Action Icons */}
+        <div className="flex items-center gap-0.5 relative" ref={menuRef}>
+          {!ghostUser && onOpenRequests && (
+            <button
+              onClick={onOpenRequests}
+              className="relative p-2 rounded-xl text-slate-300 hover:text-emerald-400 hover:bg-slate-800 transition cursor-pointer"
+              title={language === 'bn' ? 'ফ্রেন্ডস ও রিকোয়েস্ট' : 'Friends & Requests'}
+            >
+              <UserCheck className="w-4 h-4" />
+              {pendingRequestsCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-slate-950 text-[9px] font-extrabold flex items-center justify-center shadow">
+                  {pendingRequestsCount > 99 ? '99+' : pendingRequestsCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {!ghostUser && onOpenQrScanner && (
+            <button
+              onClick={onOpenQrScanner}
+              className="p-2 rounded-xl text-slate-300 hover:text-sky-400 hover:bg-slate-800 transition cursor-pointer"
+              title={language === 'bn' ? 'QR কোড স্ক্যান করুন' : 'Scan QR Code'}
+            >
+              <ScanLine className="w-4 h-4" />
+            </button>
+          )}
+
           {!ghostUser && (
             <button
               onClick={onOpenNewChat}

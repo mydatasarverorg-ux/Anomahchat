@@ -12,6 +12,9 @@ import { ChatArea } from './components/ChatArea';
 import { NewChatModal } from './components/NewChatModal';
 import { ProfileModal } from './components/ProfileModal';
 import { ShareLinkModal } from './components/ShareLinkModal';
+import { QrScannerModal } from './components/QrScannerModal';
+import { RequestsModal } from './components/RequestsModal';
+import { ConnectPreviewModal } from './components/ConnectPreviewModal';
 import { BannedScreen } from './components/BannedScreen';
 import { WarningNoticeModal } from './components/WarningNoticeModal';
 import { AnnouncementBanner } from './components/AnnouncementBanner';
@@ -20,7 +23,18 @@ import { useModalHistory } from './hooks/useModalHistory';
 
 const AdminModal = lazy(() => import('./components/AdminModal').then((m) => ({ default: m.AdminModal })));
 const CallModal = lazy(() => import('./components/CallModal').then((m) => ({ default: m.CallModal })));
-import { subscribeToUserChats } from './services/chatService';
+import {
+  subscribeToUserChats,
+  subscribeToUserFriendships,
+  getOrCreateDirectChat,
+} from './services/chatService';
+import {
+  getPendingDeepLinkTarget,
+  setPendingDeepLinkTarget,
+  isAndroidMobileBrowser,
+  buildAndroidAppIntentUrl,
+  type DeepLinkTarget,
+} from './utils/accountShortcut';
 import { subscribeToIncomingDirectCalls } from './services/callService';
 import {
   isAppNotificationSupported,
@@ -31,10 +45,10 @@ import {
   cancelAppNotification,
   type AppNotificationPermission,
 } from './services/notificationService';
-import { isSuperAdmin } from './services/adminService';
+import { isSuperAdmin, SUPPORT_DESK_ADDRESS, extractPhoneDigits } from './services/adminService';
 import { subscribeToLatestRelease, type AppReleaseInfo } from './services/updateService';
 import { isUpdateAvailable, isNativeApkApp } from './utils/appVersion';
-import type { ChatRoom, CallSession, UserProfile } from './types/chat';
+import type { ChatRoom, CallSession, Friendship, UserProfile } from './types/chat';
 import {
   MessageSquare,
   Lock,
@@ -50,6 +64,10 @@ import {
   LogOut,
   KeyRound,
   Bell,
+  Phone,
+  AtSign,
+  ScanLine,
+  Smartphone,
 } from 'lucide-react';
 
 function AppLockGate() {
@@ -129,15 +147,142 @@ function AppLockGate() {
   );
 }
 
+function PhoneNumberGate() {
+  const { user, savePhoneNumber, signOutUser } = useAuth();
+  const { language } = useLanguage();
+  const [phone, setPhone] = useState('');
+  const [usernameInput, setUsernameInput] = useState(user?.username || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (extractPhoneDigits(phone).length < 7) {
+      setError(
+        language === 'bn'
+          ? 'দয়া করে কমপক্ষে ৭ ডিজিটের সঠিক মোবাইল নম্বর দিন।'
+          : 'Please enter a valid mobile number (at least 7 digits).'
+      );
+      return;
+    }
+    setSaving(true);
+    try {
+      await savePhoneNumber(phone, !user?.username && usernameInput.trim() ? usernameInput.trim() : undefined);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : language === 'bn'
+          ? 'মোবাইল নম্বর সংরক্ষণ করতে সমস্যা হয়েছে।'
+          : 'Failed to save mobile number.'
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 safe-area-container">
+      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5">
+        <div className="text-center space-y-2">
+          <div className="mx-auto w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+            <Phone className="w-7 h-7" />
+          </div>
+          <h2 className="text-lg font-bold text-white">
+            {language === 'bn' ? 'অ্যাকাউন্ট সুরক্ষায় মোবাইল নম্বর যুক্ত করুন' : 'Add Your Mobile Number'}
+          </h2>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            {language === 'bn'
+              ? `আপনার অ্যাকাউন্ট পরিচিতি নিশ্চিত করতে এবং ভবিষ্যতে ইমেইল/অ্যাকাউন্ট রিকভারির (${SUPPORT_DESK_ADDRESS}) জন্য মোবাইল নম্বর যুক্ত করা বাধ্যতামূলক। এই নম্বরটি কেবল আপনার ও অ্যাডমিনের কাছেই গোপন থাকবে।`
+              : `A mobile number is required for identity verification and account recovery via ${SUPPORT_DESK_ADDRESS}. Your number remains private and is never shown to other users.`}
+          </p>
+        </div>
+
+        {error && (
+          <div className="p-2.5 bg-rose-950/60 border border-rose-500/40 rounded-xl text-xs text-rose-200 text-center">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSave} className="space-y-3.5">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-300 block">
+              {language === 'bn' ? 'মোবাইল নম্বর' : 'Mobile Number'} <span className="text-emerald-400">*</span>
+            </label>
+            <div className="relative">
+              <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="tel"
+                required
+                autoFocus
+                maxLength={50}
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+880 1XXX-XXXXXX"
+                className="w-full pl-10 pr-3 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+          </div>
+
+          {!user?.username && (
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-300 block">
+                {language === 'bn' ? 'ইউজারনেম (ঐচ্ছিক)' : 'Username (Optional)'}
+              </label>
+              <div className="relative">
+                <AtSign className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  maxLength={50}
+                  value={usernameInput}
+                  onChange={(e) => setUsernameInput(e.target.value.replace(/\s+/g, ''))}
+                  placeholder="username"
+                  className="w-full pl-10 pr-3 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={saving || extractPhoneDigits(phone).length < 7}
+            className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-2 shadow"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+            <span>{language === 'bn' ? 'সংরক্ষণ করে চ্যাটে প্রবেশ করুন' : 'Save & Continue to Messenger'}</span>
+          </button>
+        </form>
+
+        <div className="text-center pt-1">
+          <button
+            type="button"
+            onClick={signOutUser}
+            className="text-xs text-slate-400 hover:text-rose-400 inline-flex items-center gap-1.5 cursor-pointer transition"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>{language === 'bn' ? 'অন্য অ্যাকাউন্ট দিয়ে ঢুকুন (লগআউট)' : 'Sign out'}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ChatDashboard({ user }: { user: UserProfile }) {
   const { deletionNotice, recoverAccount, signOutUser, firebaseUser, resendVerificationEmail } = useAuth();
   const { t, language } = useLanguage();
   const [chats, setChats] = useState<ChatRoom[]>([]);
+  const [friendships, setFriendships] = useState<Friendship[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [selectedChat, setSelectedChat] = useState<ChatRoom | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
+  const [showRequests, setShowRequests] = useState(false);
+  const [showQrScanner, setShowQrScanner] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showShare, setShowShare] = useState(false);
+  const [shareGroupTarget, setShareGroupTarget] = useState<ChatRoom | null>(null);
+  const [connectPreviewTarget, setConnectPreviewTarget] = useState<DeepLinkTarget | null>(null);
   const [showAdmin, setShowAdmin] = useState(false);
   const [callSession, setCallSession] = useState<CallSession | null>(null);
   const [dismissVerifyBanner, setDismissVerifyBanner] = useState(false);
@@ -237,8 +382,61 @@ function ChatDashboard({ user }: { user: UserProfile }) {
   const [ghostUser, setGhostUser] = useState<UserProfile | null>(null);
   const ghostUserRef = useRef<UserProfile | null>(null);
   ghostUserRef.current = ghostUser;
+  const userRef = useRef(user);
+  userRef.current = user;
   const languageRef = useRef(language);
   languageRef.current = language;
+
+  // Handle personal chat & group deep-links (?chat=, ?group=, QR scanner, or native APK intent)
+  useEffect(() => {
+    if (ghostUser?.userId || !user.userId) return;
+
+    const openTarget = (target: DeepLinkTarget | null) => {
+      if (!target || !target.value) return;
+      setPendingDeepLinkTarget(null);
+      const win = window as unknown as { __pendingDeepLink?: DeepLinkTarget };
+      if (win.__pendingDeepLink) delete win.__pendingDeepLink;
+      setConnectPreviewTarget(target);
+    };
+
+    const win = window as unknown as { __pendingDeepLink?: DeepLinkTarget };
+    if (win.__pendingDeepLink) {
+      openTarget(win.__pendingDeepLink);
+    } else {
+      const stored = getPendingDeepLinkTarget();
+      if (stored) {
+        openTarget(stored);
+      }
+    }
+
+    const handleDeepLinkEvent = (e: CustomEvent<DeepLinkTarget>) => {
+      if (e.detail) {
+        openTarget(e.detail);
+      }
+    };
+    window.addEventListener('anomah_deep_link', handleDeepLinkEvent as EventListener);
+    return () => {
+      window.removeEventListener('anomah_deep_link', handleDeepLinkEvent as EventListener);
+    };
+  }, [user.userId, ghostUser?.userId]);
+
+  // Subscribe to live friendships & friend requests
+  useEffect(() => {
+    if (ghostUser?.userId || !user.userId) {
+      setFriendships([]);
+      return;
+    }
+    const unsubscribe = subscribeToUserFriendships(user.userId, setFriendships);
+    return () => unsubscribe();
+  }, [user.userId, ghostUser?.userId]);
+
+  const pendingRequestsCount = useMemo(
+    () =>
+      friendships.filter(
+        (f) => f.status === 'pending' && f.receiverId === user.userId
+      ).length,
+    [friendships, user.userId]
+  );
 
   const isPasswordAccount = Boolean(
     firebaseUser?.providerData?.some((p) => p.providerId === 'password')
@@ -602,7 +800,13 @@ function ChatDashboard({ user }: { user: UserProfile }) {
           }}
           onOpenNewChat={() => setShowNewChat(true)}
           onOpenProfile={() => setShowProfile(true)}
-          onOpenShare={() => setShowShare(true)}
+          onOpenShare={() => {
+            setShareGroupTarget(null);
+            setShowShare(true);
+          }}
+          onOpenRequests={() => setShowRequests(true)}
+          onOpenQrScanner={() => setShowQrScanner(true)}
+          pendingRequestsCount={pendingRequestsCount}
           onOpenAdmin={() => {
             if (canAccessAdminPanel) setShowAdmin(true);
           }}
@@ -617,11 +821,16 @@ function ChatDashboard({ user }: { user: UserProfile }) {
           <ChatArea
             key={activeChat.id}
             chat={activeChat}
+            friendships={friendships}
             onBack={() => {
               setActiveChatId(null);
               setSelectedChat(null);
             }}
             onStartCall={(session) => setCallSession(session)}
+            onOpenGroupShareQR={(groupChat) => {
+              setShareGroupTarget(groupChat);
+              setShowShare(true);
+            }}
             ghostUser={ghostUser}
             onExitGhostMode={handleExitGhostMode}
           />
@@ -638,7 +847,7 @@ function ChatDashboard({ user }: { user: UserProfile }) {
                 {t('emptyChatSubtitle')}
               </p>
 
-              <div className="flex gap-2.5">
+              <div className="flex flex-wrap justify-center gap-2.5">
                 <button
                   onClick={() => setShowNewChat(true)}
                   className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-xs transition cursor-pointer flex items-center gap-2 active:scale-[0.99]"
@@ -647,7 +856,17 @@ function ChatDashboard({ user }: { user: UserProfile }) {
                   <span>{t('startNewChatBtn')}</span>
                 </button>
                 <button
-                  onClick={() => setShowShare(true)}
+                  onClick={() => setShowQrScanner(true)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700/80 transition cursor-pointer flex items-center gap-1.5"
+                >
+                  <ScanLine className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>{language === 'bn' ? 'QR স্ক্যান' : 'Scan QR'}</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setShareGroupTarget(null);
+                    setShowShare(true);
+                  }}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium border border-slate-700/80 transition cursor-pointer flex items-center gap-1.5"
                 >
                   <Globe className="w-3.5 h-3.5 text-emerald-400" />
@@ -690,11 +909,96 @@ function ChatDashboard({ user }: { user: UserProfile }) {
       {/* Modals */}
       {showNewChat && (
         <NewChatModal
+          existingChats={chats}
+          friendships={friendships}
           onClose={() => setShowNewChat(false)}
           onSelectChat={(room) => {
             setActiveChatId(room.id);
             setSelectedChat(room);
             setShowNewChat(false);
+          }}
+          onStartDirectCall={(room, partner, callType) => {
+            setActiveChatId(room.id);
+            setSelectedChat(room);
+            setShowNewChat(false);
+            setCallSession({
+              active: true,
+              chatId: room.id,
+              role: 'caller',
+              type: callType,
+              partnerId: partner.userId,
+              recipientName: partner.displayName,
+              recipientPhoto:
+                partner.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${partner.userId}`,
+              status: 'calling',
+              isMuted: false,
+              isVideoOff: callType === 'audio',
+              durationSeconds: 0,
+            });
+          }}
+          onOpenShareQR={() => {
+            setShareGroupTarget(null);
+            setShowShare(true);
+          }}
+          onOpenQrScanner={() => setShowQrScanner(true)}
+        />
+      )}
+
+      {showRequests && (
+        <RequestsModal
+          currentUser={user}
+          friendships={friendships}
+          onClose={() => setShowRequests(false)}
+          onOpenChatWithFriend={async (friend, callType) => {
+            const room = await getOrCreateDirectChat(user, friend);
+            setActiveChatId(room.id);
+            setSelectedChat(room);
+            if (callType) {
+              setCallSession({
+                active: true,
+                chatId: room.id,
+                role: 'caller',
+                type: callType,
+                partnerId: friend.userId,
+                recipientName: friend.displayName,
+                recipientPhoto:
+                  friend.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${friend.userId}`,
+                status: 'calling',
+                isMuted: false,
+                isVideoOff: callType === 'audio',
+                durationSeconds: 0,
+              });
+            }
+          }}
+          onOpenQrScanner={() => setShowQrScanner(true)}
+          onOpenNewChat={() => setShowNewChat(true)}
+        />
+      )}
+
+      {showQrScanner && (
+        <QrScannerModal
+          onClose={() => setShowQrScanner(false)}
+          onDetected={(detectedTarget) => {
+            setShowQrScanner(false);
+            setConnectPreviewTarget(detectedTarget);
+          }}
+        />
+      )}
+
+      {connectPreviewTarget && (
+        <ConnectPreviewModal
+          target={connectPreviewTarget}
+          currentUser={user}
+          existingChats={chats}
+          friendships={friendships}
+          onClose={() => setConnectPreviewTarget(null)}
+          onOpenChat={(room) => {
+            setActiveChatId(room.id);
+            setSelectedChat(room);
+          }}
+          onOpenShareSelf={() => {
+            setShareGroupTarget(null);
+            setShowShare(true);
           }}
         />
       )}
@@ -706,10 +1010,24 @@ function ChatDashboard({ user }: { user: UserProfile }) {
           onOpenAdmin={() => {
             if (canAccessAdminPanel) setShowAdmin(true);
           }}
+          onOpenShareQR={() => {
+            setShareGroupTarget(null);
+            setShowShare(true);
+          }}
         />
       )}
 
-      {showShare && <ShareLinkModal onClose={() => setShowShare(false)} />}
+      {showShare && (
+        <ShareLinkModal
+          groupChat={shareGroupTarget}
+          onClose={() => {
+            setShowShare(false);
+            setShareGroupTarget(null);
+          }}
+          onOpenProfileSettings={() => setShowProfile(true)}
+          onOpenQrScanner={() => setShowQrScanner(true)}
+        />
+      )}
 
       {callSession && (
         <Suspense fallback={null}>
@@ -726,9 +1044,51 @@ function ChatDashboard({ user }: { user: UserProfile }) {
 
 function MainContent() {
   const { user, loading, isAppLocked } = useAuth();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [pendingRelease, setPendingRelease] = useState<AppReleaseInfo | null>(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [androidAppChooserTarget, setAndroidAppChooserTarget] = useState<DeepLinkTarget | null>(null);
+
+  const isDashboardActive = Boolean(user && !user.isBanned && !isAppLocked && user.phoneNumber?.trim());
+
+  // Capture ?chat= / ?group= deep-link even if user passes through Login / AppLock / PhoneGate first
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const groupParam = params.get('group')?.trim();
+    const chatParam = params.get('chat')?.trim();
+    const qrFlag = params.get('qr') === '1' || params.get('qr') === 'true';
+
+    let urlTarget: DeepLinkTarget | null = null;
+    if (groupParam) {
+      urlTarget = { type: 'group', value: groupParam, isQr: qrFlag };
+    } else if (chatParam) {
+      urlTarget = { type: 'chat', value: chatParam, isQr: qrFlag };
+    }
+
+    if (urlTarget) {
+      window.history.replaceState({}, '', `${window.location.pathname}${window.location.hash}`);
+      if (isAndroidMobileBrowser()) {
+        setAndroidAppChooserTarget(urlTarget);
+      } else {
+        setPendingDeepLinkTarget(urlTarget);
+        window.dispatchEvent(new CustomEvent('anomah_deep_link', { detail: urlTarget }));
+      }
+    }
+  }, []);
+
+  // Preserve native Android intent deep-links received before login/gates finish
+  useEffect(() => {
+    const handlePreDashboardDeepLink = (e: CustomEvent<DeepLinkTarget>) => {
+      if (!isDashboardActive && e.detail) {
+        setPendingDeepLinkTarget(e.detail);
+      }
+    };
+    window.addEventListener('anomah_deep_link', handlePreDashboardDeepLink as EventListener);
+    return () => {
+      window.removeEventListener('anomah_deep_link', handlePreDashboardDeepLink as EventListener);
+    };
+  }, [isDashboardActive]);
 
   // Subscribe to real-time app releases (Option 3 In-App Auto-Updater)
   useEffect(() => {
@@ -782,8 +1142,67 @@ function MainContent() {
         <BannedScreen />
       ) : isAppLocked ? (
         <AppLockGate />
+      ) : !user.phoneNumber?.trim() ? (
+        <PhoneNumberGate />
       ) : (
         <ChatDashboard key={user.userId} user={user} />
+      )}
+
+      {/* External Android Mobile Browser -> Suggest Installed APK or Continue in Web/PWA */}
+      {androidAppChooserTarget && (
+        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl w-full max-w-sm p-6 shadow-2xl space-y-4 text-center relative">
+            <button
+              type="button"
+              onClick={() => {
+                setPendingDeepLinkTarget(androidAppChooserTarget);
+                window.dispatchEvent(new CustomEvent('anomah_deep_link', { detail: androidAppChooserTarget }));
+                setAndroidAppChooserTarget(null);
+              }}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition cursor-pointer"
+              aria-label="Close"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+              <Smartphone className="w-7 h-7" />
+            </div>
+
+            <div>
+              <h3 className="text-base font-bold text-white">
+                {language === 'bn' ? 'কোন অ্যাপে খুলতে চান?' : 'Open in Anomah Chat?'}
+              </h3>
+              <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                {language === 'bn'
+                  ? 'আপনার ফোনে Anomah Chat APK অ্যাপ ইন্সটল করা থাকলে সরাসরি অ্যাপে খুলতে পারেন, অথবা ওয়েব/PWA ভার্সনে চালিয়ে যেতে পারেন।'
+                  : 'Open this link directly in your installed Anomah Chat Android app, or continue in the Web / PWA version.'}
+              </p>
+            </div>
+
+            <div className="space-y-2.5 pt-1">
+              <a
+                href={buildAndroidAppIntentUrl(androidAppChooserTarget)}
+                className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow"
+              >
+                <Smartphone className="w-4 h-4" />
+                <span>{language === 'bn' ? 'Anomah Chat APK অ্যাপে খুলুন' : 'Open in Android APK App'}</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingDeepLinkTarget(androidAppChooserTarget);
+                  window.dispatchEvent(new CustomEvent('anomah_deep_link', { detail: androidAppChooserTarget }));
+                  setAndroidAppChooserTarget(null);
+                }}
+                className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700/80 flex items-center justify-center gap-2 transition cursor-pointer"
+              >
+                <Globe className="w-4 h-4 text-emerald-400" />
+                <span>{language === 'bn' ? 'ওয়েব / PWA ভার্সনে চালিয়ে যান' : 'Continue in Web / PWA'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* In-App Auto Updater Modal (Strictly for Native Mobile APK) */}

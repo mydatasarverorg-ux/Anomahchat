@@ -44,17 +44,37 @@ service cloud.firestore {
         || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isBanned != true;
     }
 
+    function getSortedPairId(uidA, uidB) {
+      return uidA < uidB ? ('pair_' + uidA + '_' + uidB) : ('pair_' + uidB + '_' + uidA);
+    }
+
+    function hasAcceptedFriendshipForDm(participantIds) {
+      return participantIds.size() == 2
+        && participantIds[0] != participantIds[1]
+        && exists(/databases/$(database)/documents/friendships/$(getSortedPairId(participantIds[0], participantIds[1])))
+        && get(/databases/$(database)/documents/friendships/$(getSortedPairId(participantIds[0], participantIds[1]))).data.status == 'accepted';
+    }
+
+    function canDirectParticipantsInteract(chatData) {
+      return chatData.type != 'direct'
+        || (chatData.participantIds.size() == 2
+            && (!exists(/databases/$(database)/documents/friendships/$(getSortedPairId(chatData.participantIds[0], chatData.participantIds[1])))
+                || get(/databases/$(database)/documents/friendships/$(getSortedPairId(chatData.participantIds[0], chatData.participantIds[1]))).data.status == 'accepted'));
+    }
+
     // Validation Blueprints
     function isValidUserCreate(data, userId) {
       return data.keys().hasAll(['userId', 'displayName', 'email', 'createdAt'])
         && data.keys().hasOnly([
-          'userId', 'displayName', 'email', 'photoURL', 'about', 'username',
+          'userId', 'displayName', 'email', 'phoneNumber', 'discoverableByPhone', 'photoURL', 'about', 'username',
           'hasAppLockPin', 'status', 'themePreference', 'isOnline', 'lastSeen', 'createdAt'
         ])
         && data.userId is string && data.userId == userId && data.userId.size() <= 128
         && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
         && data.email is string && data.email.size() <= 150
         && data.createdAt is string && data.createdAt.size() <= 64
+        && (!('phoneNumber' in data) || (data.phoneNumber is string && data.phoneNumber.size() >= 6 && data.phoneNumber.size() <= 50))
+        && (!('discoverableByPhone' in data) || data.discoverableByPhone is bool)
         && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000))
         && (!('about' in data) || (data.about is string && data.about.size() <= 200))
         && (!('username' in data) || (data.username is string && data.username.size() >= 3 && data.username.size() <= 50))
@@ -68,7 +88,7 @@ service cloud.firestore {
     function isValidUserUpdate(data, prev) {
       return data.keys().hasAll(['userId', 'displayName', 'email', 'createdAt'])
         && data.keys().hasOnly([
-          'userId', 'displayName', 'email', 'photoURL', 'about', 'username',
+          'userId', 'displayName', 'email', 'phoneNumber', 'discoverableByPhone', 'photoURL', 'about', 'username',
           'hasAppLockPin', 'status', 'deleteRequestedAt', 'deleteScheduledAt',
           'themePreference', 'role', 'isBanned', 'banReason', 'bannedAt',
           'bannedBy', 'bannedUntil', 'bannedUntilMs', 'warningNotice',
@@ -80,6 +100,8 @@ service cloud.firestore {
         && data.createdAt is string && data.createdAt == prev.createdAt && data.createdAt.size() <= 64
         && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
         && data.email is string && data.email.size() <= 150
+        && (!('phoneNumber' in data) || data.phoneNumber == null || (data.phoneNumber is string && data.phoneNumber.size() >= 6 && data.phoneNumber.size() <= 50))
+        && (!('discoverableByPhone' in data) || data.discoverableByPhone is bool)
         && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000))
         && (!('about' in data) || (data.about is string && data.about.size() <= 200))
         && (!('username' in data) || (data.username is string && data.username.size() >= 3 && data.username.size() <= 50))
@@ -117,7 +139,7 @@ service cloud.firestore {
     function isValidDirectoryUser(data) {
       return data.keys().hasAll(['userId', 'displayName', 'status'])
         && data.keys().hasOnly([
-          'userId', 'displayName', 'photoURL', 'about', 'username',
+          'userId', 'displayName', 'photoURL', 'about', 'username', 'phoneLookupHash',
           'status', 'isOnline', 'lastSeen', 'isBanned'
         ])
         && data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128
@@ -126,6 +148,7 @@ service cloud.firestore {
         && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000))
         && (!('about' in data) || (data.about is string && data.about.size() <= 200))
         && (!('username' in data) || (data.username is string && data.username.size() >= 3 && data.username.size() <= 50))
+        && (!('phoneLookupHash' in data) || data.phoneLookupHash == null || (data.phoneLookupHash is string && data.phoneLookupHash.size() == 64 && data.phoneLookupHash.matches('^[a-fA-F0-9]{64}$')))
         && (!('isOnline' in data) || data.isOnline is bool)
         && (!('lastSeen' in data) || (data.lastSeen is string && data.lastSeen.size() <= 64))
         && (!('isBanned' in data) || data.isBanned is bool);
@@ -134,7 +157,8 @@ service cloud.firestore {
     function isValidChat(data) {
       return data.keys().hasAll(['type', 'participantIds', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly([
-          'id', 'type', 'name', 'creatorId', 'adminIds', 'groupPhoto',
+          'id', 'type', 'name', 'description', 'creatorId', 'adminIds', 'groupPhoto',
+          'visibility', 'joinPolicy', 'bannedUserIds',
           'participantIds', 'participantDetails', 'isSuspended',
           'suspendedUserId', 'suspendedUserName', 'lastMessageId',
           'lastMessageText', 'lastMessageSenderId', 'lastMessageTime',
@@ -147,9 +171,13 @@ service cloud.firestore {
         && data.updatedAt is string && data.updatedAt.size() <= 64
         && (!('id' in data) || (data.id is string && data.id.size() <= 128))
         && (!('name' in data) || (data.name is string && data.name.size() <= 100))
+        && (!('description' in data) || (data.description is string && data.description.size() <= 300))
         && (!('creatorId' in data) || (data.creatorId is string && data.creatorId.size() <= 128))
         && (!('adminIds' in data) || (data.adminIds is list && data.adminIds.size() <= 50 && (data.adminIds.size() == 0 || data.adminIds[0] is string)))
         && (!('groupPhoto' in data) || (data.groupPhoto is string && data.groupPhoto.size() <= 1000))
+        && (!('visibility' in data) || data.visibility in ['private', 'public'])
+        && (!('joinPolicy' in data) || data.joinPolicy in ['invite_only', 'direct', 'approval'])
+        && (!('bannedUserIds' in data) || (data.bannedUserIds is list && data.bannedUserIds.size() <= 100 && (data.bannedUserIds.size() == 0 || data.bannedUserIds[0] is string)))
         && (!('participantDetails' in data) || data.participantDetails is map)
         && (!('isSuspended' in data) || data.isSuspended is bool)
         && (!('suspendedUserId' in data) || data.suspendedUserId == null || (data.suspendedUserId is string && data.suspendedUserId.size() <= 128))
@@ -159,6 +187,68 @@ service cloud.firestore {
         && (!('lastMessageSenderId' in data) || (data.lastMessageSenderId is string && data.lastMessageSenderId.size() <= 128))
         && (!('lastMessageTime' in data) || (data.lastMessageTime is string && data.lastMessageTime.size() <= 64))
         && (!('lastMessageReadBy' in data) || (data.lastMessageReadBy is list && data.lastMessageReadBy.size() <= 100 && (data.lastMessageReadBy.size() == 0 || data.lastMessageReadBy[0] is string)));
+    }
+
+    function isValidFriendship(data, friendshipId) {
+      return data.keys().hasAll(['id', 'userIds', 'requesterId', 'receiverId', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'userIds', 'requesterId', 'receiverId', 'status', 'blockedBy',
+          'source', 'requesterProfile', 'receiverProfile', 'createdAt', 'updatedAt'
+        ])
+        && data.userIds is list && data.userIds.size() == 2
+        && data.userIds[0] is string && data.userIds[1] is string
+        && data.userIds[0] < data.userIds[1]
+        && data.id is string && data.id == friendshipId && data.id.size() <= 128
+        && data.id == ('pair_' + data.userIds[0] + '_' + data.userIds[1])
+        && data.requesterId is string && data.requesterId.size() <= 128 && data.requesterId in data.userIds
+        && data.receiverId is string && data.receiverId.size() <= 128 && data.receiverId in data.userIds
+        && data.requesterId != data.receiverId
+        && data.status in ['pending', 'accepted', 'declined', 'blocked']
+        && (!('blockedBy' in data) || data.blockedBy == null || (data.blockedBy is string && data.blockedBy in data.userIds))
+        && (!('source' in data) || data.source in ['search', 'qr', 'link'])
+        && (!('requesterProfile' in data) || data.requesterProfile is map)
+        && (!('receiverProfile' in data) || data.receiverProfile is map)
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidPublicGroup(data, groupId) {
+      return data.keys().hasAll([
+          'groupId', 'name', 'creatorId', 'adminIds', 'joinPolicy',
+          'memberCount', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'groupId', 'name', 'description', 'groupPhoto', 'creatorId',
+          'adminIds', 'joinPolicy', 'memberCount', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.groupId is string && data.groupId == groupId && data.groupId.size() <= 128
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
+        && (!('description' in data) || (data.description is string && data.description.size() <= 300))
+        && (!('groupPhoto' in data) || (data.groupPhoto is string && data.groupPhoto.size() <= 1000))
+        && data.creatorId is string && data.creatorId.size() >= 1 && data.creatorId.size() <= 128
+        && data.adminIds is list && data.adminIds.size() >= 1 && data.adminIds.size() <= 50 && data.adminIds[0] is string
+        && data.joinPolicy in ['direct', 'approval']
+        && data.memberCount is number && data.memberCount >= 1 && data.memberCount <= 100
+        && data.status in ['active', 'deleted']
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidJoinRequest(data, chatId, reqUserId) {
+      return data.keys().hasAll(['userId', 'chatId', 'displayName', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'userId', 'chatId', 'displayName', 'photoURL', 'username',
+          'message', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.userId is string && data.userId == reqUserId && data.userId.size() <= 128
+        && data.chatId is string && data.chatId == chatId && data.chatId.size() <= 128
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000))
+        && (!('username' in data) || (data.username is string && data.username.size() <= 50))
+        && (!('message' in data) || (data.message is string && data.message.size() <= 200))
+        && data.status in ['pending', 'approved', 'declined']
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && data.updatedAt is string && data.updatedAt.size() <= 64;
     }
 
     function isValidMessage(data, chatId, msgId) {
@@ -291,7 +381,7 @@ service cloud.firestore {
           'status', 'adminNotes', 'resolvedAt', 'resolvedBy', 'createdAt'
         ])
         && data.id is string && data.id == reqId && data.id.size() <= 128
-        && data.email is string && data.email.size() >= 3 && data.email.size() <= 150
+        && data.email is string && data.email.size() <= 150
         && data.status in ['pending', 'resolved', 'dismissed']
         && data.createdAt is string && data.createdAt.size() <= 64
         && (!('name' in data) || (data.name is string && data.name.size() <= 100))
@@ -336,8 +426,8 @@ service cloud.firestore {
         (isOwner(userId) && (
           // Action 1: Presence and active minutes tracking
           incoming().diff(existing()).affectedKeys().hasOnly(['isOnline', 'lastSeen', 'lastLoginAt', 'lastExitAt', 'dailyActivity', 'totalActiveMinutes']) ||
-          // Action 2: Profile & sign-in sync
-          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'about', 'photoURL', 'username', 'email', 'themePreference', 'isOnline', 'lastSeen']) ||
+          // Action 2: Profile, phone & sign-in sync
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'about', 'photoURL', 'username', 'email', 'phoneNumber', 'discoverableByPhone', 'themePreference', 'isOnline', 'lastSeen']) ||
           // Action 3: Toggle Quick App-Lock PIN flag
           incoming().diff(existing()).affectedKeys().hasOnly(['hasAppLockPin']) ||
           // Action 4: Acknowledge official warning
@@ -382,13 +472,115 @@ service cloud.firestore {
         isAdmin() ||
         (isOwner(userId) && incoming().userId == existing().userId &&
           incoming().diff(existing()).affectedKeys().hasOnly([
-            'userId', 'displayName', 'photoURL', 'about', 'username',
+            'userId', 'displayName', 'photoURL', 'about', 'username', 'phoneLookupHash',
             'status', 'isOnline', 'lastSeen', 'isBanned'
           ]) &&
           (!('isBanned' in incoming()) || incoming().isBanned == true || isCallerNotBanned()))
       );
 
       allow delete: if isValidId(userId) && (isOwner(userId) || isAdmin());
+    }
+
+    // 2B. Friendships & Requests (Gated 1-on-1 connections)
+    match /friendships/{friendshipId} {
+      allow get: if isValidId(friendshipId) && (
+        isAdmin() ||
+        (isSignedIn() && (
+          (resource == null && friendshipId.matches('^pair_.*') && request.auth.uid in friendshipId.split('_')) ||
+          (resource != null && request.auth.uid in existing().userIds)
+        ))
+      );
+
+      allow list: if isAdmin() || (isSignedIn() && request.auth.uid in existing().userIds);
+
+      allow create: if isSignedIn() && isValidId(friendshipId) && isValidFriendship(incoming(), friendshipId) && (
+        isAdmin() ||
+        (isCallerNotBanned() &&
+          incoming().requesterId == request.auth.uid &&
+          incoming().status == 'pending' &&
+          (!('blockedBy' in incoming()) || incoming().blockedBy == null))
+      );
+
+      allow update: if isSignedIn() && isValidId(friendshipId) && isValidFriendship(incoming(), friendshipId) && (
+        isAdmin() ||
+        (request.auth.uid in existing().userIds &&
+          incoming().id == existing().id &&
+          incoming().userIds == existing().userIds &&
+          incoming().createdAt == existing().createdAt && (
+          // Action 1: Receiver accepts or declines pending request
+          (isCallerNotBanned() && existing().status == 'pending' &&
+            request.auth.uid == existing().receiverId &&
+            incoming().requesterId == existing().requesterId &&
+            incoming().receiverId == existing().receiverId &&
+            incoming().status in ['accepted', 'declined'] &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'receiverProfile', 'requesterProfile'])) ||
+          // Action 2: Resend request after previous decline/unfriend (never when blocked)
+          (isCallerNotBanned() && existing().status == 'declined' &&
+            incoming().requesterId == request.auth.uid &&
+            incoming().status == 'pending' &&
+            (!('blockedBy' in incoming()) || incoming().blockedBy == null) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['requesterId', 'receiverId', 'status', 'source', 'requesterProfile', 'receiverProfile', 'updatedAt'])) ||
+          // Action 3: Unfriend an accepted friendship (transitions cleanly to declined so DMs lock)
+          (existing().status == 'accepted' &&
+            incoming().status == 'declined' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
+          // Action 4: Block user
+          (existing().status != 'blocked' &&
+            incoming().status == 'blocked' &&
+            incoming().blockedBy == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'blockedBy', 'updatedAt'])) ||
+          // Action 5: Blocker unblocks user (reverts to declined, never auto-accepts)
+          (existing().status == 'blocked' &&
+            existing().blockedBy == request.auth.uid &&
+            incoming().status == 'declined' &&
+            (!('blockedBy' in incoming()) || incoming().blockedBy == null) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'blockedBy', 'updatedAt']))
+        ))
+      );
+
+      // Blocked users CANNOT delete a block record to bypass blocking
+      allow delete: if isValidId(friendshipId) && (
+        isAdmin() ||
+        (isSignedIn() && request.auth.uid in existing().userIds && (
+          (existing().status == 'pending' && request.auth.uid == existing().requesterId) ||
+          existing().status == 'declined' ||
+          (existing().status == 'blocked' && existing().blockedBy == request.auth.uid)
+        ))
+      );
+    }
+
+    // 2C. Public Groups Discovery Index (Zero messages, zero member PII)
+    match /public_groups/{groupId} {
+      allow get: if isValidId(groupId) && isSignedIn();
+      allow list: if isAdmin() || (isSignedIn() && existing().status == 'active');
+
+      allow create: if isSignedIn() && isValidId(groupId) && isValidPublicGroup(incoming(), groupId) && (
+        isAdmin() ||
+        (isCallerNotBanned() &&
+          incoming().creatorId == request.auth.uid &&
+          request.auth.uid in incoming().adminIds &&
+          incoming().status == 'active')
+      );
+
+      allow update: if isSignedIn() && isValidId(groupId) && isValidPublicGroup(incoming(), groupId) && (
+        isAdmin() ||
+        (isCallerNotBanned() &&
+          incoming().groupId == existing().groupId &&
+          incoming().creatorId == existing().creatorId &&
+          incoming().createdAt == existing().createdAt && (
+          // Action 1: Group admin updates public metadata or member count
+          (request.auth.uid in existing().adminIds || request.auth.uid == existing().creatorId) ||
+          // Action 2: Direct-join user increments memberCount atomically during self-join
+          (existing().status == 'active' &&
+            existing().joinPolicy == 'direct' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['memberCount', 'updatedAt']))
+        ))
+      );
+
+      allow delete: if isValidId(groupId) && (
+        isAdmin() ||
+        (isSignedIn() && (request.auth.uid in existing().adminIds || request.auth.uid == existing().creatorId))
+      );
     }
 
     // 3. Direct & Group Chat Rooms
@@ -407,11 +599,28 @@ service cloud.firestore {
         isAdmin() ||
         (isSignedIn() && isCallerNotBanned()
           && request.auth.uid in incoming().participantIds
-          && (!('isSuspended' in incoming()) || incoming().isSuspended == false))
+          && (!('isSuspended' in incoming()) || incoming().isSuspended == false)
+          && (
+            (incoming().type == 'direct' && hasAcceptedFriendshipForDm(incoming().participantIds)) ||
+            (incoming().type == 'group' && ('creatorId' in incoming()) && incoming().creatorId == request.auth.uid && ('adminIds' in incoming()) && request.auth.uid in incoming().adminIds)
+          ))
       );
 
       allow update: if isSignedIn() && isValidId(chatId) && isValidChat(incoming()) && (
         isAdmin() ||
+        // Non-member self-joining an active Public Direct-Join Group (strictly appends ONLY self)
+        (isCallerNotBanned() &&
+          existing().type == 'group' &&
+          ('visibility' in existing()) && existing().visibility == 'public' &&
+          ('joinPolicy' in existing()) && existing().joinPolicy == 'direct' &&
+          !(request.auth.uid in existing().participantIds) &&
+          (!('bannedUserIds' in existing()) || !(request.auth.uid in existing().bannedUserIds)) &&
+          incoming().type == existing().type &&
+          incoming().createdAt == existing().createdAt &&
+          request.auth.uid in incoming().participantIds &&
+          incoming().participantIds.size() == existing().participantIds.size() + 1 &&
+          incoming().participantIds.hasAll(existing().participantIds) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['participantIds', 'participantDetails', 'updatedAt'])) ||
         (request.auth.uid in existing().participantIds &&
           incoming().type == existing().type &&
           incoming().createdAt == existing().createdAt && (
@@ -421,11 +630,12 @@ service cloud.firestore {
               'lastMessageId', 'lastMessageText', 'lastMessageSenderId',
               'lastMessageTime', 'lastMessageReadBy', 'updatedAt'
             ])) ||
-          // Action 2: Group admin manages title, members, and admins
+          // Action 2: Group admin manages title, settings, members, bans, and admins
           (isCallerNotBanned() && existing().type == 'group' &&
             (!('adminIds' in existing()) || request.auth.uid in existing().adminIds || (('creatorId' in existing()) && existing().creatorId == request.auth.uid)) &&
             incoming().diff(existing()).affectedKeys().hasOnly([
-              'name', 'participantIds', 'participantDetails', 'adminIds',
+              'name', 'description', 'visibility', 'joinPolicy', 'bannedUserIds',
+              'participantIds', 'participantDetails', 'adminIds',
               'lastMessageId', 'lastMessageText', 'lastMessageSenderId',
               'lastMessageTime', 'lastMessageReadBy', 'updatedAt'
             ])) ||
@@ -464,7 +674,65 @@ service cloud.firestore {
         ))
       );
 
-      // Messages Sub-Collection (Master Gate to parent chat participantIds)
+      // Public Group Join Requests Sub-Collection
+      match /join_requests/{reqUserId} {
+        allow get: if isValidId(chatId) && isValidId(reqUserId) && (
+          isAdmin() ||
+          isOwner(reqUserId) ||
+          (isSignedIn() && (
+            request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds ||
+            request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.creatorId
+          ))
+        );
+
+        allow list: if isValidId(chatId) && (
+          isAdmin() ||
+          (isSignedIn() && (
+            request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds ||
+            request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.creatorId
+          ))
+        );
+
+        allow create: if isSignedIn() && isValidId(chatId) && isValidId(reqUserId)
+          && isOwner(reqUserId)
+          && isCallerNotBanned()
+          && isValidJoinRequest(incoming(), chatId, reqUserId)
+          && incoming().status == 'pending'
+          && exists(/databases/$(database)/documents/public_groups/$(chatId))
+          && get(/databases/$(database)/documents/public_groups/$(chatId)).data.status == 'active'
+          && get(/databases/$(database)/documents/public_groups/$(chatId)).data.joinPolicy == 'approval'
+          && !(request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds)
+          && (!('bannedUserIds' in get(/databases/$(database)/documents/chats/$(chatId)).data)
+              || !(request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.bannedUserIds));
+
+        allow update: if isSignedIn() && isValidId(chatId) && isValidId(reqUserId)
+          && isValidJoinRequest(incoming(), chatId, reqUserId)
+          && incoming().userId == existing().userId
+          && incoming().chatId == existing().chatId
+          && incoming().createdAt == existing().createdAt
+          && (
+            isAdmin() ||
+            (isCallerNotBanned() &&
+              (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds ||
+               request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.creatorId) &&
+              incoming().status in ['approved', 'declined']) ||
+            (isOwner(reqUserId) && isCallerNotBanned() && existing().status == 'declined' &&
+              incoming().status == 'pending' &&
+              (!('bannedUserIds' in get(/databases/$(database)/documents/chats/$(chatId)).data)
+                || !(request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.bannedUserIds)))
+          );
+
+        allow delete: if isValidId(chatId) && isValidId(reqUserId) && (
+          isAdmin() ||
+          isOwner(reqUserId) ||
+          (isSignedIn() && (
+            request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.adminIds ||
+            request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.creatorId
+          ))
+        );
+      }
+
+      // Messages Sub-Collection (Master Gate to parent chat participantIds + DM Friendship Gate)
       match /messages/{messageId} {
         allow get: if isValidId(chatId) && isValidId(messageId) && (
           isAdmin() ||
@@ -484,6 +752,7 @@ service cloud.firestore {
               && incoming().senderId == request.auth.uid
               && isCallerNotBanned()
               && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
+              && canDirectParticipantsInteract(get(/databases/$(database)/documents/chats/$(chatId)).data)
               && (!('isSuspended' in get(/databases/$(database)/documents/chats/$(chatId)).data) ||
                   get(/databases/$(database)/documents/chats/$(chatId)).data.isSuspended != true))
           );
@@ -535,6 +804,7 @@ service cloud.firestore {
           && incoming().status == 'ringing'
           && isCallerNotBanned()
           && get(/databases/$(database)/documents/chats/$(chatId)).data.type == 'direct'
+          && canDirectParticipantsInteract(get(/databases/$(database)/documents/chats/$(chatId)).data)
           && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
           && incoming().calleeId in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds
           && incoming().calleeId != request.auth.uid;
@@ -590,6 +860,7 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if isSignedIn() && isValidId(reportId) && isValidReport(incoming(), reportId)
         && incoming().reporterId == request.auth.uid
+        && incoming().targetUserId != request.auth.uid
         && incoming().status == 'pending'
         && !('resolvedAt' in incoming())
         && !('resolvedBy' in incoming())
@@ -624,6 +895,9 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if isValidId(requestId) && isValidRecoveryRequest(incoming(), requestId)
         && incoming().status == 'pending'
+        && (incoming().email.size() >= 3
+            || ('contactPhone' in incoming() && incoming().contactPhone.size() >= 5)
+            || ('username' in incoming() && incoming().username.size() >= 3))
         && !('adminNotes' in incoming())
         && !('resolvedAt' in incoming())
         && !('resolvedBy' in incoming());

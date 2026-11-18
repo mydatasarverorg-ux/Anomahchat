@@ -9,6 +9,7 @@ import {
   KeyRound,
   Lock,
   MessageSquare,
+  Phone,
   ShieldOff,
   X,
 } from 'lucide-react';
@@ -126,9 +127,29 @@ export function AdminModals({
                   </span>
                 </div>
                 <div className="text-xs text-slate-400 truncate">{selectedDossierUser.email}</div>
-                {selectedDossierUser.username && (
-                  <div className="text-[11px] text-emerald-400 font-mono">@{selectedDossierUser.username}</div>
-                )}
+                <div className="flex items-center gap-2.5 flex-wrap mt-0.5">
+                  {selectedDossierUser.username && (
+                    <span className="text-[11px] text-emerald-400 font-mono">@{selectedDossierUser.username}</span>
+                  )}
+                  {selectedDossierUser.phoneNumber && (
+                    <span className="text-[11px] text-slate-300 font-mono inline-flex items-center gap-1">
+                      <Phone className="w-3 h-3 text-emerald-400" />
+                      <span>{selectedDossierUser.phoneNumber}</span>
+                      <button
+                        type="button"
+                        onClick={() => onCopy(selectedDossierUser.phoneNumber!)}
+                        className="p-0.5 text-slate-400 hover:text-white cursor-pointer"
+                        title={t('copy')}
+                      >
+                        {copiedText === selectedDossierUser.phoneNumber ? (
+                          <Check className="w-3 h-3 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                      </button>
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -318,7 +339,12 @@ export function AdminModals({
             </div>
 
             <p className="text-xs text-slate-400">
-              Applicant: <strong className="text-white">{selectedRecovery.email}</strong>
+              Applicant:{' '}
+              <strong className="text-white">
+                {selectedRecovery.email ||
+                  selectedRecovery.contactPhone ||
+                  (selectedRecovery.username ? `@${selectedRecovery.username}` : selectedRecovery.name || selectedRecovery.id)}
+              </strong>
             </p>
             <p className="text-[11px] text-slate-400 leading-relaxed bg-slate-950/70 p-2.5 rounded-xl border border-slate-800">
               {language === 'bn'

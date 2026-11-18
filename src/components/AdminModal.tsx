@@ -21,11 +21,16 @@ import {
   subscribeToRecoveryRequests,
   resolveRecoveryRequest,
   dismissRecoveryRequest,
+  reopenRecoveryRequest,
+  deleteRecoveryRequest,
+  sendAdminPasswordResetEmail,
   adminClearUserAppLock,
   backfillDirectoryFromUsers,
   subscribeToAllChatsForAdmin,
   subscribeToChatMessagesForAdmin,
   SUPER_ADMIN_EMAIL,
+  extractPhoneDigits,
+  doPhonesMatch,
 } from '../services/adminService';
 import {
   publishAppRelease,
@@ -83,16 +88,16 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   >('overview');
 
   const [currentLiveRelease, setCurrentLiveRelease] = useState<AppReleaseInfo | null>(null);
-  const [releaseVersionName, setReleaseVersionName] = useState('1.0.10');
-  const [releaseVersionCode, setReleaseVersionCode] = useState('110');
+  const [releaseVersionName, setReleaseVersionName] = useState('1.0.11');
+  const [releaseVersionCode, setReleaseVersionCode] = useState('111');
   const [releaseApkUrl, setReleaseApkUrl] = useState('https://github.com/mydatasarverorg-ux/Anomahchat/releases/latest/download/AnomahChat.apk');
   const [releaseApkSha256, setReleaseApkSha256] = useState('');
   const [releaseFileSizeText, setReleaseFileSizeText] = useState('');
   const [releaseChangelogEn, setReleaseChangelogEn] = useState(
-    '• Fixed DM & Inbox Read Receipts (accurate seen/unread status, visibility-aware read marking & atomic sync)\n• Super Admin Google Drive Backup, Safe 1 GiB Cleanup & 1-Click Cloud Restore\n• Automatic In-Chat Call Logs, Native Notifications & WebRTC Calling (Mahi A10)'
+    '• Friend Request & Accepted Connection Gate with QR Auto-Request\n• Private & Public Groups (Friends-only invite, Direct Join & Admin Approval)\n• Cross-Platform Offline QR Scanner & Deep-Linking across Web, PWA & Android APK (Mahi A11)'
   );
   const [releaseChangelogBn, setReleaseChangelogBn] = useState(
-    '• ডিএম ও ইনবক্সের Seen / কে দেখেছে সিস্টেম ফিক্স (সঠিক ব্লু টিক, আনরিড ইন্ডিকেটর ও ব্যাকগ্রাউন্ড সুরক্ষা)\n• সুপার অ্যাডমিন Google Drive ব্যাকআপ, ১ GiB ক্লিনআপ ও ১-ক্লিক রিস্টোর\n• অটোমেটিক কল লগ, নেটিভ নোটিফিকেশন ও অডিও/ভিডিও কল সাপোর্ট (Mahi A10)'
+    '• ফ্রেন্ড রিকোয়েস্ট ও একসেপ্ট সিস্টেম এবং QR স্ক্যানে অটো রিকোয়েস্ট\n• প্রাইভেট ও পাবলিক গ্রুপ (শুধু বন্ধু দিয়ে গ্রুপ, ডাইরেক্ট ও অ্যাডমিন অ্যাপ্রুভাল জয়েন)\n• Web, PWA ও Android APK-তে অফলাইন QR স্ক্যানার ও ডিপ-লিংকিং সাপোর্ট (Mahi A11)'
   );
   const [releaseForceUpdate, setReleaseForceUpdate] = useState(false);
   const [publishingRelease, setPublishingRelease] = useState(false);
@@ -126,8 +131,26 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     setSelectedChat(userChats.length > 0 ? userChats[0] : null);
   };
 
+  const handleInspectReportChat = (chatId: string) => {
+    setTargetUserChatFilter(null);
+    setChatSearch('');
+    setChatFilter('all');
+    const foundChat = allChats.find((c) => c.id === chatId) || null;
+    setSelectedChat(foundChat);
+    setActiveTab('chat_audit');
+    setMobileChatView(foundChat ? 'messages' : 'list');
+    if (!foundChat) {
+      setActionErrorMsg(
+        language === 'bn'
+          ? 'এই রিপোর্টের সাথে যুক্ত চ্যাট রুমটি আর পাওয়া যায়নি (সম্ভবত ডিলিট করা হয়েছে)।'
+          : 'The chat room linked to this report was not found (it may have been deleted).'
+      );
+    }
+  };
+
   const [recoveryRequests, setRecoveryRequests] = useState<PasswordRecoveryRequest[]>([]);
   const [recoveryFilter, setRecoveryFilter] = useState<'all' | 'pending' | 'resolved' | 'dismissed'>('all');
+  const [recoverySearch, setRecoverySearch] = useState('');
   const [selectedRecovery, setSelectedRecovery] = useState<PasswordRecoveryRequest | null>(null);
   const [resolvingRecovery, setResolvingRecovery] = useState(false);
   const [recoveryAdminNotes, setRecoveryAdminNotes] = useState('');
@@ -216,6 +239,20 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     setActionErrorMsg(null);
     setActionSuccessMsg(msg);
     setTimeout(() => setActionSuccessMsg(null), 3500);
+  };
+
+  const extractReadableError = (err: unknown, fallback: string) => {
+    if (err instanceof Error && err.message) {
+      try {
+        const parsed = JSON.parse(err.message);
+        if (parsed && typeof parsed.error === 'string' && parsed.error.trim()) {
+          return parsed.error;
+        }
+      } catch {
+        return err.message;
+      }
+    }
+    return fallback;
   };
 
   const copyToClipboard = (text: string) => {
@@ -317,9 +354,14 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
       await issueWarning(warnTarget.userId, warnTarget.email, warnTarget.displayName, warnText, user.email);
       setWarnTarget(null);
       setWarnText('');
-      showSuccessBanner(`Issued official warning to ${warnTarget.displayName}.`);
+      showSuccessBanner(
+        language === 'bn'
+          ? `${warnTarget.displayName}-কে অফিশিয়াল সতর্কবার্তা পাঠানো হয়েছে।`
+          : `Issued official warning to ${warnTarget.displayName}.`
+      );
     } catch (err) {
       console.error(err);
+      setActionErrorMsg(extractReadableError(err, 'Failed to issue warning.'));
     } finally {
       setIsWarning(false);
     }
@@ -358,11 +400,20 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     try {
       setResolvingRecovery(true);
       await resolveRecoveryRequest(selectedRecovery.id, recoveryAdminNotes, user.email);
-      showSuccessBanner(`Support ticket resolved for ${selectedRecovery.email}`);
+      const applicantLabel =
+        selectedRecovery.email ||
+        selectedRecovery.contactPhone ||
+        (selectedRecovery.username ? `@${selectedRecovery.username}` : selectedRecovery.id);
+      showSuccessBanner(
+        language === 'bn'
+          ? `${applicantLabel}-এর সাপোর্ট টিকিট সমাধান করা হয়েছে।`
+          : `Support ticket resolved for ${applicantLabel}`
+      );
       setSelectedRecovery(null);
       setRecoveryAdminNotes('');
     } catch (err) {
       console.error(err);
+      setActionErrorMsg(extractReadableError(err, 'Failed to resolve support ticket.'));
     } finally {
       setResolvingRecovery(false);
     }
@@ -372,10 +423,67 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     if (!user?.email) return;
     try {
       await dismissRecoveryRequest(reqId, 'Dismissed by administrator.', user.email);
-      showSuccessBanner('Recovery request dismissed.');
+      showSuccessBanner(language === 'bn' ? 'সাপোর্ট টিকিট বাতিল করা হয়েছে।' : 'Support ticket dismissed.');
       setSelectedRecovery(null);
     } catch (err) {
       console.error(err);
+      setActionErrorMsg(extractReadableError(err, 'Failed to dismiss support ticket.'));
+    }
+  };
+
+  const handleReopenRecovery = async (reqId: string) => {
+    if (!user?.email) return;
+    try {
+      await reopenRecoveryRequest(reqId, user.email);
+      showSuccessBanner(
+        language === 'bn' ? 'সাপোর্ট টিকিটটি পুনরায় খোলা হয়েছে।' : 'Support ticket reopened.'
+      );
+    } catch (err) {
+      console.error(err);
+      setActionErrorMsg(extractReadableError(err, 'Failed to reopen support ticket.'));
+    }
+  };
+
+  const handleDeleteRecovery = async (reqId: string) => {
+    if (!user?.email) return;
+    try {
+      await deleteRecoveryRequest(reqId, user.email);
+      showSuccessBanner(
+        language === 'bn' ? 'সাপোর্ট টিকিটটি আর্কাইভ থেকে মুছে ফেলা হয়েছে।' : 'Support ticket deleted.'
+      );
+    } catch (err) {
+      console.error(err);
+      setActionErrorMsg(extractReadableError(err, 'Failed to delete support ticket.'));
+    }
+  };
+
+  const handleSendResetFromSupport = async (targetEmail: string, ticketId: string) => {
+    if (!user?.email) return;
+    try {
+      await sendAdminPasswordResetEmail(targetEmail, user.email, ticketId);
+      showSuccessBanner(
+        language === 'bn'
+          ? `${targetEmail} ঠিকানায় পাসওয়ার্ড রিসেট ইমেইল পাঠানো হয়েছে।`
+          : `Password reset email sent to ${targetEmail}.`
+      );
+    } catch (err) {
+      console.error(err);
+      setActionErrorMsg(extractReadableError(err, 'Failed to send password reset email.'));
+    }
+  };
+
+  const handleClearAppLockFromSupport = async (targetUser: UserProfile) => {
+    if (!user?.email) return;
+    try {
+      await adminClearUserAppLock(targetUser.userId, user.email);
+      showSuccessBanner(
+        language === 'bn'
+          ? `${targetUser.displayName}-এর অ্যাপ-লক পিন রিসেট করা হয়েছে।`
+          : `Cleared Quick App-Lock for ${targetUser.displayName}.`
+      );
+    } catch (err) {
+      console.error(err);
+      setActionErrorMsg(extractReadableError(err, 'Failed to clear App-Lock PIN.'));
     }
   };
 
@@ -435,11 +543,14 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     if (userFilter === 'online' && !u.isOnline) return false;
 
     if (!userSearch.trim()) return true;
-    const term = userSearch.toLowerCase();
+    const term = userSearch.trim().toLowerCase();
+    const digitTerm = extractPhoneDigits(userSearch);
     return (
       u.displayName?.toLowerCase().includes(term) ||
       u.email?.toLowerCase().includes(term) ||
       u.username?.toLowerCase().includes(term) ||
+      u.phoneNumber?.toLowerCase().includes(term) ||
+      (digitTerm.length >= 3 && extractPhoneDigits(u.phoneNumber).includes(digitTerm)) ||
       u.userId.toLowerCase().includes(term)
     );
   });
@@ -460,12 +571,56 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     return nameMatch || memberMatch;
   });
 
+  const recoveryCounts = {
+    all: recoveryRequests.length,
+    pending: recoveryRequests.filter((r) => r.status === 'pending').length,
+    resolved: recoveryRequests.filter((r) => r.status === 'resolved').length,
+    dismissed: recoveryRequests.filter((r) => r.status === 'dismissed').length,
+  };
+
   const filteredRecovery = recoveryRequests.filter((r) => {
     if (recoveryFilter === 'pending' && r.status !== 'pending') return false;
     if (recoveryFilter === 'resolved' && r.status !== 'resolved') return false;
     if (recoveryFilter === 'dismissed' && r.status !== 'dismissed') return false;
-    return true;
+
+    if (!recoverySearch.trim()) return true;
+    const term = recoverySearch.trim().toLowerCase();
+    const cleanTermHandle = term.replace(/^@/, '');
+    const digitTerm = extractPhoneDigits(recoverySearch);
+
+    const directMatch =
+      r.email?.toLowerCase().includes(term) ||
+      r.name?.toLowerCase().includes(term) ||
+      r.username?.toLowerCase().includes(cleanTermHandle) ||
+      r.contactPhone?.toLowerCase().includes(term) ||
+      (digitTerm.length >= 3 && extractPhoneDigits(r.contactPhone).includes(digitTerm)) ||
+      r.details?.toLowerCase().includes(term) ||
+      r.adminNotes?.toLowerCase().includes(term) ||
+      r.id.toLowerCase().includes(term);
+
+    if (directMatch) return true;
+
+    const matchedUser = usersList.find(
+      (u) =>
+        (r.email && u.email?.trim().toLowerCase() === r.email.trim().toLowerCase()) ||
+        (r.username && u.username?.trim().toLowerCase() === r.username.trim().replace(/^@/, '').toLowerCase()) ||
+        doPhonesMatch(r.contactPhone, u.phoneNumber)
+    );
+    if (!matchedUser) return false;
+    return (
+      matchedUser.displayName?.toLowerCase().includes(term) ||
+      matchedUser.email?.toLowerCase().includes(term) ||
+      matchedUser.username?.toLowerCase().includes(cleanTermHandle) ||
+      (digitTerm.length >= 3 && extractPhoneDigits(matchedUser.phoneNumber).includes(digitTerm))
+    );
   });
+
+  const reportCounts = {
+    all: reports.length,
+    pending: reports.filter((r) => r.status === 'pending').length,
+    resolved: reports.filter((r) => r.status === 'resolved').length,
+    dismissed: reports.filter((r) => r.status === 'dismissed').length,
+  };
 
   const filteredReports = reports.filter((r) => {
     if (reportFilter === 'pending' && r.status !== 'pending') return false;
@@ -651,9 +806,22 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
                 setBanReason(reason);
               }}
               onDeleteMessage={async (chatId, msgId) => {
-                if (user?.email) {
-                  await deleteAdminMessage(chatId, msgId, user.email, 'Admin moderation violation');
-                  showSuccessBanner('Deleted message from chat room.');
+                if (!user?.email) return;
+                try {
+                  const deleted = await deleteAdminMessage(chatId, msgId, user.email, 'Admin moderation violation');
+                  if (deleted) {
+                    showSuccessBanner(
+                      language === 'bn' ? 'চ্যাট রুম থেকে মেসেজ ডিলিট করা হয়েছে।' : 'Deleted message from chat room.'
+                    );
+                  } else {
+                    setActionErrorMsg(
+                      language === 'bn'
+                        ? 'এই মেসেজটি ইতিমধ্যেই ডিলিট করা হয়েছে।'
+                        : 'This message has already been deleted.'
+                    );
+                  }
+                } catch (err) {
+                  setActionErrorMsg(extractReadableError(err, 'Failed to delete message.'));
                 }
               }}
             />
@@ -662,10 +830,22 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
           {activeTab === 'recovery' && (
             <AdminRecoveryTab
               t={t}
+              language={language}
+              usersList={usersList}
               filteredRecovery={filteredRecovery}
+              recoveryCounts={recoveryCounts}
               recoveryFilter={recoveryFilter}
               setRecoveryFilter={setRecoveryFilter}
+              recoverySearch={recoverySearch}
+              setRecoverySearch={setRecoverySearch}
+              copiedText={copiedText}
+              onCopy={copyToClipboard}
+              onOpenDossier={(u) => setSelectedDossierUser(u)}
+              onClearAppLock={handleClearAppLockFromSupport}
+              onSendResetEmail={handleSendResetFromSupport}
               onDismiss={handleDismissRecovery}
+              onReopen={handleReopenRecovery}
+              onDelete={handleDeleteRecovery}
               onSelectResolve={(req) => {
                 setSelectedRecovery(req);
                 setRecoveryAdminNotes('');
@@ -676,28 +856,79 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
           {activeTab === 'reports' && (
             <AdminReportsTab
               t={t}
+              language={language}
               usersList={usersList}
               filteredReports={filteredReports}
+              reportCounts={reportCounts}
               reportFilter={reportFilter}
               setReportFilter={setReportFilter}
               onOpenBan={(u, reason) => {
                 setBanTarget(u);
                 setBanReason(reason);
               }}
+              onOpenWarn={(u, text) => {
+                setWarnTarget(u);
+                setWarnText(text);
+              }}
+              onOpenDossier={(u) => setSelectedDossierUser(u)}
+              onInspectChat={handleInspectReportChat}
               onDeleteReportedMessage={async (chatId, msgId, reason) => {
-                if (user?.email) {
-                  await deleteAdminMessage(chatId, msgId, user.email, reason);
-                  showSuccessBanner('Deleted offending message.');
+                if (!user?.email) return;
+                try {
+                  const deleted = await deleteAdminMessage(chatId, msgId, user.email, reason);
+                  if (deleted) {
+                    showSuccessBanner(
+                      language === 'bn' ? 'অপরাধমূলক মেসেজটি ডিলিট করা হয়েছে।' : 'Deleted offending message.'
+                    );
+                  } else {
+                    setActionErrorMsg(
+                      language === 'bn'
+                        ? 'এই মেসেজটি ইতিমধ্যেই ডিলিট করা হয়েছে বা আর পাওয়া যাচ্ছে না।'
+                        : 'This message has already been deleted or no longer exists.'
+                    );
+                  }
+                } catch (err) {
+                  setActionErrorMsg(extractReadableError(err, 'Failed to delete reported message.'));
                 }
               }}
               onResolveReport={async (reportId, status, notes) => {
-                if (user?.email) {
+                if (!user?.email) return;
+                try {
                   await updateReportStatus(reportId, status, notes, user.email);
-                  if (status === 'resolved') showSuccessBanner('Report marked as resolved.');
+                  if (status === 'resolved') {
+                    showSuccessBanner(
+                      language === 'bn' ? 'রিপোর্টটি মীমাংসিত হিসেবে চিহ্নিত হয়েছে।' : 'Report marked as resolved.'
+                    );
+                  } else if (status === 'dismissed') {
+                    showSuccessBanner(
+                      language === 'bn' ? 'রিপোর্টটি বাতিল করা হয়েছে।' : 'Report dismissed.'
+                    );
+                  } else {
+                    showSuccessBanner(
+                      language === 'bn' ? 'রিপোর্টটি পুনরায় পর্যালোচনার জন্য খোলা হয়েছে।' : 'Report reopened for review.'
+                    );
+                  }
+                } catch (err) {
+                  setActionErrorMsg(extractReadableError(err, 'Failed to update report status.'));
                 }
               }}
               onDeleteReport={async (reportId) => {
-                if (user?.email) await deleteReport(reportId, user.email);
+                if (!user?.email) return;
+                try {
+                  await deleteReport(reportId, user.email);
+                  showSuccessBanner(
+                    language === 'bn' ? 'রিপোর্টটি আর্কাইভ থেকে মুছে ফেলা হয়েছে।' : 'Report deleted from archive.'
+                  );
+                } catch (err) {
+                  setActionErrorMsg(extractReadableError(err, 'Failed to delete report.'));
+                }
+              }}
+              onNotifyMissingUser={(targetName) => {
+                setActionErrorMsg(
+                  language === 'bn'
+                    ? `${targetName}-এর ইউজার অ্যাকাউন্টটি আর ডাটাবেজে পাওয়া যায়নি (সম্ভবত ডিলিট হয়েছে)।`
+                    : `User account for ${targetName} was not found in the database (it may have been deleted).`
+                );
               }}
             />
           )}

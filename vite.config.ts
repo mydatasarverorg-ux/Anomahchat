@@ -30,6 +30,9 @@ export default defineConfig(() => {
           orientation: 'portrait',
           start_url: './',
           scope: './',
+          launch_handler: {
+            client_mode: 'focus-existing',
+          },
           categories: ['social', 'productivity', 'utilities'],
           icons: [
             {

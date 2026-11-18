@@ -20,6 +20,15 @@
           "description": "Email address of the user (PII, owner and Super Admin only)",
           "maxLength": 150
         },
+        "phoneNumber": {
+          "type": "string",
+          "description": "Mandatory mobile phone number for account identity and admin support recovery (PII, owner and Super Admin only)",
+          "maxLength": 50
+        },
+        "discoverableByPhone": {
+          "type": "boolean",
+          "description": "Whether friends who already know this user's exact mobile number can find them via privacy-preserving hash lookup"
+        },
         "photoURL": {
           "type": "string",
           "description": "Avatar URL or preset avatar identifier",
@@ -171,6 +180,12 @@
           "description": "Indexed lowercase username handle",
           "maxLength": 50
         },
+        "phoneLookupHash": {
+          "type": "string",
+          "description": "Optional salted SHA-256 hex digest of canonical phone digits for exact-match friend lookup without exposing phone numbers",
+          "maxLength": 64,
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
         "status": {
           "type": "string",
           "description": "Lifecycle status for directory filtering",
@@ -235,6 +250,11 @@
           "description": "Group chat name",
           "maxLength": 100
         },
+        "description": {
+          "type": "string",
+          "description": "Optional group description",
+          "maxLength": 300
+        },
         "creatorId": {
           "type": "string",
           "description": "UID of group creator",
@@ -248,6 +268,20 @@
           "type": "string",
           "description": "Group avatar URL",
           "maxLength": 1000
+        },
+        "visibility": {
+          "type": "string",
+          "description": "Group visibility mode: private or public",
+          "enum": ["private", "public"]
+        },
+        "joinPolicy": {
+          "type": "string",
+          "description": "How new members can join a group: invite_only, direct, or approval",
+          "enum": ["invite_only", "direct", "approval"]
+        },
+        "bannedUserIds": {
+          "type": "array",
+          "description": "Bounded list of UIDs banned from re-joining this group"
         },
         "participantIds": {
           "type": "array",
@@ -630,7 +664,7 @@
         },
         "email": {
           "type": "string",
-          "description": "Registered email address requiring support",
+          "description": "Registered email address requiring support (may be empty if Lost Email access is requested with phoneNumber or username)",
           "maxLength": 150
         },
         "name": {
@@ -780,6 +814,61 @@
         "usernameFragment": { "type": "string", "maxLength": 128 }
       },
       "required": ["candidate"]
+    },
+    "Friendship": {
+      "title": "Friendship",
+      "description": "Canonical bilateral friendship / friend-request state between two users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userIds": { "type": "array", "description": "Sorted 2-element array of participant UIDs" },
+        "requesterId": { "type": "string", "maxLength": 128 },
+        "receiverId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["pending", "accepted", "declined", "blocked"] },
+        "blockedBy": { "type": "string", "maxLength": 128 },
+        "source": { "type": "string", "enum": ["search", "qr", "link"] },
+        "requesterProfile": { "type": "object" },
+        "receiverProfile": { "type": "object" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "userIds", "requesterId", "receiverId", "status", "createdAt", "updatedAt"]
+    },
+    "PublicGroup": {
+      "title": "PublicGroup",
+      "description": "Lightweight non-message discovery index for Public Groups (no messages or member PII)",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 300 },
+        "groupPhoto": { "type": "string", "maxLength": 1000 },
+        "creatorId": { "type": "string", "maxLength": 128 },
+        "adminIds": { "type": "array", "description": "Bounded list of group admin UIDs" },
+        "joinPolicy": { "type": "string", "enum": ["direct", "approval"] },
+        "memberCount": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "deleted"] },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["groupId", "name", "creatorId", "adminIds", "joinPolicy", "memberCount", "status", "createdAt", "updatedAt"]
+    },
+    "GroupJoinRequest": {
+      "title": "GroupJoinRequest",
+      "description": "Pending or triaged join request for an Approval-mode Public Group",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "chatId": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "photoURL": { "type": "string", "maxLength": 1000 },
+        "username": { "type": "string", "maxLength": 50 },
+        "message": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "enum": ["pending", "approved", "declined"] },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["userId", "chatId", "displayName", "status", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -795,9 +884,21 @@
       "schema": "DirectoryUser",
       "description": "Non-PII public discovery and presence projection for signed-in users"
     },
+    "/friendships/{friendshipId}": {
+      "schema": "Friendship",
+      "description": "Bilateral friend requests, accepted connections, and block states between users"
+    },
+    "/public_groups/{groupId}": {
+      "schema": "PublicGroup",
+      "description": "Publicly searchable group metadata without exposing chat messages or member PII"
+    },
     "/chats/{chatId}": {
       "schema": "Chat",
       "description": "Direct and group chat rooms restricted to participants and Super Admin"
+    },
+    "/chats/{chatId}/join_requests/{userId}": {
+      "schema": "GroupJoinRequest",
+      "description": "Join approval requests for Approval-mode Public Groups"
     },
     "/chats/{chatId}/messages/{messageId}": {
       "schema": "Message",

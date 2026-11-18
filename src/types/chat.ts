@@ -4,6 +4,8 @@ export interface UserProfile {
   userId: string;
   displayName: string;
   email: string;
+  phoneNumber?: string;
+  discoverableByPhone?: boolean;
   photoURL: string;
   about?: string;
   username?: string;
@@ -40,6 +42,7 @@ export interface DirectoryUser {
   photoURL: string;
   about?: string;
   username?: string;
+  phoneLookupHash?: string;
   isOnline?: boolean;
   lastSeen?: string;
   status: 'active' | 'scheduled_for_deletion' | 'deleted';
@@ -121,8 +124,13 @@ export interface AdminAuditLog {
     | 'delete_chat'
     | 'resolve_report'
     | 'dismiss_report'
+    | 'reopen_report'
+    | 'delete_report'
     | 'resolve_recovery'
     | 'dismiss_recovery'
+    | 'reopen_recovery'
+    | 'delete_recovery'
+    | 'send_password_reset'
     | 'reset_pin'
     | 'clear_app_lock'
     | 'create_announcement'
@@ -170,13 +178,68 @@ export interface ChatMessage {
   createdAt: string;
 }
 
+export type FriendshipStatus = 'pending' | 'accepted' | 'declined' | 'blocked';
+
+export interface FriendshipPartyPreview {
+  displayName: string;
+  photoURL?: string;
+  username?: string;
+}
+
+export interface Friendship {
+  id: string; // canonical sorted: pair_${minUid}_${maxUid}
+  userIds: string[]; // [minUid, maxUid]
+  requesterId: string;
+  receiverId: string;
+  status: FriendshipStatus;
+  blockedBy?: string | null;
+  source?: 'search' | 'qr' | 'link';
+  requesterProfile?: FriendshipPartyPreview;
+  receiverProfile?: FriendshipPartyPreview;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type GroupVisibility = 'private' | 'public';
+export type GroupJoinPolicy = 'invite_only' | 'direct' | 'approval';
+
+export interface PublicGroupSummary {
+  groupId: string;
+  name: string;
+  description?: string;
+  groupPhoto?: string;
+  creatorId: string;
+  adminIds: string[];
+  joinPolicy: 'direct' | 'approval';
+  memberCount: number;
+  status: 'active' | 'deleted';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GroupJoinRequest {
+  userId: string;
+  chatId: string;
+  displayName: string;
+  photoURL?: string;
+  username?: string;
+  message?: string;
+  status: 'pending' | 'approved' | 'declined';
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ChatRoom {
   id: string;
   type: 'direct' | 'group';
   name?: string;
+  description?: string;
   creatorId?: string;
   adminIds?: string[];
   groupPhoto?: string;
+  visibility?: GroupVisibility;
+  joinPolicy?: GroupJoinPolicy;
+  bannedUserIds?: string[];
   participantIds: string[];
   participantDetails?: Record<string, {
     displayName: string;

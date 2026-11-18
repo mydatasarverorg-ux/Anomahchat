@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { useModalHistory } from '../hooks/useModalHistory';
 import {
   MessageSquare,
   Globe,
@@ -17,8 +18,21 @@ import {
   KeyRound,
   X,
   Languages,
+  Phone,
+  AtSign,
 } from 'lucide-react';
-import { submitRecoveryRequest } from '../services/adminService';
+import {
+  submitRecoveryRequest,
+  SUPPORT_DESK_ADDRESS,
+  extractPhoneDigits,
+} from '../services/adminService';
+import {
+  getSavedDeviceAccounts,
+  removeSavedDeviceAccount,
+  setPendingChatTarget,
+  setRememberDevicePending,
+  type SavedDeviceAccount,
+} from '../utils/accountShortcut';
 
 export function LoginScreen() {
   const {
@@ -38,6 +52,8 @@ export function LoginScreen() {
 
   // Form Fields
   const [name, setName] = useState('');
+  const [signupPhone, setSignupPhone] = useState('');
+  const [signupUsername, setSignupUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -51,11 +67,34 @@ export function LoginScreen() {
 
   // Recovery Support Desk Form Fields
   const [recoveryTab, setRecoveryTab] = useState<'email' | 'request'>('email');
+  const [recoveryTopic, setRecoveryTopic] = useState<'app_lock' | 'lost_email' | 'suspended' | 'other'>('app_lock');
   const [recoveryName, setRecoveryName] = useState('');
   const [recoveryUsername, setRecoveryUsername] = useState('');
   const [recoveryPhone, setRecoveryPhone] = useState('');
   const [recoveryDetails, setRecoveryDetails] = useState('');
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+
+  // Saved Quick-Tap Accounts on this device (zero passwords stored)
+  const [savedAccounts, setSavedAccounts] = useState<SavedDeviceAccount[]>(() => getSavedDeviceAccounts());
+  const [selectedSavedAccount, setSelectedSavedAccount] = useState<SavedDeviceAccount | null>(null);
+  const [rememberDevice, setRememberDevice] = useState(true);
+  const passwordInputRef = useRef<HTMLInputElement>(null);
+
+  useModalHistory(showForgotModal, () => setShowForgotModal(false));
+
+  // Preserve ?chat= target across sign-in/sign-up
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const target = params.get('chat');
+      if (target?.trim()) {
+        setPendingChatTarget(target.trim());
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,9 +103,27 @@ export function LoginScreen() {
     setInfoMessage(null);
 
     try {
+      setRememberDevicePending(rememberDevice);
       if (authMode === 'email-signup') {
         if (!name.trim()) {
           setLocalError(language === 'bn' ? 'আপনার পুরো নাম লিখুন।' : 'Please enter your full name or nickname.');
+          return;
+        }
+        if (extractPhoneDigits(signupPhone).length < 7) {
+          setLocalError(
+            language === 'bn'
+              ? 'অ্যাকাউন্টের নিরাপত্তা ও পরিচয় যাচাইয়ের জন্য অন্তত ৭ ডিজিটের সঠিক মোবাইল নম্বর দিন।'
+              : 'Please enter a valid mobile number (at least 7 digits) for identity verification.'
+          );
+          return;
+        }
+        const cleanUser = signupUsername.trim().replace(/^@/, '');
+        if (cleanUser && cleanUser.length < 3) {
+          setLocalError(
+            language === 'bn'
+              ? 'ইউজারনেম দিলে কমপক্ষে ৩ অক্ষরের হতে হবে।'
+              : 'Username must be at least 3 characters if provided.'
+          );
           return;
         }
         if (!email.trim() || !password.trim()) {
@@ -77,13 +134,14 @@ export function LoginScreen() {
           setLocalError(t('passwordMinLengthError'));
           return;
         }
-        await signUpWithEmail(email, password, name);
+        await signUpWithEmail(email, password, name, cleanUser || undefined, signupPhone);
       } else {
-        if (!email.trim() || !password.trim()) {
+        const resolvedEmail = selectedSavedAccount ? selectedSavedAccount.email : email;
+        if (!resolvedEmail.trim() || !password.trim()) {
           setLocalError(language === 'bn' ? 'ইমেইল ও পাসওয়ার্ড লিখুন।' : 'Please enter your email and password.');
           return;
         }
-        await signInWithEmail(email, password);
+        await signInWithEmail(resolvedEmail, password);
       }
     } catch {
       // Error handled in AuthContext or localError
@@ -94,13 +152,16 @@ export function LoginScreen() {
     e.preventDefault();
     if (!forgotEmail.trim()) return;
     setForgotLoading(true);
+    setModalError(null);
     try {
       await sendPasswordReset(forgotEmail.trim());
       setInfoMessage(t('recoveryEmailSent', { email: forgotEmail }));
       setShowForgotModal(false);
       setForgotEmail('');
     } catch (err: unknown) {
-      setLocalError(err instanceof Error ? err.message : t('recoveryEmailFailed'));
+      const msg = err instanceof Error ? err.message : t('recoveryEmailFailed');
+      setModalError(msg);
+      setLocalError(msg);
     } finally {
       setForgotLoading(false);
     }
@@ -215,6 +276,7 @@ export function LoginScreen() {
               type="button"
               onClick={() => {
                 setAuthMode('email-signup');
+                setSelectedSavedAccount(null);
                 setLocalError(null);
                 clearAuthError();
               }}
@@ -228,6 +290,65 @@ export function LoginScreen() {
               <span>{t('loginTabEmailSignUp')}</span>
             </button>
           </div>
+
+          {/* Quick-Tap Saved Accounts on This Device (Zero passwords stored) */}
+          {authMode === 'email-signin' && savedAccounts.length > 0 && !selectedSavedAccount && (
+            <div className="mb-4 space-y-2">
+              <div className="flex items-center justify-between text-[11px] text-slate-400 px-0.5">
+                <span className="font-semibold text-slate-300">
+                  {language === 'bn' ? 'এই ডিভাইসে সেভ করা অ্যাকাউন্ট' : 'Quick Sign-In on This Device'}
+                </span>
+                <span className="text-[10px]">
+                  {language === 'bn' ? 'ট্যাপ করে দ্রুত ঢুকুন' : 'Tap to continue'}
+                </span>
+              </div>
+              <div className="space-y-1.5 max-h-36 overflow-y-auto pr-0.5">
+                {savedAccounts.map((acc) => (
+                  <div
+                    key={acc.userId}
+                    onClick={() => {
+                      setLocalError(null);
+                      clearAuthError();
+                      if (acc.provider === 'google') {
+                        setRememberDevicePending(true);
+                        signInWithGoogle();
+                      } else {
+                        setSelectedSavedAccount(acc);
+                        setEmail(acc.email);
+                        setPassword('');
+                        setTimeout(() => passwordInputRef.current?.focus(), 60);
+                      }
+                    }}
+                    className="flex items-center gap-2.5 p-2 rounded-xl bg-slate-950/80 hover:bg-slate-800/90 border border-slate-800 hover:border-emerald-500/50 transition cursor-pointer group"
+                  >
+                    <img
+                      src={acc.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${acc.userId}`}
+                      alt={acc.displayName}
+                      className="w-8 h-8 rounded-full object-cover bg-slate-800 border border-slate-700 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-bold text-white truncate">{acc.displayName}</div>
+                      <div className="text-[10px] text-slate-400 truncate">
+                        {acc.maskedEmail} · {acc.provider === 'google' ? 'Google' : language === 'bn' ? 'পাসওয়ার্ড' : 'Password'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const next = removeSavedDeviceAccount(acc.userId);
+                        setSavedAccounts(next);
+                      }}
+                      title={language === 'bn' ? 'ডিভাইস থেকে মুছুন' : 'Remove from device'}
+                      className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Notifications */}
           {infoMessage && (
@@ -259,41 +380,107 @@ export function LoginScreen() {
           {/* Email Auth Form */}
           <form onSubmit={handleSubmit} className="space-y-3 mb-3">
             {authMode === 'email-signup' && (
+              <>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    {t('loginFullNameLabel')} <span className="text-emerald-400">*</span>
+                  </label>
+                  <div className="relative">
+                    <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      required
+                      placeholder={language === 'bn' ? 'যেমন: আপনার নাম' : 'e.g. John Doe'}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full pl-10 pr-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+                      maxLength={100}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      {language === 'bn' ? 'মোবাইল নম্বর' : 'Mobile Number'} <span className="text-emerald-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <Phone className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="tel"
+                        required
+                        placeholder="+880 1XXX-XXXXXX"
+                        value={signupPhone}
+                        onChange={(e) => setSignupPhone(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+                        maxLength={50}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      {t('loginUsernameLabel')}
+                    </label>
+                    <div className="relative">
+                      <AtSign className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="username"
+                        value={signupUsername}
+                        onChange={(e) => setSignupUsername(e.target.value.replace(/\s+/g, ''))}
+                        className="w-full pl-9 pr-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+                        maxLength={50}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {selectedSavedAccount && authMode === 'email-signin' ? (
+              <div className="flex items-center justify-between gap-2.5 p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/40">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <img
+                    src={selectedSavedAccount.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${selectedSavedAccount.userId}`}
+                    alt={selectedSavedAccount.displayName}
+                    className="w-9 h-9 rounded-full object-cover border border-emerald-500/40 bg-slate-800 shrink-0"
+                  />
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white truncate">{selectedSavedAccount.displayName}</div>
+                    <div className="text-[11px] text-emerald-300/80 truncate">{selectedSavedAccount.maskedEmail}</div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedSavedAccount(null);
+                    setEmail('');
+                    setPassword('');
+                  }}
+                  className="text-[11px] text-slate-300 hover:text-white underline shrink-0 cursor-pointer"
+                >
+                  {language === 'bn' ? 'অন্য অ্যাকাউন্ট' : 'Switch'}
+                </button>
+              </div>
+            ) : (
               <div>
                 <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                  {t('loginFullNameLabel')}
+                  {t('loginEmailLabel')}
                 </label>
                 <div className="relative">
-                  <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
-                    type="text"
+                    type="email"
                     required
-                    placeholder={language === 'bn' ? 'যেমন: আপনার নাম' : 'e.g. John Doe'}
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    placeholder="name@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
                     className="w-full pl-10 pr-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
-                    maxLength={100}
                   />
                 </div>
               </div>
             )}
-
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                {t('loginEmailLabel')}
-              </label>
-              <div className="relative">
-                <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="email"
-                  required
-                  placeholder="name@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-10 pr-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
-                />
-              </div>
-            </div>
 
             <div>
               <div className="flex items-center justify-between mb-1">
@@ -303,7 +490,12 @@ export function LoginScreen() {
                 {authMode === 'email-signin' && (
                   <button
                     type="button"
-                    onClick={() => setShowForgotModal(true)}
+                    onClick={() => {
+                      if (selectedSavedAccount?.email) {
+                        setForgotEmail(selectedSavedAccount.email);
+                      }
+                      setShowForgotModal(true);
+                    }}
                     className="text-[10px] text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
                   >
                     {t('loginForgotPasswordBtn')}
@@ -313,6 +505,7 @@ export function LoginScreen() {
               <div className="relative">
                 <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
+                  ref={passwordInputRef}
                   type={showPassword ? 'text' : 'password'}
                   required
                   placeholder="••••••••"
@@ -330,6 +523,23 @@ export function LoginScreen() {
                 </button>
               </div>
             </div>
+
+            {/* Opt-in Remember Account Card (Passwordless Quick-Tap) */}
+            {!selectedSavedAccount && (
+              <label className="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer select-none pt-0.5">
+                <input
+                  type="checkbox"
+                  checked={rememberDevice}
+                  onChange={(e) => setRememberDevice(e.target.checked)}
+                  className="rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500/40"
+                />
+                <span>
+                  {language === 'bn'
+                    ? 'দ্রুত লগইনের জন্য এই ডিভাইসে অ্যাকাউন্ট মনে রাখুন (পাসওয়ার্ড নয়)'
+                    : 'Save account card on this device (no password stored)'}
+                </span>
+              </label>
+            )}
 
             {/* Submit Button */}
             <button
@@ -368,6 +578,7 @@ export function LoginScreen() {
             onClick={() => {
               setPassword('');
               clearAuthError();
+              setRememberDevicePending(rememberDevice);
               signInWithGoogle();
             }}
             disabled={loading}
@@ -421,7 +632,10 @@ export function LoginScreen() {
             <div className="grid grid-cols-2 p-1 bg-slate-950 border border-slate-800 rounded-xl mb-4 text-xs font-semibold">
               <button
                 type="button"
-                onClick={() => setRecoveryTab('email')}
+                onClick={() => {
+                  setRecoveryTab('email');
+                  setModalError(null);
+                }}
                 className={`py-1.5 px-2 rounded-lg transition cursor-pointer text-center truncate ${
                   recoveryTab === 'email'
                     ? 'bg-emerald-600 text-white shadow-sm'
@@ -432,7 +646,10 @@ export function LoginScreen() {
               </button>
               <button
                 type="button"
-                onClick={() => setRecoveryTab('request')}
+                onClick={() => {
+                  setRecoveryTab('request');
+                  setModalError(null);
+                }}
                 className={`py-1.5 px-2 rounded-lg transition cursor-pointer text-center truncate ${
                   recoveryTab === 'request'
                     ? 'bg-emerald-600 text-white shadow-sm'
@@ -443,6 +660,13 @@ export function LoginScreen() {
               </button>
             </div>
 
+            {modalError && (
+              <div className="mb-3 p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-200 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{modalError}</span>
+              </div>
+            )}
+
             {/* TAB 1: Automated Firebase Reset Email */}
             {recoveryTab === 'email' && (
               <form onSubmit={handleForgotPassword} className="space-y-3">
@@ -451,6 +675,7 @@ export function LoginScreen() {
                   <input
                     type="email"
                     required
+                    maxLength={150}
                     placeholder="your.email@example.com"
                     value={forgotEmail}
                     onChange={(e) => setForgotEmail(e.target.value)}
@@ -475,35 +700,163 @@ export function LoginScreen() {
               <form
                 onSubmit={async (e) => {
                   e.preventDefault();
-                  if (!forgotEmail.trim()) return;
+                  setModalError(null);
+                  const cleanEmail = forgotEmail.trim();
+                  const hasEmail = cleanEmail.length >= 3 && cleanEmail.includes('@');
+                  const hasPhone = extractPhoneDigits(recoveryPhone).length >= 6;
+                  const hasUsername = recoveryUsername.trim().replace(/^@/, '').length >= 3;
+
+                  if (cleanEmail.length > 0 && !hasEmail) {
+                    setModalError(
+                      language === 'bn'
+                        ? 'সঠিক ফরম্যাটের ইমেইল লিখুন অথবা ফাঁকা রাখুন।'
+                        : 'Please enter a valid email format or leave blank if forgotten.'
+                    );
+                    return;
+                  }
+
+                  if (recoveryTopic === 'lost_email') {
+                    if (!hasPhone && !hasUsername && !hasEmail) {
+                      setModalError(
+                        language === 'bn'
+                          ? 'ইমেইল ভুলে গেলে অন্তত আপনার নিবন্ধিত মোবাইল নম্বর অথবা @ইউজারনেম দিন।'
+                          : 'Please enter your registered mobile number or @username so we can locate your account.'
+                      );
+                      return;
+                    }
+                  } else if (!hasEmail) {
+                    setModalError(
+                      language === 'bn'
+                        ? 'আপনার নিবন্ধিত ইমেইল ঠিকানা লিখুন।'
+                        : 'Please enter your registered email address.'
+                    );
+                    return;
+                  }
+
                   setRecoverySubmitting(true);
+                  const topicLabels = {
+                    app_lock: 'App-Lock PIN Reset',
+                    lost_email: 'Lost Email / Login Access',
+                    suspended: 'Suspension / Ban Appeal',
+                    other: 'Account Help',
+                  };
+                  const combinedDetails = recoveryDetails.trim()
+                    ? `[${topicLabels[recoveryTopic]}] ${recoveryDetails.trim()}`
+                    : `[${topicLabels[recoveryTopic]}] User requested administrator assistance.`;
+
                   try {
                     await submitRecoveryRequest({
-                      email: forgotEmail.trim(),
+                      email: cleanEmail,
                       name: recoveryName.trim() || undefined,
                       username: recoveryUsername.trim() || undefined,
                       contactPhone: recoveryPhone.trim() || undefined,
-                      details: recoveryDetails.trim() || undefined,
+                      details: combinedDetails.slice(0, 1000),
                     });
                     setInfoMessage(t('recoverySubmittedSuccess'));
                     setShowForgotModal(false);
                     setRecoveryDetails('');
+                    setRecoveryName('');
+                    setRecoveryUsername('');
+                    setRecoveryPhone('');
+                    setForgotEmail('');
                   } catch (err: unknown) {
-                    setLocalError(err instanceof Error ? err.message : 'Failed to submit support ticket.');
+                    const msg =
+                      err instanceof Error ? err.message : 'Failed to submit support ticket.';
+                    setModalError(msg);
                   } finally {
                     setRecoverySubmitting(false);
                   }
                 }}
                 className="space-y-3"
               >
+                {/* Automatically Routed Support Desk Address Banner (Read-Only) */}
+                <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[11px]">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Mail className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span className="text-slate-400 shrink-0">
+                      {language === 'bn' ? 'প্রাপক:' : 'To:'}
+                    </span>
+                    <span className="font-mono font-bold text-emerald-400 truncate">
+                      {SUPPORT_DESK_ADDRESS}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 shrink-0 font-medium">
+                    {language === 'bn' ? 'স্বয়ংক্রিয়ভাবে সেট' : 'Auto-routed'}
+                  </span>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-300 block">
+                    {language === 'bn' ? 'সমস্যার ধরন নির্বাচন করুন' : 'Select Issue Category'}
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                    {[
+                      {
+                        id: 'app_lock' as const,
+                        label: language === 'bn' ? 'অ্যাপ-লক পিন ভুলে গেছি' : 'Forgot App-Lock PIN',
+                      },
+                      {
+                        id: 'lost_email' as const,
+                        label: language === 'bn' ? 'ইমেইল/অ্যাক্সেস হারিয়েছি' : 'Lost Email / Access',
+                      },
+                      {
+                        id: 'suspended' as const,
+                        label: language === 'bn' ? 'অ্যাকাউন্ট স্থগিত / আপিল' : 'Suspension Appeal',
+                      },
+                      {
+                        id: 'other' as const,
+                        label: language === 'bn' ? 'অন্যান্য সহায়তা' : 'Other Help',
+                      },
+                    ].map((cat) => (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => {
+                          setRecoveryTopic(cat.id);
+                          setModalError(null);
+                        }}
+                        className={`px-2.5 py-1.5 rounded-xl border text-left font-semibold transition cursor-pointer truncate ${
+                          recoveryTopic === cat.id
+                            ? 'bg-emerald-600 border-emerald-500 text-white shadow-sm'
+                            : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {cat.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {recoveryTopic === 'lost_email' && (
+                  <p className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 leading-relaxed">
+                    {language === 'bn'
+                      ? 'আপনি যেহেতু ইমেইল ভুলে গেছেন, ইমেইল ঘরটি ফাঁকা রাখতে পারেন — নিচে আপনার নিবন্ধিত মোবাইল নম্বর অথবা @ইউজারনেম দিন।'
+                      : 'Lost your email? You may leave email blank — enter your registered mobile number or @username below to verify your account.'}
+                  </p>
+                )}
+
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-slate-300 block">
-                    {t('applicantEmail')} <span className="text-emerald-400">*</span>
+                    {t('applicantEmail')}{' '}
+                    {recoveryTopic === 'lost_email' ? (
+                      <span className="text-slate-400 font-normal">
+                        ({language === 'bn' ? 'ঐচ্ছিক / বিকল্প ইমেইল' : 'Optional'})
+                      </span>
+                    ) : (
+                      <span className="text-emerald-400">*</span>
+                    )}
                   </label>
                   <input
                     type="email"
-                    required
-                    placeholder="registered.email@example.com"
+                    required={recoveryTopic !== 'lost_email'}
+                    maxLength={150}
+                    placeholder={
+                      recoveryTopic === 'lost_email'
+                        ? language === 'bn'
+                          ? 'বিকল্প যোগাযোগের ইমেইল (ঐচ্ছিক)'
+                          : 'alternate.contact@example.com (optional)'
+                        : 'registered.email@example.com'
+                    }
                     value={forgotEmail}
                     onChange={(e) => setForgotEmail(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
@@ -515,16 +868,20 @@ export function LoginScreen() {
                     <label className="text-xs font-medium text-slate-300 block">{t('applicantName')}</label>
                     <input
                       type="text"
-                      placeholder="Your Name"
+                      maxLength={100}
+                      placeholder={language === 'bn' ? 'আপনার নাম' : 'Your Name'}
                       value={recoveryName}
                       onChange={(e) => setRecoveryName(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-slate-300 block">Username</label>
+                    <label className="text-xs font-medium text-slate-300 block">
+                      Username {recoveryTopic === 'lost_email' && <span className="text-emerald-400">*</span>}
+                    </label>
                     <input
                       type="text"
+                      maxLength={50}
                       placeholder="@username"
                       value={recoveryUsername}
                       onChange={(e) => setRecoveryUsername(e.target.value)}
@@ -534,10 +891,14 @@ export function LoginScreen() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-300 block">{t('applicantPhone')}</label>
+                  <label className="text-xs font-medium text-slate-300 block">
+                    {t('applicantPhone')}{' '}
+                    {recoveryTopic === 'lost_email' && <span className="text-emerald-400">*</span>}
+                  </label>
                   <input
-                    type="text"
-                    placeholder="+880 1..."
+                    type="tel"
+                    maxLength={50}
+                    placeholder="+880 1XXX-XXXXXX"
                     value={recoveryPhone}
                     onChange={(e) => setRecoveryPhone(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
@@ -545,20 +906,37 @@ export function LoginScreen() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-300 block">{t('applicantDetails')}</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-slate-300 block">{t('applicantDetails')}</label>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      {recoveryDetails.length}/920
+                    </span>
+                  </div>
                   <textarea
                     rows={2}
-                    placeholder="Explain what happened or any verification info..."
+                    maxLength={920}
+                    placeholder={
+                      language === 'bn'
+                        ? 'আপনার সমস্যা বা যুক্তি/তথ্য সংক্ষেপে লিখুন...'
+                        : 'Explain what happened or any verification info...'
+                    }
                     value={recoveryDetails}
-                    onChange={(e) => setRecoveryDetails(e.target.value)}
+                    onChange={(e) => setRecoveryDetails(e.target.value.slice(0, 920))}
                     className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 resize-none"
                   />
                 </div>
 
                 <button
                   type="submit"
-                  disabled={recoverySubmitting || !forgotEmail.trim()}
-                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 transition"
+                  disabled={
+                    recoverySubmitting ||
+                    (recoveryTopic === 'lost_email'
+                      ? extractPhoneDigits(recoveryPhone).length < 6 &&
+                        recoveryUsername.trim().replace(/^@/, '').length < 3 &&
+                        !(forgotEmail.trim().length >= 3 && forgotEmail.includes('@'))
+                      : !(forgotEmail.trim().length >= 3 && forgotEmail.includes('@')))
+                  }
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 transition shadow"
                 >
                   {recoverySubmitting ? (
                     <Loader2 className="w-4 h-4 animate-spin" />

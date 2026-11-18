@@ -1,8 +1,23 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { claimExpiredSuspension } from '../services/adminService';
-import { ShieldAlert, LogOut, Mail, Calendar, AlertTriangle, Clock, CheckCircle2 } from 'lucide-react';
+import {
+  claimExpiredSuspension,
+  submitRecoveryRequest,
+  SUPPORT_DESK_ADDRESS,
+} from '../services/adminService';
+import {
+  ShieldAlert,
+  LogOut,
+  Mail,
+  Calendar,
+  AlertTriangle,
+  Clock,
+  CheckCircle2,
+  Send,
+  Loader2,
+  X,
+} from 'lucide-react';
 
 export function BannedScreen() {
   const { user, signOutUser } = useAuth();
@@ -12,6 +27,14 @@ export function BannedScreen() {
     text: string;
   } | null>(null);
   const reactivatingRef = useRef(false);
+
+  // Appeal Support Ticket State
+  const [showAppealForm, setShowAppealForm] = useState(false);
+  const [appealPhone, setAppealPhone] = useState(user?.phoneNumber || '');
+  const [appealDetails, setAppealDetails] = useState('');
+  const [submittingAppeal, setSubmittingAppeal] = useState(false);
+  const [appealSubmittedId, setAppealSubmittedId] = useState<string | null>(null);
+  const [appealError, setAppealError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user?.bannedUntil) {
@@ -153,17 +176,128 @@ export function BannedScreen() {
           )}
         </div>
 
-        {/* Appeals Notice */}
-        <div className="text-xs text-slate-400 space-y-1">
+        {/* Appeals Notice & In-App Appeal to support@anomah.me */}
+        <div className="text-xs text-slate-400 space-y-2.5">
           <p>{t('bannedSupportHelp')}</p>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800 text-emerald-400 font-mono text-[11px] border border-slate-700/80">
-            <Mail className="w-3 h-3" />
-            <span>{t('bannedContactEmail')}</span>
+          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 text-emerald-400 font-mono text-[11px] border border-slate-700/80">
+            <Mail className="w-3.5 h-3.5" />
+            <span>{SUPPORT_DESK_ADDRESS}</span>
           </div>
+
+          {appealSubmittedId ? (
+            <div className="p-3 bg-emerald-950/60 border border-emerald-500/40 rounded-2xl text-emerald-200 text-xs space-y-1 text-left">
+              <div className="flex items-center gap-1.5 font-bold text-emerald-300">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>
+                  {language === 'bn'
+                    ? `আপনার আপিল সফলভাবে ${SUPPORT_DESK_ADDRESS} ডেস্কে পাঠানো হয়েছে!`
+                    : `Your appeal has been sent to ${SUPPORT_DESK_ADDRESS}!`}
+                </span>
+              </div>
+              <p className="text-[11px] opacity-85 font-mono">Ticket ID: {appealSubmittedId}</p>
+            </div>
+          ) : showAppealForm ? (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!appealDetails.trim()) return;
+                setSubmittingAppeal(true);
+                setAppealError(null);
+                try {
+                  const id = await submitRecoveryRequest({
+                    email: user?.email || '',
+                    name: user?.displayName || undefined,
+                    username: user?.username || undefined,
+                    contactPhone: appealPhone.trim() || user?.phoneNumber || undefined,
+                    details: `[Suspension / Ban Appeal | UID: ${user?.userId || 'unknown'}] ${appealDetails.trim()}`.slice(0, 1000),
+                  });
+                  setAppealSubmittedId(id);
+                  setShowAppealForm(false);
+                } catch (err: unknown) {
+                  setAppealError(
+                    err instanceof Error ? err.message : 'Failed to submit appeal.'
+                  );
+                } finally {
+                  setSubmittingAppeal(false);
+                }
+              }}
+              className="bg-slate-950 border border-slate-800 rounded-2xl p-3.5 text-left space-y-2.5"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-white">
+                  {language === 'bn'
+                    ? `আপিল ফর্ম (${SUPPORT_DESK_ADDRESS})`
+                    : `Suspension Appeal (${SUPPORT_DESK_ADDRESS})`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowAppealForm(false)}
+                  className="p-1 text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {appealError && (
+                <div className="p-2 rounded-lg bg-rose-950/60 border border-rose-500/40 text-rose-200 text-[11px]">
+                  {appealError}
+                </div>
+              )}
+
+              <input
+                type="tel"
+                maxLength={50}
+                placeholder={language === 'bn' ? 'যোগাযোগের মোবাইল নম্বর' : 'Contact mobile number'}
+                value={appealPhone}
+                onChange={(e) => setAppealPhone(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              />
+
+              <textarea
+                rows={3}
+                required
+                maxLength={850}
+                placeholder={
+                  language === 'bn'
+                    ? 'কেন এই সাসপেনশনটি ভুল হয়েছে বলে মনে করছেন তা স্পষ্টভাবে লিখুন...'
+                    : 'Explain why you believe this suspension was a mistake or should be reviewed...'
+                }
+                value={appealDetails}
+                onChange={(e) => setAppealDetails(e.target.value.slice(0, 850))}
+                className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
+              />
+
+              <button
+                type="submit"
+                disabled={submittingAppeal || !appealDetails.trim()}
+                className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition shadow"
+              >
+                {submittingAppeal ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                <span>
+                  {language === 'bn' ? 'আপিল সাবমিট করুন' : 'Send Appeal to Support Desk'}
+                </span>
+              </button>
+            </form>
+          ) : (
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowAppealForm(true)}
+                className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow flex items-center justify-center gap-2"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>
+                  {language === 'bn'
+                    ? `আপিল পাঠান (${SUPPORT_DESK_ADDRESS})`
+                    : `Appeal to ${SUPPORT_DESK_ADDRESS}`}
+                </span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Sign Out Button */}
-        <div className="pt-2">
+        <div className="pt-1">
           <button
             onClick={signOutUser}
             className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition cursor-pointer shadow flex items-center justify-center gap-2 border border-slate-700 active:scale-95"

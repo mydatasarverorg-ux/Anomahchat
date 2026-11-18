@@ -2,6 +2,7 @@ import {
   collection,
   doc,
   setDoc,
+  getDoc,
   getDocs,
   query,
   where,
@@ -11,7 +12,8 @@ import {
   deleteDoc,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { db, auth } from '../firebase/config';
 import { handleFirestoreError, OperationType } from '../firebase/errorHandler';
 import { syncChatLastMessageFromLatest } from './chatService';
 import type {
@@ -27,6 +29,26 @@ import type {
 } from '../types/chat';
 
 export const SUPER_ADMIN_EMAIL = 'chinisdramaorg@gmail.com';
+export const SUPPORT_DESK_ADDRESS = 'support@anomah.me';
+
+export function normalizePhoneNumber(phone?: string | null): string {
+  if (!phone) return '';
+  return phone.trim().replace(/\s+/g, ' ').slice(0, 50);
+}
+
+export function extractPhoneDigits(phone?: string | null): string {
+  if (!phone) return '';
+  return phone.replace(/\D/g, '');
+}
+
+export function doPhonesMatch(a?: string | null, b?: string | null): boolean {
+  const da = extractPhoneDigits(a);
+  const dbDigits = extractPhoneDigits(b);
+  if (da.length < 6 || dbDigits.length < 6) return false;
+  if (da === dbDigits) return true;
+  const tailLen = Math.min(10, Math.min(da.length, dbDigits.length));
+  return tailLen >= 8 && da.slice(-tailLen) === dbDigits.slice(-tailLen);
+}
 
 export function isSuperAdmin(email?: string | null): boolean {
   if (!email) return false;
@@ -307,6 +329,16 @@ export async function acknowledgeWarning(userId: string): Promise<void> {
   }
 }
 
+const ALLOWED_REPORT_REASONS: ReportReason[] = [
+  'harassment',
+  'hate_speech',
+  'spam',
+  'scam',
+  'inappropriate',
+  'impersonation',
+  'other',
+];
+
 // Submit a new abuse / conduct report
 export async function submitReport(reportData: {
   reporterId: string;
@@ -321,26 +353,45 @@ export async function submitReport(reportData: {
   reason: ReportReason;
   details: string;
 }): Promise<void> {
+  const reporterId = (reportData.reporterId || '').trim().slice(0, 128);
+  const targetUserId = (reportData.targetUserId || '').trim().slice(0, 128);
+
+  if (!reporterId || !targetUserId) {
+    throw new Error('Invalid reporter or target user identifier.');
+  }
+  if (reporterId === targetUserId) {
+    throw new Error('You cannot submit a report against your own account.');
+  }
+
+  const safeReason: ReportReason = ALLOWED_REPORT_REASONS.includes(reportData.reason)
+    ? reportData.reason
+    : 'other';
+
   const reportId = `rep_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const path = `reports/${reportId}`;
   try {
     const newReport: Record<string, unknown> = {
       id: reportId,
-      reporterId: reportData.reporterId,
-      reporterName: reportData.reporterName,
-      reporterEmail: reportData.reporterEmail || '',
-      targetUserId: reportData.targetUserId,
-      targetUserName: reportData.targetUserName,
-      reason: reportData.reason,
-      details: reportData.details.trim(),
+      reporterId,
+      reporterName: (reportData.reporterName || 'Anonymous User').trim().slice(0, 100) || 'Anonymous User',
+      reporterEmail: (reportData.reporterEmail || '').trim().slice(0, 150),
+      targetUserId,
+      targetUserName: (reportData.targetUserName || 'User').trim().slice(0, 100) || 'User',
+      reason: safeReason,
+      details: (reportData.details || '').trim().slice(0, 2000),
       status: 'pending',
       createdAt: new Date().toISOString(),
     };
 
-    if (reportData.targetUserEmail) newReport.targetUserEmail = reportData.targetUserEmail;
-    if (reportData.chatId) newReport.chatId = reportData.chatId;
-    if (reportData.messageId) newReport.messageId = reportData.messageId;
-    if (reportData.messageText) newReport.messageText = reportData.messageText;
+    const cleanTargetEmail = reportData.targetUserEmail?.trim().slice(0, 150);
+    const cleanChatId = reportData.chatId?.trim().slice(0, 128);
+    const cleanMessageId = reportData.messageId?.trim().slice(0, 128);
+    const cleanMessageText = reportData.messageText?.trim().slice(0, 1000);
+
+    if (cleanTargetEmail) newReport.targetUserEmail = cleanTargetEmail;
+    if (cleanChatId) newReport.chatId = cleanChatId;
+    if (cleanMessageId) newReport.messageId = cleanMessageId;
+    if (cleanMessageText) newReport.messageText = cleanMessageText;
 
     await setDoc(doc(db, 'reports', reportId), newReport as unknown as UserReport);
   } catch (error) {
@@ -372,24 +423,40 @@ export function subscribeToReports(callback: (reports: UserReport[]) => void): U
 // Update report status (Admin only)
 export async function updateReportStatus(
   reportId: string,
-  status: 'resolved' | 'dismissed',
+  status: 'pending' | 'resolved' | 'dismissed',
   resolutionNotes: string,
   adminEmail: string
 ): Promise<void> {
   const path = `reports/${reportId}`;
   try {
     const reportRef = doc(db, 'reports', reportId);
+    const defaultNote =
+      status === 'resolved'
+        ? 'Addressed by admin.'
+        : status === 'dismissed'
+        ? 'Dismissed as false report.'
+        : 'Reopened for further review.';
+    const cleanNotes = (resolutionNotes.trim() || defaultNote).slice(0, 1000);
+    const cleanAdminEmail = (adminEmail || SUPER_ADMIN_EMAIL).trim().slice(0, 150);
+
     await updateDoc(reportRef, {
       status,
-      resolutionNotes: resolutionNotes.trim(),
+      resolutionNotes: cleanNotes,
       resolvedAt: new Date().toISOString(),
-      resolvedBy: adminEmail,
+      resolvedBy: cleanAdminEmail,
     });
 
+    const auditAction: AdminAuditLog['action'] =
+      status === 'resolved'
+        ? 'resolve_report'
+        : status === 'dismissed'
+        ? 'dismiss_report'
+        : 'reopen_report';
+
     await logAdminAction(
-      status === 'resolved' ? 'resolve_report' : 'dismiss_report',
-      `Marked report as ${status}. Notes: "${resolutionNotes.trim()}"`,
-      adminEmail,
+      auditAction,
+      `${status === 'pending' ? 'Reopened report for review' : `Marked report as ${status}`}. Notes: "${cleanNotes}"`,
+      cleanAdminEmail,
       reportId
     );
   } catch (error) {
@@ -402,7 +469,7 @@ export async function deleteReport(reportId: string, adminEmail: string): Promis
   const path = `reports/${reportId}`;
   try {
     await deleteDoc(doc(db, 'reports', reportId));
-    await logAdminAction('dismiss_report', 'Deleted report entry from archive.', adminEmail, reportId);
+    await logAdminAction('delete_report', `Deleted report entry (${reportId}) from archive.`, adminEmail, reportId);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
@@ -519,25 +586,33 @@ export function subscribeToAdminLogs(callback: (logs: AdminAuditLog[]) => void):
   );
 }
 
-// Admin message deletion (moderation)
+// Admin message deletion (moderation) — returns false if message was already deleted
 export async function deleteAdminMessage(
   chatId: string,
   messageId: string,
   adminEmail: string,
   reason?: string
-): Promise<void> {
+): Promise<boolean> {
   const path = `chats/${chatId}/messages/${messageId}`;
   try {
-    await deleteDoc(doc(db, 'chats', chatId, 'messages', messageId));
+    const msgRef = doc(db, 'chats', chatId, 'messages', messageId);
+    const snap = await getDoc(msgRef);
+    if (!snap.exists()) {
+      return false;
+    }
+
+    await deleteDoc(msgRef);
     await syncChatLastMessageFromLatest(chatId, messageId);
     await logAdminAction(
       'delete_message',
-      `Admin removed inappropriate message. Reason: "${reason || 'Safety moderation'}"`,
+      `Admin removed inappropriate message. Reason: "${(reason || 'Safety moderation').slice(0, 300)}"`,
       adminEmail,
       messageId
     );
+    return true;
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+    return false;
   }
 }
 
@@ -546,13 +621,24 @@ export async function deleteAdminMessage(
 // ----------------------------------------------------
 
 export async function submitRecoveryRequest(data: {
-  email: string;
+  email?: string;
   name?: string;
   username?: string;
   contactPhone?: string;
   details?: string;
 }): Promise<string> {
-  const cleanEmail = data.email.trim().toLowerCase();
+  const cleanEmail = (data.email || '').trim().toLowerCase().slice(0, 150);
+  const cleanUsername = (data.username || '').trim().replace(/^@/, '').toLowerCase().slice(0, 50);
+  const cleanPhone = normalizePhoneNumber(data.contactPhone);
+
+  const hasValidEmail = cleanEmail.length >= 3 && cleanEmail.includes('@');
+  if (cleanEmail.length > 0 && !hasValidEmail) {
+    throw new Error('Please provide a valid email address.');
+  }
+  if (!hasValidEmail && extractPhoneDigits(cleanPhone).length < 5 && cleanUsername.length < 3) {
+    throw new Error('Please provide an email address, mobile number, or @username so support can identify your account.');
+  }
+
   const reqId = `rec_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const path = `recovery_requests/${reqId}`;
 
@@ -564,8 +650,8 @@ export async function submitRecoveryRequest(data: {
   };
 
   if (data.name?.trim()) reqDoc.name = data.name.trim().slice(0, 100);
-  if (data.username?.trim()) reqDoc.username = data.username.trim().replace(/^@/, '').slice(0, 50);
-  if (data.contactPhone?.trim()) reqDoc.contactPhone = data.contactPhone.trim().slice(0, 50);
+  if (cleanUsername) reqDoc.username = cleanUsername;
+  if (cleanPhone) reqDoc.contactPhone = cleanPhone;
   if (data.details?.trim()) reqDoc.details = data.details.trim().slice(0, 1000);
 
   try {
@@ -607,18 +693,20 @@ export async function resolveRecoveryRequest(
   try {
     const reqRef = doc(db, 'recovery_requests', requestId);
     const nowIso = new Date().toISOString();
+    const cleanNotes = (adminNotes.trim() || 'Resolved by administrator.').slice(0, 1000);
+    const cleanAdminEmail = (adminEmail || SUPER_ADMIN_EMAIL).trim().slice(0, 150);
 
     await updateDoc(reqRef, {
       status: 'resolved',
-      adminNotes: adminNotes.trim(),
+      adminNotes: cleanNotes,
       resolvedAt: nowIso,
-      resolvedBy: adminEmail,
+      resolvedBy: cleanAdminEmail,
     });
 
     await logAdminAction(
       'resolve_recovery',
-      `Resolved support recovery ticket. Notes: "${adminNotes.trim()}"`,
-      adminEmail,
+      `Resolved support recovery ticket. Notes: "${cleanNotes}"`,
+      cleanAdminEmail,
       requestId
     );
   } catch (error) {
@@ -634,22 +722,87 @@ export async function dismissRecoveryRequest(
   const path = `recovery_requests/${requestId}`;
   try {
     const reqRef = doc(db, 'recovery_requests', requestId);
+    const cleanNotes = (adminNotes.trim() || 'Dismissed by administrator.').slice(0, 1000);
+    const cleanAdminEmail = (adminEmail || SUPER_ADMIN_EMAIL).trim().slice(0, 150);
+
     await updateDoc(reqRef, {
       status: 'dismissed',
-      adminNotes: adminNotes.trim(),
+      adminNotes: cleanNotes,
       resolvedAt: new Date().toISOString(),
-      resolvedBy: adminEmail,
+      resolvedBy: cleanAdminEmail,
     });
 
     await logAdminAction(
       'dismiss_recovery',
-      `Dismissed password recovery request. Notes: "${adminNotes.trim()}"`,
-      adminEmail,
+      `Dismissed support ticket. Notes: "${cleanNotes}"`,
+      cleanAdminEmail,
       requestId
     );
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
+}
+
+export async function reopenRecoveryRequest(
+  requestId: string,
+  adminEmail: string
+): Promise<void> {
+  const path = `recovery_requests/${requestId}`;
+  try {
+    const cleanAdminEmail = (adminEmail || SUPER_ADMIN_EMAIL).trim().slice(0, 150);
+    await updateDoc(doc(db, 'recovery_requests', requestId), {
+      status: 'pending',
+      adminNotes: 'Reopened for further support.',
+      resolvedAt: new Date().toISOString(),
+      resolvedBy: cleanAdminEmail,
+    });
+
+    await logAdminAction(
+      'reopen_recovery',
+      'Reopened support ticket for further review.',
+      cleanAdminEmail,
+      requestId
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteRecoveryRequest(
+  requestId: string,
+  adminEmail: string
+): Promise<void> {
+  const path = `recovery_requests/${requestId}`;
+  try {
+    await deleteDoc(doc(db, 'recovery_requests', requestId));
+    await logAdminAction(
+      'delete_recovery',
+      `Deleted support ticket (${requestId}) from archive.`,
+      adminEmail,
+      requestId
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function sendAdminPasswordResetEmail(
+  targetEmail: string,
+  adminEmail: string,
+  ticketId?: string
+): Promise<void> {
+  const cleanEmail = targetEmail.trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    throw new Error('Invalid email address for password reset.');
+  }
+  await sendPasswordResetEmail(auth, cleanEmail);
+  await logAdminAction(
+    'send_password_reset',
+    `Triggered Firebase Password Reset email to ${cleanEmail}.`,
+    adminEmail,
+    ticketId || cleanEmail,
+    cleanEmail
+  );
 }
 
 // Clear a user's Quick App-Lock PIN (Admin recovery support without exposing/storing plaintext PIN)

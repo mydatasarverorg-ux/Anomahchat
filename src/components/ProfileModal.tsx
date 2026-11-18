@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useModalHistory } from '../hooks/useModalHistory';
 import { isUsernameAvailable } from '../services/chatService';
-import { isSuperAdmin, SUPER_ADMIN_EMAIL } from '../services/adminService';
+import { isSuperAdmin, SUPER_ADMIN_EMAIL, extractPhoneDigits } from '../services/adminService';
 import { PWAInstallButton } from './PWAInstallButton';
 import type { ThemeMode } from '../types/chat';
 import {
@@ -29,7 +29,15 @@ import {
   MailCheck,
   KeyRound,
   Bell,
+  Phone,
+  QrCode,
+  Smartphone,
 } from 'lucide-react';
+import {
+  isDeviceAccountSaved,
+  saveDeviceAccount,
+  removeSavedDeviceAccount,
+} from '../utils/accountShortcut';
 import { APP_VERSION, isUpdateAvailable, isNativeApkApp } from '../utils/appVersion';
 import { getLatestRelease } from '../services/updateService';
 import {
@@ -42,9 +50,11 @@ import {
 export function ProfileModal({
   onClose,
   onOpenAdmin,
+  onOpenShareQR,
 }: {
   onClose: () => void;
   onOpenAdmin?: () => void;
+  onOpenShareQR?: () => void;
 }) {
   const {
     user,
@@ -70,16 +80,26 @@ export function ProfileModal({
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [about, setAbout] = useState(user?.about || 'Available | Using Anomah Chat');
   const [photoURL, setPhotoURL] = useState(user?.photoURL || '');
+  const [phoneNumber, setPhoneNumber] = useState(user?.phoneNumber || '');
+  const [discoverableByPhone, setDiscoverableByPhone] = useState(user?.discoverableByPhone !== false);
 
   // Security Fields (Quick App-Lock PIN is hashed client-side, never stored in plaintext)
   const [username, setUsername] = useState(user?.username || '');
   const [appLockPinInput, setAppLockPinInput] = useState('');
   const [showPin, setShowPin] = useState(false);
   const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
+  const [savedOnDevice, setSavedOnDevice] = useState(() => isDeviceAccountSaved(user?.userId));
 
-  // Password Change Fields
+  // Password Change Fields (ephemeral, never persisted or logged)
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+
+  const hasPasswordProvider = Boolean(
+    firebaseUser?.providerData?.some((p) => p.providerId === 'password')
+  );
 
   // Account Deletion Confirmation
   const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
@@ -165,14 +185,40 @@ export function ProfileModal({
     setDisplayName(user?.displayName || '');
     setAbout(user?.about || 'Available | Using Anomah Chat');
     setPhotoURL(user?.photoURL || '');
+    setPhoneNumber(user?.phoneNumber || '');
+    setDiscoverableByPhone(user?.discoverableByPhone !== false);
     setUsername(user?.username || '');
+    setSavedOnDevice(isDeviceAccountSaved(user?.userId));
     setAppLockPinInput('');
     setShowPin(false);
+    setCurrentPassword('');
     setNewPassword('');
     setConfirmPassword('');
+    setShowCurrentPassword(false);
+    setShowNewPassword(false);
     setErrorMessage(null);
     setSuccessMessage(null);
-  }, [user?.userId, user?.hasAppLockPin, user?.username, user?.displayName, user?.about, user?.photoURL]);
+  }, [
+    user?.userId,
+    user?.hasAppLockPin,
+    user?.username,
+    user?.displayName,
+    user?.about,
+    user?.photoURL,
+    user?.phoneNumber,
+    user?.discoverableByPhone,
+  ]);
+
+  // Wipe sensitive password inputs from component memory when navigating away from Security tab
+  useEffect(() => {
+    if (activeTab !== 'security') {
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setShowCurrentPassword(false);
+      setShowNewPassword(false);
+    }
+  }, [activeTab]);
 
   useModalHistory(true, onClose);
 
@@ -215,11 +261,21 @@ export function ProfileModal({
         }
       }
 
+      if (extractPhoneDigits(phoneNumber).length < 7) {
+        throw new Error(
+          language === 'bn'
+            ? 'অন্তত ৭ ডিজিটের সঠিক মোবাইল নম্বর দিন।'
+            : 'Please enter a valid mobile number (at least 7 digits).'
+        );
+      }
+
       await updateProfile(
         displayName.trim(),
         about.trim(),
         photoURL,
-        cleanUsername
+        cleanUsername,
+        phoneNumber.trim(),
+        discoverableByPhone
       );
 
       setSuccessMessage(t('profileSavedSuccess'));
@@ -286,6 +342,11 @@ export function ProfileModal({
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!hasPasswordProvider) return;
+    if (!currentPassword) {
+      setErrorMessage(t('currentPasswordRequiredError'));
+      return;
+    }
     if (newPassword.length < 6) {
       setErrorMessage(t('passwordMinLengthError'));
       return;
@@ -299,14 +360,34 @@ export function ProfileModal({
     setErrorMessage(null);
     setSuccessMessage(null);
     try {
-      await changePassword(newPassword);
+      await changePassword(currentPassword, newPassword);
       setSuccessMessage(t('passwordChangedSuccess'));
+      setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      setTimeout(() => setSuccessMessage(null), 3000);
+      setShowCurrentPassword(false);
+      setShowNewPassword(false);
+      setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to update password.';
-      setErrorMessage(msg);
+      const rawMsg = err instanceof Error ? err.message : 'Failed to update password.';
+      const lower = rawMsg.toLowerCase();
+      if (lower.includes('incorrect')) {
+        setErrorMessage(
+          language === 'bn'
+            ? 'বর্তমান (পুরনো) পাসওয়ার্ডটি সঠিক নয়। অনুগ্রহ করে যাচাই করে আবার চেষ্টা করুন।'
+            : rawMsg
+        );
+      } else if (lower.includes('too many failed')) {
+        setErrorMessage(
+          language === 'bn'
+            ? 'অনেকবার ভুল পাসওয়ার্ড দেওয়া হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।'
+            : rawMsg
+        );
+      } else if (lower.includes('must be different')) {
+        setErrorMessage(t('samePasswordError'));
+      } else {
+        setErrorMessage(rawMsg);
+      }
     } finally {
       setSaving(false);
     }
@@ -583,6 +664,81 @@ export function ProfileModal({
                       maxLength={150}
                     />
                   </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-slate-300">
+                      {language === 'bn' ? 'মোবাইল নম্বর (ব্যক্তিগত — পরিচয় ও সাপোর্ট)' : 'Mobile Number (Private — Identity & Support)'}
+                    </label>
+                    <div className="relative">
+                      <Phone className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="tel"
+                        value={phoneNumber}
+                        onChange={(e) => setPhoneNumber(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                        placeholder="+880 1XXX-XXXXXX"
+                        maxLength={50}
+                        required
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      {language === 'bn'
+                        ? 'আপনার মোবাইল নম্বর কখনোই কারও প্রোফাইলে প্রদর্শিত হয় না; শুধু অ্যাকাউন্ট পরিচয় ও অ্যাডমিন সাপোর্টের জন্য নিরাপদ থাকে।'
+                        : 'Your number is never shown publicly; it is kept private for identity verification and admin support.'}
+                    </p>
+                  </div>
+
+                  {/* Privacy-preserving exact mobile lookup toggle */}
+                  <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-2xl flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-white">
+                        {language === 'bn'
+                          ? 'সঠিক মোবাইল নম্বর দিয়ে বন্ধুদের খুঁজতে দিন'
+                          : 'Allow friends to find me by exact mobile number'}
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-0.5 leading-relaxed">
+                        {language === 'bn'
+                          ? 'চালু থাকলে কেবল যার কাছে আপনার পুরো নম্বর আছে, সেই নম্বর সার্চ করে চ্যাট করতে পারবে (নম্বর গোপন হ্যাশ হিসেবে থাকে)।'
+                          : 'Stored as a one-way cryptographic hash only—strangers cannot see or browse your number.'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={discoverableByPhone}
+                      onClick={() => setDiscoverableByPhone((prev) => !prev)}
+                      className={`w-11 h-6 rounded-full transition relative shrink-0 cursor-pointer ${
+                        discoverableByPhone ? 'bg-emerald-500' : 'bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        className={`block w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                          discoverableByPhone ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {onOpenShareQR && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenShareQR();
+                      }}
+                      className="w-full py-2.5 px-3.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-2xl text-xs font-semibold text-emerald-300 flex items-center justify-between transition cursor-pointer"
+                    >
+                      <span className="flex items-center gap-2">
+                        <QrCode className="w-4 h-4 text-emerald-400" />
+                        <span>
+                          {language === 'bn'
+                            ? 'আমার পার্সোনাল চ্যাট লিংক ও QR কোড দেখুন'
+                            : 'View My Personal Chat Link & QR Code'}
+                        </span>
+                      </span>
+                      <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+                    </button>
+                  )}
                 </form>
               )}
 
@@ -694,7 +850,12 @@ export function ProfileModal({
                           {showPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                         </button>
                       </div>
-                      <p className="text-[10px] text-slate-400">{t('secretPinHelpText')}</p>
+                      <p className="text-[10px] text-slate-400">
+                        {t('secretPinHelpText')}{' '}
+                        {language === 'bn'
+                          ? '(লগইন থাকা অবস্থায় অ্যাপ খুললে শুধু ৪-৬ ডিজিটের পিন দিয়েই ১ ক্লিকে আনলক হবে।)'
+                          : '(While signed in on this device, unlock messenger in 1 tap with your 4-6 digit PIN.)'}
+                      </p>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
@@ -734,45 +895,188 @@ export function ProfileModal({
                     </div>
                   </div>
 
+                  {/* Device Quick-Tap Account Shortcut Toggle */}
+                  <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-2xl flex items-center justify-between gap-3">
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5">
+                        <Smartphone className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-white">
+                          {language === 'bn'
+                            ? 'এই ডিভাইসে অ্যাকাউন্ট শর্টকাট কার্ড সংরক্ষণ'
+                            : 'Save Account Shortcut Card on This Device'}
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                          {language === 'bn'
+                            ? 'লগআউট করার পরও নাম ও মাস্কড ইমেইল কার্ড হিসেবে থাকবে (কোনো পাসওয়ার্ড বা পিন ডিভাইসে সেভ হয় না)।'
+                            : 'Shows your masked profile card on the login screen for faster sign-in. Passwords and PINs are never saved.'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={savedOnDevice}
+                      onClick={() => {
+                        if (!user?.userId) return;
+                        if (savedOnDevice) {
+                          removeSavedDeviceAccount(user.userId);
+                          setSavedOnDevice(false);
+                          setSuccessMessage(
+                            language === 'bn'
+                              ? 'এই ডিভাইস থেকে শর্টকাট কার্ড সরানো হয়েছে।'
+                              : 'Account shortcut card removed from this device.'
+                          );
+                        } else if (user.email) {
+                          saveDeviceAccount({
+                            userId: user.userId,
+                            displayName: user.displayName,
+                            photoURL: user.photoURL || '',
+                            email: user.email,
+                            provider: hasPasswordProvider ? 'password' : 'google',
+                          });
+                          setSavedOnDevice(true);
+                          setSuccessMessage(
+                            language === 'bn'
+                              ? 'এই ডিভাইসে অ্যাকাউন্ট শর্টকাট কার্ড সংরক্ষণ করা হয়েছে।'
+                              : 'Account shortcut card saved on this device.'
+                          );
+                        }
+                        setTimeout(() => setSuccessMessage(null), 3000);
+                      }}
+                      className={`w-11 h-6 rounded-full transition relative shrink-0 cursor-pointer ${
+                        savedOnDevice ? 'bg-emerald-500' : 'bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        className={`block w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                          savedOnDevice ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
                   {/* Password Change / Recovery */}
                   <form onSubmit={handleChangePassword} className="p-4 bg-slate-950/60 border border-slate-800 rounded-2xl space-y-3">
-                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">
-                      {t('passwordChangeTitle')}
-                    </h4>
-
-                    <div className="space-y-2">
-                      <input
-                        type="password"
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder={t('newPasswordPlaceholder')}
-                        className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-                      />
-                      <input
-                        type="password"
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        placeholder={t('confirmPasswordPlaceholder')}
-                        className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-                      />
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>{t('passwordChangeTitle')}</span>
+                      </h4>
+                      {hasPasswordProvider && (
+                        <span className="text-[10px] text-emerald-400 font-semibold">
+                          {language === 'bn' ? 'সুরক্ষিত যাচাইকরণ' : 'Verified Update'}
+                        </span>
+                      )}
                     </div>
 
-                    <div className="flex items-center justify-between pt-1">
-                      <button
-                        type="button"
-                        onClick={handleSendResetEmail}
-                        className="text-[11px] text-emerald-400 hover:underline cursor-pointer"
-                      >
-                        {t('sendRecoveryEmailBtn')}
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={saving || !newPassword}
-                        className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold disabled:opacity-50 cursor-pointer transition"
-                      >
-                        {t('changePasswordBtn')}
-                      </button>
-                    </div>
+                    {hasPasswordProvider ? (
+                      <>
+                        <div className="space-y-2.5">
+                          <div className="space-y-1">
+                            <label className="block text-[11px] font-medium text-slate-300">
+                              {t('currentPasswordLabel')} <span className="text-rose-400">*</span>
+                            </label>
+                            <div className="relative">
+                              <input
+                                type={showCurrentPassword ? 'text' : 'password'}
+                                value={currentPassword}
+                                onChange={(e) => setCurrentPassword(e.target.value)}
+                                placeholder={t('currentPasswordPlaceholder')}
+                                autoComplete="current-password"
+                                required
+                                className="w-full px-3 py-1.5 pr-9 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowCurrentPassword((prev) => !prev)}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                                aria-label="Toggle current password visibility"
+                              >
+                                {showCurrentPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="block text-[11px] font-medium text-slate-300">
+                              {t('newPasswordLabel')} <span className="text-rose-400">*</span>
+                            </label>
+                            <div className="relative">
+                              <input
+                                type={showNewPassword ? 'text' : 'password'}
+                                value={newPassword}
+                                onChange={(e) => setNewPassword(e.target.value)}
+                                placeholder={t('newPasswordPlaceholder')}
+                                autoComplete="new-password"
+                                minLength={6}
+                                required
+                                className="w-full px-3 py-1.5 pr-9 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowNewPassword((prev) => !prev)}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                                aria-label="Toggle new password visibility"
+                              >
+                                {showNewPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="block text-[11px] font-medium text-slate-300">
+                              {t('confirmPasswordLabel')} <span className="text-rose-400">*</span>
+                            </label>
+                            <input
+                              type={showNewPassword ? 'text' : 'password'}
+                              value={confirmPassword}
+                              onChange={(e) => setConfirmPassword(e.target.value)}
+                              placeholder={t('confirmPasswordPlaceholder')}
+                              autoComplete="new-password"
+                              minLength={6}
+                              required
+                              className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={handleSendResetEmail}
+                            disabled={saving}
+                            className="text-[11px] text-emerald-400 hover:underline disabled:opacity-50 cursor-pointer text-left"
+                          >
+                            {t('forgotCurrentPasswordBtn')}
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={saving || !currentPassword || newPassword.length < 6 || !confirmPassword}
+                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold disabled:opacity-50 cursor-pointer transition shadow"
+                          >
+                            {saving ? t('saving') : t('changePasswordBtn')}
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="space-y-3">
+                        <p className="text-[11px] text-slate-300 leading-relaxed bg-slate-900/70 border border-slate-800 rounded-xl p-3">
+                          {t('googleOnlyPasswordNotice')}
+                        </p>
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={handleSendResetEmail}
+                            disabled={saving}
+                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold disabled:opacity-50 cursor-pointer transition shadow"
+                          >
+                            {saving ? t('saving') : t('sendSetPasswordEmailBtn')}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </form>
                 </div>
               )}

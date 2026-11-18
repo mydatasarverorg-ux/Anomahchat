@@ -1,9 +1,9 @@
-# Anomah Chat (`v1.0.10` · `Mahi A10`)
+# Anomah Chat (`v1.0.11` · `Mahi A11`)
 
 > **Developer & Owner:** Mahi Muhtasim  
 > **Package ID:** `com.mahimuhtasim.anomahchat`  
 > **Platforms:** Web (PWA) & Android Native APK (Capacitor 8)  
-> **Release Channel:** Stable (`versionCode: 110`)
+> **Release Channel:** Stable (`versionCode: 111`)
 
 Anomah Chat is a real-time cross-platform cloud messenger built with React, TypeScript, Tailwind CSS, Firebase Authentication, Cloud Firestore, WebRTC, and Capacitor Android. Users can connect worldwide via 1-on-1 direct messaging, group chats, voice notes, compressed image sharing, and peer-to-peer audio/video calls, backed by strict Zero-Trust Firestore Security Rules.
 
@@ -52,7 +52,17 @@ Anomah Chat is a real-time cross-platform cloud messenger built with React, Type
 
 ---
 
-## Changelog (`v1.0.10 · Mahi A10`)
+## Changelog (`v1.0.11 · Mahi A11`)
+- **Friend Request & Accepted Connection System (`RequestsModal`, `ConnectPreviewModal`, `firestore.rules`):**
+  - Enforced accepted friend status (`friendships`) prior to opening new 1-on-1 DMs or starting calls, with full incoming/sent/friends/blocked management.
+  - Added QR auto-request flow (`?chat=` / `?group=`) with instant cancel support.
+- **Private & Public Group Controls (`NewChatModal`, `GroupInfoModal`, `ShareLinkModal`):**
+  - Restricted group creation and admin member additions strictly to accepted friends.
+  - Added Private (`invite_only`) and Public (`direct` or `approval` queue) group policies alongside shareable Group Invite QR links.
+- **Cross-Platform Offline QR Scanner & Deep-Linking (`QrScannerModal`, `MainActivity.java`, `vite.config.ts`):**
+  - Added built-in `jsQR` camera & gallery scanner with runtime permission recovery and smart Web / PWA / Android APK routing.
+
+### Previous (`v1.0.10 · Mahi A10`)
 - **Fixed Direct Message & Inbox Read Receipts (`Sidebar`, `ChatArea`, `chatService`, `MessageBubble`, `MessageInfoModal`, `MessageContextMenu`):**
   - Replaced misleading always-blue double-ticks in `Sidebar` with real `lastMessageReadBy` tracking (slate ticks until partner reads, sky-blue after read, plus live unread indicator dot for incoming unread messages).
   - Prevented background/minimized auto-seen by gating `markChatMessagesAsRead` on `isAppInBackground()` and syncing read status on `visibilitychange` / `focus`.
@@ -121,8 +131,8 @@ The workflow in `.github/workflows/build-apk.yml` automatically builds an Androi
    - `ANDROID_KEY_ALIAS`
    - `ANDROID_KEY_PASSWORD`
    *(Falls back to a Debug APK if keystore secrets are not set.)*
-3. Computes the APK **SHA-256** digest, uploads `AnomahChat-v1.0.10-APK` as a workflow artifact, and publishes `v1.0.10` (`AnomahChat-v1.0.10.apk` & `AnomahChat.apk`) to **GitHub Releases**.
+3. Computes the APK **SHA-256** digest, uploads `AnomahChat-v1.0.11-APK` as a workflow artifact, and publishes `v1.0.11` (`AnomahChat-v1.0.11.apk` & `AnomahChat.apk`) to **GitHub Releases**.
 
 ---
 
-*Built & maintained by **Mahi Muhtasim** · Anomah Chat `v1.0.10` (`Mahi A10`)*
+*Built & maintained by **Mahi Muhtasim** · Anomah Chat `v1.0.11` (`Mahi A11`)*

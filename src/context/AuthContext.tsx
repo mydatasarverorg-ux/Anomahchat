@@ -9,6 +9,8 @@ import {
   sendEmailVerification,
   updatePassword,
   updateProfile as updateFirebaseProfile,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
   type User as FirebaseUser,
 } from 'firebase/auth';
 import { doc, updateDoc, onSnapshot, deleteField } from 'firebase/firestore';
@@ -24,8 +26,18 @@ import {
   restoreAccount,
   checkAccountDeletionStatus,
   isUsernameAvailable,
+  hashPhoneForDirectory,
 } from '../services/chatService';
-import { SUPER_ADMIN_EMAIL } from '../services/adminService';
+import {
+  consumeRememberDevicePending,
+  isDeviceAccountSaved,
+  saveDeviceAccount,
+} from '../utils/accountShortcut';
+import {
+  SUPER_ADMIN_EMAIL,
+  normalizePhoneNumber,
+  extractPhoneDigits,
+} from '../services/adminService';
 import type { UserProfile, ThemeMode } from '../types/chat';
 
 interface AuthContextType {
@@ -45,16 +57,25 @@ interface AuthContextType {
   recoverAccount: () => Promise<void>;
   requestAccountDeletion: () => Promise<void>;
   signInWithGoogle: () => Promise<void>;
-  signUpWithEmail: (email: string, pass: string, name: string, username?: string) => Promise<void>;
+  signUpWithEmail: (
+    email: string,
+    pass: string,
+    name: string,
+    username?: string,
+    phoneNumber?: string
+  ) => Promise<void>;
   signInWithEmail: (email: string, pass: string) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
-  changePassword: (newPass: string) => Promise<void>;
+  changePassword: (currentPass: string, newPass: string) => Promise<void>;
   signOutUser: () => Promise<void>;
+  savePhoneNumber: (phoneNumber: string, username?: string, discoverableByPhone?: boolean) => Promise<void>;
   updateProfile: (
     displayName: string,
     about: string,
     photoURL: string,
-    username?: string
+    username?: string,
+    phoneNumber?: string,
+    discoverableByPhone?: boolean
   ) => Promise<void>;
   clearAuthError: () => void;
 }
@@ -197,6 +218,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               prev.about !== fresh.about ||
               prev.photoURL !== fresh.photoURL ||
               prev.username !== fresh.username ||
+              prev.phoneNumber !== fresh.phoneNumber ||
+              prev.discoverableByPhone !== fresh.discoverableByPhone ||
               prev.hasAppLockPin !== fresh.hasAppLockPin
             ) {
               return { ...prev, ...fresh };
@@ -250,6 +273,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setIsAppLocked(false);
             }
             setUser(profile);
+            if (isDeviceAccountSaved(profile.userId) && profile.email) {
+              const isGoogleUser = !current.providerData.some((p) => p.providerId === 'password');
+              saveDeviceAccount({
+                userId: profile.userId,
+                displayName: profile.displayName,
+                photoURL: profile.photoURL || '',
+                email: profile.email,
+                provider: isGoogleUser ? 'google' : 'password',
+              });
+            }
           } else {
             await signOut(auth);
             setIsAppLocked(false);
@@ -287,6 +320,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         setUser(profile);
         setPresence(res.user.uid, true);
+        if (consumeRememberDevicePending() || isDeviceAccountSaved(profile.userId)) {
+          if (profile.email) {
+            saveDeviceAccount({
+              userId: profile.userId,
+              displayName: profile.displayName,
+              photoURL: profile.photoURL || '',
+              email: profile.email,
+              provider: 'google',
+            });
+          }
+        }
       }
     } catch (err: unknown) {
       console.warn('Google sign-in attempt notice:', err);
@@ -311,13 +355,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signUpWithEmail = async (email: string, pass: string, name: string, username?: string) => {
+  const signUpWithEmail = async (
+    email: string,
+    pass: string,
+    name: string,
+    username?: string,
+    phoneNumber?: string
+  ) => {
     setLoading(true);
     setAuthError(null);
     explicitAuthInProgressRef.current = true;
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim().slice(0, 100);
     const cleanUsername = username ? username.trim().toLowerCase().replace(/^@/, '') : undefined;
+    const cleanPhone = normalizePhoneNumber(phoneNumber);
 
     try {
       const res = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
@@ -330,22 +381,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           displayName: cleanName,
           email: cleanEmail,
           photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanName)}`,
+          phoneNumber: cleanPhone.length >= 6 ? cleanPhone : undefined,
         });
 
         // Send verification link non-blockingly so Super Admin / standard accounts can verify email
         sendEmailVerification(res.user).catch(() => {});
 
-        // Check username availability now that the user is signed in
+        // Persist phoneNumber explicitly (covers race with onAuthStateChanged) and username if valid
+        const extraUpdates: Record<string, unknown> = {};
+        if (cleanPhone.length >= 6 && profile.phoneNumber !== cleanPhone) {
+          extraUpdates.phoneNumber = cleanPhone;
+          extraUpdates.discoverableByPhone = true;
+          profile.phoneNumber = cleanPhone;
+          profile.discoverableByPhone = true;
+          const hash = await hashPhoneForDirectory(cleanPhone);
+          if (hash) await syncDirectoryEntry(res.user.uid, { phoneLookupHash: hash });
+        }
         if (cleanUsername && cleanUsername.length >= 3) {
           const available = await isUsernameAvailable(cleanUsername, res.user.uid);
           if (available) {
-            await updateDoc(doc(db, 'users', res.user.uid), { username: cleanUsername });
+            extraUpdates.username = cleanUsername;
             await syncDirectoryEntry(res.user.uid, { username: cleanUsername });
             profile.username = cleanUsername;
           }
         }
+        if (Object.keys(extraUpdates).length > 0) {
+          await updateDoc(doc(db, 'users', res.user.uid), extraUpdates);
+        }
+
         setUser(profile);
         setPresence(res.user.uid, true);
+        if (consumeRememberDevicePending()) {
+          saveDeviceAccount({
+            userId: profile.userId,
+            displayName: profile.displayName,
+            photoURL: profile.photoURL || '',
+            email: cleanEmail,
+            provider: 'password',
+          });
+        }
       }
     } catch (err: unknown) {
       console.warn('Email sign up error:', err);
@@ -385,6 +459,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         setUser(profile);
         setPresence(res.user.uid, true);
+        if (consumeRememberDevicePending() || isDeviceAccountSaved(profile.userId)) {
+          saveDeviceAccount({
+            userId: profile.userId,
+            displayName: profile.displayName,
+            photoURL: profile.photoURL || '',
+            email: cleanEmail,
+            provider: 'password',
+          });
+        }
       }
     } catch (err: unknown) {
       console.warn('Email sign in error:', err);
@@ -447,39 +530,74 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const sendPasswordReset = async (email: string) => {
-    setLoading(true);
     setAuthError(null);
     try {
       await sendPasswordResetEmail(auth, email.trim().toLowerCase());
     } catch (err: unknown) {
-      console.warn('Password reset error:', err);
       const code = (err as { code?: string })?.code || '';
+      console.warn('Password reset error:', code || 'unknown');
       if (code === 'auth/user-not-found') {
         throw new Error('No registered account was found with this email address.');
+      } else if (code === 'auth/too-many-requests') {
+        throw new Error('Too many requests. Please wait a few minutes before trying again.');
       } else {
         throw new Error('Failed to send password reset email. Please check the address.');
       }
-    } finally {
-      setLoading(false);
     }
   };
 
-  const changePassword = async (newPass: string) => {
-    if (!auth.currentUser) {
+  const changePassword = async (currentPass: string, newPass: string) => {
+    const currentUser = auth.currentUser;
+    if (!currentUser || !currentUser.email) {
       throw new Error('You must be signed in with an email account to update your password.');
     }
-    setLoading(true);
+    const hasPasswordProvider = currentUser.providerData.some((p) => p.providerId === 'password');
+    if (!hasPasswordProvider) {
+      throw new Error(
+        'This account uses Google Sign-In and does not have a password yet. Use "Send Set-Password Email" to create one.'
+      );
+    }
+    if (!currentPass) {
+      throw new Error('Please enter your current password.');
+    }
+    if (!newPass || newPass.length < 6) {
+      throw new Error('New password must be at least 6 characters.');
+    }
+
     try {
-      await updatePassword(auth.currentUser, newPass);
-    } catch (err: unknown) {
-      console.warn('Change password error:', err);
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('requires-recent-login')) {
-        throw new Error('For security, please log out and log back in before changing password.');
+      // Strictly verify the old/current password directly against Firebase Auth servers first
+      const credential = EmailAuthProvider.credential(currentUser.email, currentPass);
+      await reauthenticateWithCredential(currentUser, credential);
+
+      if (currentPass === newPass) {
+        throw new Error('SAME_PASSWORD_NOT_ALLOWED');
       }
-      throw new Error(msg);
-    } finally {
-      setLoading(false);
+
+      await updatePassword(currentUser, newPass);
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      const rawMsg = err instanceof Error ? err.message : '';
+      console.warn('Change password notice:', code || (rawMsg === 'SAME_PASSWORD_NOT_ALLOWED' ? 'same-password' : 'validation'));
+
+      if (rawMsg === 'SAME_PASSWORD_NOT_ALLOWED') {
+        throw new Error('New password must be different from your current password.');
+      }
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        throw new Error('Current password is incorrect. Please verify and try again.');
+      }
+      if (code === 'auth/too-many-requests') {
+        throw new Error('Too many failed password attempts. Please wait a few minutes and try again.');
+      }
+      if (code === 'auth/weak-password') {
+        throw new Error('New password should be at least 6 characters long.');
+      }
+      if (code === 'auth/requires-recent-login') {
+        throw new Error('Session verification expired. Please re-enter your current password or sign in again.');
+      }
+      if (code === 'auth/network-request-failed') {
+        throw new Error('Network error. Please check your internet connection and try again.');
+      }
+      throw new Error('Unable to update password right now. Please check your inputs and try again.');
     }
   };
 
@@ -518,11 +636,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setDeletionNotice(null);
   };
 
+  const savePhoneNumber = async (phoneNumber: string, username?: string, discoverableByPhone = true) => {
+    if (!user) return;
+    const cleanPhone = normalizePhoneNumber(phoneNumber);
+    if (cleanPhone.length < 6 || extractPhoneDigits(cleanPhone).length < 7) {
+      throw new Error('Please enter a valid mobile number (at least 7 digits).');
+    }
+
+    const docUpdates: Record<string, unknown> = {
+      phoneNumber: cleanPhone,
+      discoverableByPhone,
+    };
+
+    const cleanUsername = username?.trim().toLowerCase().replace(/^@/, '');
+    if (cleanUsername) {
+      if (cleanUsername.length < 3) {
+        throw new Error('Username must be at least 3 characters.');
+      }
+      if (cleanUsername !== user.username) {
+        const isAvail = await isUsernameAvailable(cleanUsername, user.userId);
+        if (!isAvail) {
+          throw new Error('This username is already taken. Please choose another username.');
+        }
+        docUpdates.username = cleanUsername;
+      }
+    }
+
+    await updateDoc(doc(db, 'users', user.userId), docUpdates);
+    const phoneLookupHash = discoverableByPhone ? await hashPhoneForDirectory(cleanPhone) : null;
+    await syncDirectoryEntry(user.userId, {
+      ...(cleanUsername && cleanUsername !== user.username ? { username: cleanUsername } : {}),
+      phoneLookupHash,
+    });
+
+    setUser((prev) =>
+      prev
+        ? {
+            ...prev,
+            phoneNumber: cleanPhone,
+            discoverableByPhone,
+            ...(cleanUsername ? { username: cleanUsername } : {}),
+          }
+        : prev
+    );
+  };
+
   const updateProfile = async (
     displayName: string,
     about: string,
     photoURL: string,
-    username?: string
+    username?: string,
+    phoneNumber?: string,
+    discoverableByPhone?: boolean
   ) => {
     if (!user) return;
     const userRef = doc(db, 'users', user.userId);
@@ -544,6 +709,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    let resolvedPhone: string | undefined = user.phoneNumber;
+    if (phoneNumber !== undefined) {
+      const cleanPhone = normalizePhoneNumber(phoneNumber);
+      if (cleanPhone) {
+        if (cleanPhone.length < 6 || extractPhoneDigits(cleanPhone).length < 7) {
+          throw new Error('Please enter a valid mobile number (at least 7 digits).');
+        }
+        resolvedPhone = cleanPhone;
+      }
+    }
+
+    const resolvedDiscoverable =
+      discoverableByPhone !== undefined ? discoverableByPhone : user.discoverableByPhone !== false;
+
     const cleanDisplayName = displayName.trim().slice(0, 100);
     const cleanAbout = about.trim().slice(0, 200);
     const cleanPhoto = photoURL.trim().slice(0, 1000);
@@ -552,9 +731,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       displayName: cleanDisplayName,
       about: cleanAbout,
       photoURL: cleanPhoto,
+      discoverableByPhone: resolvedDiscoverable,
     };
     if (resolvedUsername !== undefined) {
       docUpdates.username = resolvedUsername;
+    }
+    if (resolvedPhone && resolvedPhone !== user.phoneNumber) {
+      docUpdates.phoneNumber = resolvedPhone;
     }
 
     await updateDoc(userRef, docUpdates);
@@ -566,11 +749,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }).catch(() => {});
     }
 
+    const phoneLookupHash =
+      resolvedDiscoverable && resolvedPhone ? await hashPhoneForDirectory(resolvedPhone) : null;
+
     const dirUpdates: Record<string, unknown> = {
       userId: user.userId,
       displayName: cleanDisplayName,
       about: cleanAbout,
       photoURL: cleanPhoto,
+      phoneLookupHash,
       status: user.status || 'active',
     };
     if (resolvedUsername !== undefined) {
@@ -583,9 +770,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       displayName: cleanDisplayName,
       about: cleanAbout,
       photoURL: cleanPhoto,
+      phoneNumber: resolvedPhone,
+      discoverableByPhone: resolvedDiscoverable,
       username: typeof resolvedUsername === 'string' ? resolvedUsername : undefined,
     };
     setUser(merged);
+    if (isDeviceAccountSaved(user.userId) && user.email) {
+      const isGoogleUser = !auth.currentUser?.providerData.some((p) => p.providerId === 'password');
+      saveDeviceAccount({
+        userId: user.userId,
+        displayName: cleanDisplayName,
+        photoURL: cleanPhoto,
+        email: user.email,
+        provider: isGoogleUser ? 'google' : 'password',
+      });
+    }
   };
 
   return (
@@ -612,6 +811,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sendPasswordReset,
         changePassword,
         signOutUser,
+        savePhoneNumber,
         updateProfile,
         clearAuthError: () => setAuthError(null),
       }}

@@ -1,4 +1,4 @@
-import { HardDrive, KeyRound, Lock, MessageSquare, Users } from 'lucide-react';
+import { Flag, HardDrive, KeyRound, Lock, MessageSquare, Users } from 'lucide-react';
 import { SUPER_ADMIN_EMAIL } from '../../services/adminService';
 
 interface AdminOverviewTabProps {
@@ -9,7 +9,7 @@ interface AdminOverviewTabProps {
   pendingRecoveryCount: number;
   pendingReportsCount: number;
   bannedUsersCount: number;
-  onSelectTab: (tab: 'recovery' | 'chat_audit' | 'users' | 'backup') => void;
+  onSelectTab: (tab: 'recovery' | 'chat_audit' | 'users' | 'backup' | 'reports') => void;
 }
 
 export function AdminOverviewTab({
@@ -54,14 +54,22 @@ export function AdminOverviewTab({
           <div className="text-[11px] font-medium text-sky-400 mb-1">{t('statTotalChats')}</div>
           <div className="text-2xl font-bold text-sky-400">{totalChatsCount}</div>
         </div>
-        <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-2xl">
-          <div className="text-[11px] font-medium text-amber-400 mb-1">Support Tickets</div>
+        <button
+          type="button"
+          onClick={() => onSelectTab('recovery')}
+          className="bg-slate-950/70 border border-slate-800 hover:border-amber-500/50 p-4 rounded-2xl text-left transition cursor-pointer"
+        >
+          <div className="text-[11px] font-medium text-amber-400 mb-1">{t('adminTabRecovery')}</div>
           <div className="text-2xl font-bold text-amber-400">{pendingRecoveryCount}</div>
-        </div>
-        <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-2xl">
+        </button>
+        <button
+          type="button"
+          onClick={() => onSelectTab('reports')}
+          className="bg-slate-950/70 border border-slate-800 hover:border-red-500/50 p-4 rounded-2xl text-left transition cursor-pointer"
+        >
           <div className="text-[11px] font-medium text-red-400 mb-1">{t('statPendingReports')}</div>
           <div className="text-2xl font-bold text-red-400">{pendingReportsCount}</div>
-        </div>
+        </button>
         <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-2xl">
           <div className="text-[11px] font-medium text-rose-400 mb-1">{t('statBannedUsers')}</div>
           <div className="text-2xl font-bold text-rose-400">{bannedUsersCount}</div>
@@ -72,7 +80,18 @@ export function AdminOverviewTab({
         <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
           {t('quickActionsTitle')}
         </h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <button
+            onClick={() => onSelectTab('reports')}
+            className="p-4 bg-slate-950/70 border border-slate-800 hover:border-red-500/50 rounded-2xl text-left transition cursor-pointer group"
+          >
+            <Flag className="w-5 h-5 text-red-400 mb-2 group-hover:scale-110 transition" />
+            <div className="text-xs font-bold text-white">{t('quickReviewReportsBtn')}</div>
+            <div className="text-[11px] text-slate-400 mt-1">
+              {pendingReportsCount} {t('statPendingReports')}
+            </div>
+          </button>
+
           <button
             onClick={() => onSelectTab('recovery')}
             className="p-4 bg-slate-950/70 border border-slate-800 hover:border-amber-500/50 rounded-2xl text-left transition cursor-pointer group"

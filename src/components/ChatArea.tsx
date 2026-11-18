@@ -13,7 +13,14 @@ import {
   formatLastSeenStatus,
 } from '../services/chatService';
 import { isAppInBackground, cancelAppNotification } from '../services/notificationService';
-import type { ChatRoom, ChatMessage, CallSession, UserProfile, DirectoryUser } from '../types/chat';
+import type {
+  ChatRoom,
+  ChatMessage,
+  CallSession,
+  UserProfile,
+  DirectoryUser,
+  Friendship,
+} from '../types/chat';
 import { sounds } from '../utils/audioEffects';
 import { compressImageForChat } from '../utils/imageCompressor';
 import {
@@ -36,6 +43,9 @@ import {
   Info,
   Users,
   UserX,
+  Globe,
+  Lock,
+  ShieldBan,
 } from 'lucide-react';
 import { ReportModal } from './ReportModal';
 import { GroupInfoModal } from './GroupInfoModal';
@@ -46,16 +56,20 @@ import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 
 interface ChatAreaProps {
   chat: ChatRoom;
+  friendships?: Friendship[];
   onBack: () => void;
   onStartCall: (session: CallSession) => void;
+  onOpenGroupShareQR?: (chat: ChatRoom) => void;
   ghostUser?: UserProfile | null;
   onExitGhostMode?: () => void;
 }
 
 export function ChatArea({
   chat,
+  friendships = [],
   onBack,
   onStartCall,
+  onOpenGroupShareQR,
   ghostUser,
   onExitGhostMode,
 }: ChatAreaProps) {
@@ -128,11 +142,19 @@ export function ChatArea({
       Boolean(partnerUser?.isBanned) ||
       Boolean(partnerDetails?.isBanned));
   const isCurrentUserSuspended = Boolean(effectiveUser?.isBanned);
+  const dmFriendship =
+    chat.type === 'direct' && partnerId
+      ? friendships.find((f) => f.userIds.includes(partnerId))
+      : undefined;
+  const isDmBlocked = Boolean(dmFriendship?.status === 'blocked');
+  const isDmUnfriended = Boolean(dmFriendship && dmFriendship.status !== 'accepted');
+  const isInteractionBlocked =
+    isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended || isDmUnfriended;
 
   const voice = useVoiceRecorder({
     chatId: chat.id,
     user,
-    disabled: isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended || Boolean(ghostUser),
+    disabled: isInteractionBlocked || Boolean(ghostUser),
     language,
     t,
   });
@@ -299,7 +321,7 @@ export function ChatArea({
 
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!inputText.trim() || !user || isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended) return;
+    if (!inputText.trim() || !user || isInteractionBlocked) return;
 
     const text = inputText;
     const currentReply = replyingTo;
@@ -338,7 +360,7 @@ export function ChatArea({
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !user || isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended) return;
+    if (!file || !user || isInteractionBlocked) return;
     e.target.value = '';
     setSendError(null);
 
@@ -483,9 +505,21 @@ export function ChatArea({
                 }`}
               >
                 {chat.type === 'group' ? (
-                  <span className="flex items-center gap-1 text-emerald-400/90 font-medium">
+                  <span className="flex items-center gap-1.5 text-emerald-400/90 font-medium">
                     <Users className="w-3 h-3" />
                     <span>{t('membersLabel', { count: chat.participantIds.length })}</span>
+                    <span>·</span>
+                    {chat.visibility === 'public' ? (
+                      <span className="inline-flex items-center gap-0.5 text-sky-400">
+                        <Globe className="w-2.5 h-2.5" />
+                        <span>{language === 'bn' ? 'পাবলিক' : 'Public'}</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-0.5 text-slate-400">
+                        <Lock className="w-2.5 h-2.5" />
+                        <span>{language === 'bn' ? 'প্রাইভেট' : 'Private'}</span>
+                      </span>
+                    )}
                   </span>
                 ) : isPartnerDeleted ? (
                   <span className="text-rose-400 font-medium flex items-center gap-1">
@@ -523,9 +557,9 @@ export function ChatArea({
           {!ghostUser && chat.type === 'direct' && partnerId && (
             <>
               <button
-                disabled={isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended}
+                disabled={isInteractionBlocked}
                 onClick={() => {
-                  if (isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended) return;
+                  if (isInteractionBlocked) return;
                   onStartCall({
                     active: true,
                     chatId: chat.id,
@@ -541,14 +575,14 @@ export function ChatArea({
                   });
                 }}
                 className={`p-2 rounded-xl transition ${
-                  isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended
+                  isInteractionBlocked
                     ? 'text-slate-600 opacity-40 cursor-not-allowed'
                     : 'text-slate-400 hover:text-emerald-400 hover:bg-slate-800 cursor-pointer'
                 }`}
                 title={
                   isPartnerDeleted
                     ? t('deletedAccountCallDisabled')
-                    : isPartnerSuspended || isCurrentUserSuspended
+                    : isInteractionBlocked
                     ? t('callDisabledUserSuspended')
                     : t('audioCall')
                 }
@@ -557,9 +591,9 @@ export function ChatArea({
               </button>
 
               <button
-                disabled={isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended}
+                disabled={isInteractionBlocked}
                 onClick={() => {
-                  if (isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended) return;
+                  if (isInteractionBlocked) return;
                   onStartCall({
                     active: true,
                     chatId: chat.id,
@@ -575,14 +609,14 @@ export function ChatArea({
                   });
                 }}
                 className={`p-2 rounded-xl transition ${
-                  isPartnerSuspended || isPartnerDeleted || isCurrentUserSuspended
+                  isInteractionBlocked
                     ? 'text-slate-600 opacity-40 cursor-not-allowed'
                     : 'text-slate-400 hover:text-emerald-400 hover:bg-slate-800 cursor-pointer'
                 }`}
                 title={
                   isPartnerDeleted
                     ? t('deletedAccountCallDisabled')
-                    : isPartnerSuspended || isCurrentUserSuspended
+                    : isInteractionBlocked
                     ? t('callDisabledUserSuspended')
                     : t('videoCall')
                 }
@@ -760,9 +794,7 @@ export function ChatArea({
                   !ghostUser &&
                   chat.type === 'direct' &&
                   partnerId &&
-                  !isPartnerSuspended &&
-                  !isPartnerDeleted &&
-                  !isCurrentUserSuspended
+                  !isInteractionBlocked
                     ? (callType) => {
                         onStartCall({
                           active: true,
@@ -804,15 +836,27 @@ export function ChatArea({
           onInfo={(m) => setMessageInfoTarget(m)}
           onCopy={handleCopyText}
           onEdit={handleStartEditFromMenu}
-          onReport={(m) =>
+          onReport={(m) => {
+            const fallbackSummary =
+              m.type === 'image'
+                ? '📷 Photo message'
+                : m.type === 'audio'
+                ? `🎤 Voice note (${m.audioDuration || 0}s)`
+                : m.type === 'call'
+                ? `📞 ${m.callType === 'video' ? 'Video' : 'Voice'} call log (${m.callStatus || 'ended'})`
+                : m.type === 'file'
+                ? '📎 File attachment'
+                : '';
+            const resolvedText = (m.text?.trim() || fallbackSummary).slice(0, 1000);
             setReportTarget({
               targetUserId: m.senderId,
               targetUserName: m.senderName,
+              targetUserEmail: chat.participantDetails?.[m.senderId]?.email,
               chatId: chat.id,
               messageId: m.id,
-              messageText: m.text,
-            })
-          }
+              messageText: resolvedText,
+            });
+          }}
           onDelete={(m) => setMessageToDelete(m)}
           onClose={() => setActiveMenuMessage(null)}
         />
@@ -955,6 +999,24 @@ export function ChatArea({
           <ShieldAlert className="w-4 h-4 text-amber-500 shrink-0" />
           <span className="text-xs font-medium text-slate-300 text-center">
             {t('chatPartnerSuspendedNotice')}
+          </span>
+        </div>
+      ) : isDmBlocked ? (
+        <div className="px-4 py-3.5 bg-rose-950/30 border-t border-rose-900/50 flex items-center justify-center gap-2.5 shrink-0 select-none">
+          <ShieldBan className="w-4 h-4 text-rose-400 shrink-0" />
+          <span className="text-xs font-medium text-rose-200 text-center">
+            {language === 'bn'
+              ? 'এই কথোপকথনটি ব্লক করা আছে। মেসেজ ও কল বন্ধ রয়েছে।'
+              : 'This conversation is blocked. Messaging and calls are disabled.'}
+          </span>
+        </div>
+      ) : isDmUnfriended ? (
+        <div className="px-4 py-3.5 bg-slate-900 border-t border-slate-800 flex items-center justify-center gap-2.5 shrink-0 select-none">
+          <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+          <span className="text-xs font-medium text-slate-300 text-center">
+            {language === 'bn'
+              ? 'আপনারা বর্তমানে ফ্রেন্ড তালিকায় যুক্ত নন। পুনরায় মেসেজ ও কল করতে ফ্রেন্ড রিকোয়েস্ট পাঠান/একসেপ্ট করুন।'
+              : 'You are not currently accepted friends. Send or accept a friend request to resume messaging & calls.'}
           </span>
         </div>
       ) : (
@@ -1191,8 +1253,10 @@ export function ChatArea({
           onClose={() => setShowGroupInfoModal(false)}
           chat={chat}
           currentUser={user}
+          friendships={friendships}
           onLeaveGroup={onBack}
           onDeleteGroup={onBack}
+          onOpenGroupShareQR={onOpenGroupShareQR}
         />
       )}
 

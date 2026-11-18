@@ -1,4 +1,4 @@
-import { AlertTriangle, BarChart3, CheckCircle2, Eye, Lock, MessageSquare, Search } from 'lucide-react';
+import { AlertTriangle, BarChart3, CheckCircle2, Eye, Lock, MessageSquare, Phone, Search } from 'lucide-react';
 import { SUPER_ADMIN_EMAIL } from '../../services/adminService';
 import type { UserProfile } from '../../types/chat';
 
@@ -46,7 +46,11 @@ export function AdminUsersTab({
             type="text"
             value={userSearch}
             onChange={(e) => setUserSearch(e.target.value)}
-            placeholder={t('searchUsersPlaceholder')}
+            placeholder={
+              language === 'bn'
+                ? 'নাম, ইমেইল, @ইউজারনেম, মোবাইল নম্বর বা আইডি দিয়ে খুঁজুন...'
+                : 'Search by name, email, @username, mobile number or ID...'
+            }
             className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
           />
         </div>
@@ -123,9 +127,17 @@ export function AdminUsersTab({
                     )}
                   </div>
                   <div className="text-[11px] text-slate-400 truncate">{u.email}</div>
-                  {u.username && (
-                    <div className="text-[10px] text-slate-500 font-mono">@{u.username}</div>
-                  )}
+                  <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                    {u.username && (
+                      <span className="text-[10px] text-slate-500 font-mono">@{u.username}</span>
+                    )}
+                    {u.phoneNumber && (
+                      <span className="text-[10px] text-emerald-400/90 font-mono inline-flex items-center gap-1">
+                        <Phone className="w-2.5 h-2.5" />
+                        {u.phoneNumber}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 
