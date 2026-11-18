@@ -5,6 +5,7 @@ interface MessageContextMenuProps {
   message: ChatMessage;
   position: { x: number; y: number };
   chatId: string;
+  chatType?: 'direct' | 'group';
   user: UserProfile | null;
   ghostUser?: UserProfile | null;
   language: string;
@@ -22,6 +23,7 @@ interface MessageContextMenuProps {
 export function MessageContextMenu({
   message,
   position,
+  chatType = 'direct',
   user,
   ghostUser,
   language,
@@ -88,16 +90,19 @@ export function MessageContextMenu({
               <span>{t('replyAction')}</span>
             </button>
 
-            <button
-              onClick={() => {
-                onInfo(message);
-                onClose();
-              }}
-              className="w-full px-3.5 py-2 text-left text-xs text-sky-300 hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer transition font-medium"
-            >
-              <Info className="w-3.5 h-3.5 text-sky-400" />
-              <span>{t('messageInfoTitle')}</span>
-            </button>
+            {message.type !== 'call' &&
+              (message.senderId === user?.userId || chatType === 'group') && (
+                <button
+                  onClick={() => {
+                    onInfo(message);
+                    onClose();
+                  }}
+                  className="w-full px-3.5 py-2 text-left text-xs text-sky-300 hover:bg-slate-800 flex items-center gap-2.5 cursor-pointer transition font-medium"
+                >
+                  <Info className="w-3.5 h-3.5 text-sky-400" />
+                  <span>{t('messageInfoTitle')}</span>
+                </button>
+              )}
 
             {message.type === 'text' && (
               <button

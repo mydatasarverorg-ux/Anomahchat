@@ -7,9 +7,13 @@ import {
   query,
   where,
   orderBy,
+  limit,
   onSnapshot,
   updateDoc,
   deleteDoc,
+  arrayUnion,
+  writeBatch,
+  type DocumentReference,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
@@ -333,9 +337,11 @@ export async function getOrCreateDirectChat(
           email: partner.email || '',
         },
       },
+      lastMessageId: '',
       lastMessageText: 'Started conversation',
-      lastMessageSenderId: currentUser.userId,
+      lastMessageSenderId: 'system',
       lastMessageTime: nowIso,
+      lastMessageReadBy: [],
       createdAt: nowIso,
       updatedAt: nowIso,
     };
@@ -377,9 +383,11 @@ export async function createGroupChat(
       adminIds: [currentUser.userId],
       participantIds,
       participantDetails,
+      lastMessageId: '',
       lastMessageText: `${currentUser.displayName} created group "${groupName}"`,
-      lastMessageSenderId: currentUser.userId,
+      lastMessageSenderId: 'system',
       lastMessageTime: nowIso,
+      lastMessageReadBy: [],
       createdAt: nowIso,
       updatedAt: nowIso,
     };
@@ -515,57 +523,113 @@ export async function sendMessage(params: {
       messageData.replyToSender = params.replyTo.senderName;
     }
 
-    await setDoc(messageRef, messageData);
-
     let snippet = messageData.text;
     if (params.type === 'audio') snippet = '🎤 Voice note';
     if (params.type === 'image') snippet = '📷 Photo';
 
-    await updateDoc(parentChatRef, {
+    const batch = writeBatch(db);
+    batch.set(messageRef, messageData);
+    batch.update(parentChatRef, {
+      lastMessageId: messageId,
       lastMessageText: snippet.slice(0, 500),
       lastMessageSenderId: params.sender.userId,
       lastMessageTime: effectiveIso,
+      lastMessageReadBy: [params.sender.userId],
       updatedAt: effectiveIso,
     });
+    await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
   }
 }
 
-// Mark messages as read by current user
+const inFlightReadMsgKeys = new Set<string>();
+const inFlightChatLastReadKeys = new Set<string>();
+
+// Mark messages as read by current user atomically with in-flight deduplication
 export async function markChatMessagesAsRead(
   chatId: string,
   user: UserProfile,
-  unreadMessages: ChatMessage[]
+  messages: ChatMessage[],
+  chatRoom?: ChatRoom
 ) {
-  if (!chatId || !user || !user.userId || !Array.isArray(unreadMessages) || unreadMessages.length === 0) {
+  if (!chatId || !user || !user.userId || !Array.isArray(messages) || messages.length === 0) {
     return;
   }
-  try {
-    const unreadForUser = unreadMessages.filter(
-      (msg) => msg.senderId !== user.userId && Array.isArray(msg.readBy) && !msg.readBy.includes(user.userId)
-    );
-    if (unreadForUser.length === 0) return;
 
+  const uid = user.userId;
+  const toUpdate = messages.filter((msg) => {
+    if (!msg?.id || msg.senderId === uid) return false;
+    if (inFlightReadMsgKeys.has(`${chatId}:${msg.id}`)) return false;
+    const inReadBy = Array.isArray(msg.readBy) && msg.readBy.includes(uid);
+    const hasSeenDetails = Boolean(msg.seenByDetails && msg.seenByDetails[uid]);
+    return !inReadBy || !hasSeenDetails;
+  });
+
+  const batchKeys: string[] = [];
+  if (toUpdate.length > 0) {
     const nowIso = new Date().toISOString();
-    for (const msg of unreadForUser) {
-      const msgRef = doc(db, 'chats', chatId, 'messages', msg.id);
-      const existingDetails = msg.seenByDetails || {};
-      await updateDoc(msgRef, {
-        readBy: [...(msg.readBy || []), user.userId],
-        seenByDetails: {
-          ...existingDetails,
-          [user.userId]: {
-            displayName: user.displayName || 'User',
-            photoURL: user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.userId}`,
-            seenAt: nowIso,
-          },
-        },
-      });
+    const seenPayload = {
+      displayName: (user.displayName || 'User').slice(0, 100),
+      photoURL: (user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`).slice(0, 1000),
+      seenAt: nowIso,
+    };
+
+    try {
+      const CHUNK_SIZE = 400;
+      for (let i = 0; i < toUpdate.length; i += CHUNK_SIZE) {
+        const chunk = toUpdate.slice(i, i + CHUNK_SIZE);
+        const batch = writeBatch(db);
+        for (const msg of chunk) {
+          const key = `${chatId}:${msg.id}`;
+          inFlightReadMsgKeys.add(key);
+          batchKeys.push(key);
+          const msgRef = doc(db, 'chats', chatId, 'messages', msg.id);
+          batch.update(msgRef, {
+            readBy: arrayUnion(uid),
+            [`seenByDetails.${uid}`]: seenPayload,
+          });
+        }
+        await batch.commit();
+      }
+    } catch (error) {
+      console.warn('Mark read warning:', error);
+    } finally {
+      batchKeys.forEach((k) => inFlightReadMsgKeys.delete(k));
     }
-  } catch (error) {
-    console.warn('Mark read warning:', error);
+  }
+
+  // Sync inbox room lastMessageReadBy if the latest message from partner is not yet marked read on room doc
+  const latestMsg = messages[messages.length - 1];
+  const latestSenderId = chatRoom?.lastMessageSenderId || latestMsg?.senderId;
+  const roomLastMsgId = chatRoom?.lastMessageId || '';
+  const isSameLatestMsg =
+    !roomLastMsgId || !latestMsg?.id || roomLastMsgId === latestMsg.id;
+  const alreadySyncedOnRoom =
+    isSameLatestMsg &&
+    Array.isArray(chatRoom?.lastMessageReadBy) &&
+    chatRoom.lastMessageReadBy.includes(uid);
+  const roomSyncKey = `${chatId}:${uid}:${roomLastMsgId || latestMsg?.id || chatRoom?.lastMessageTime || ''}`;
+
+  if (
+    latestSenderId &&
+    latestSenderId !== 'system' &&
+    latestSenderId !== uid &&
+    isSameLatestMsg &&
+    !alreadySyncedOnRoom &&
+    !inFlightChatLastReadKeys.has(roomSyncKey)
+  ) {
+    inFlightChatLastReadKeys.add(roomSyncKey);
+    try {
+      await updateDoc(doc(db, 'chats', chatId), {
+        lastMessageReadBy: arrayUnion(uid),
+      });
+    } catch (error) {
+      console.warn('Chat lastMessageReadBy sync warning:', error);
+    } finally {
+      inFlightChatLastReadKeys.delete(roomSyncKey);
+    }
   }
 }
 
@@ -606,12 +670,97 @@ export async function toggleMessageReaction(
   }
 }
 
+async function deleteDocRefsInChunks(refs: DocumentReference[]): Promise<void> {
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < refs.length; i += CHUNK_SIZE) {
+    const batch = writeBatch(db);
+    refs.slice(i, i + CHUNK_SIZE).forEach((ref) => batch.delete(ref));
+    await batch.commit();
+  }
+}
+
+async function deleteCallsAndCandidates(chatId: string): Promise<void> {
+  const callsSnap = await getDocs(collection(db, 'chats', chatId, 'calls')).catch(() => null);
+  if (!callsSnap || callsSnap.empty) return;
+
+  for (const callDoc of callsSnap.docs) {
+    const [offerSnap, answerSnap] = await Promise.all([
+      getDocs(collection(db, 'chats', chatId, 'calls', callDoc.id, 'offerCandidates')).catch(() => null),
+      getDocs(collection(db, 'chats', chatId, 'calls', callDoc.id, 'answerCandidates')).catch(() => null),
+    ]);
+    const iceRefs = [
+      ...(offerSnap?.docs.map((d) => d.ref) || []),
+      ...(answerSnap?.docs.map((d) => d.ref) || []),
+    ];
+    if (iceRefs.length > 0) {
+      await deleteDocRefsInChunks(iceRefs).catch(() => {});
+    }
+  }
+
+  await deleteDocRefsInChunks(callsSnap.docs.map((d) => d.ref)).catch(() => {});
+}
+
+// Re-sync parent chat room preview snippet from the remaining newest message after deletions
+export async function syncChatLastMessageFromLatest(
+  chatId: string,
+  deletedMessageId?: string
+): Promise<void> {
+  if (!chatId) return;
+  try {
+    const chatRef = doc(db, 'chats', chatId);
+    const chatSnap = await getDoc(chatRef);
+    if (!chatSnap.exists()) return;
+    const chatData = chatSnap.data() as ChatRoom;
+
+    if (deletedMessageId && chatData.lastMessageId && chatData.lastMessageId !== deletedMessageId) {
+      return;
+    }
+
+    const latestSnap = await getDocs(
+      query(collection(db, 'chats', chatId, 'messages'), orderBy('createdAt', 'desc'), limit(1))
+    );
+
+    if (latestSnap.empty) {
+      const fallbackTime = chatData.createdAt || new Date().toISOString();
+      await updateDoc(chatRef, {
+        lastMessageId: '',
+        lastMessageText: '',
+        lastMessageSenderId: '',
+        lastMessageTime: fallbackTime,
+        lastMessageReadBy: [],
+        updatedAt: fallbackTime,
+      });
+      return;
+    }
+
+    const latestDoc = latestSnap.docs[0];
+    const latestMsg = latestDoc.data() as ChatMessage;
+    const msgId = latestMsg.id || latestDoc.id;
+    let snippet = (latestMsg.text || '').trim();
+    if (latestMsg.type === 'audio') snippet = '🎤 Voice note';
+    if (latestMsg.type === 'image') snippet = '📷 Photo';
+    const msgTime = latestMsg.createdAt || chatData.createdAt || new Date().toISOString();
+
+    await updateDoc(chatRef, {
+      lastMessageId: msgId,
+      lastMessageText: snippet.slice(0, 500),
+      lastMessageSenderId: latestMsg.senderId || '',
+      lastMessageTime: msgTime,
+      lastMessageReadBy: Array.isArray(latestMsg.readBy) ? latestMsg.readBy.slice(0, 100) : [],
+      updatedAt: msgTime,
+    });
+  } catch (error) {
+    console.warn('Sync lastMessage after delete notice:', error);
+  }
+}
+
 // Delete message
 export async function deleteChatMessage(chatId: string, messageId: string) {
   const path = `chats/${chatId}/messages/${messageId}`;
   try {
     const msgRef = doc(db, 'chats', chatId, 'messages', messageId);
     await deleteDoc(msgRef);
+    await syncChatLastMessageFromLatest(chatId, messageId);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
@@ -642,15 +791,13 @@ export async function deleteChatRoom(chatId: string, currentUserId: string) {
     const data = snap.data() as ChatRoom;
 
     if (data.type === 'direct') {
-      // Purge all messages in deterministic dm_* room so deleted history never resurrects on new DM
+      // Purge all messages & calls in deterministic dm_* room in chunks so deleted history never resurrects
       const msgsSnap = await getDocs(collection(db, 'chats', chatId, 'messages'));
-      await Promise.all(msgsSnap.docs.map((d) => deleteDoc(d.ref)));
-
-      const callsSnap = await getDocs(collection(db, 'chats', chatId, 'calls')).catch(() => null);
-      if (callsSnap) {
-        await Promise.all(callsSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})));
+      if (!msgsSnap.empty) {
+        await deleteDocRefsInChunks(msgsSnap.docs.map((d) => d.ref));
       }
 
+      await deleteCallsAndCandidates(chatId);
       await deleteDoc(chatRef);
       return;
     }
@@ -697,8 +844,11 @@ export async function addGroupMembers(
     await updateDoc(chatRef, {
       participantIds: Array.from(currentIds),
       participantDetails: details,
+      lastMessageId: '',
       lastMessageText: `${addedByName} added ${addedNames}`,
+      lastMessageSenderId: 'system',
       lastMessageTime: nowIso,
+      lastMessageReadBy: [],
       updatedAt: nowIso,
     });
   } catch (error) {
@@ -732,8 +882,11 @@ export async function removeGroupMember(
     await updateDoc(chatRef, {
       participantIds: remainingIds,
       adminIds: remainingAdmins,
+      lastMessageId: '',
       lastMessageText: `${removedByName || 'Admin'} removed ${memberName}`,
+      lastMessageSenderId: 'system',
       lastMessageTime: nowIso,
+      lastMessageReadBy: [],
       updatedAt: nowIso,
     });
   } catch (error) {
@@ -818,8 +971,11 @@ export async function leaveGroupChat(
     await updateDoc(chatRef, {
       participantIds: remainingIds,
       adminIds: remainingAdmins,
+      lastMessageId: '',
       lastMessageText: `${userName || 'A member'} left the group`,
+      lastMessageSenderId: 'system',
       lastMessageTime: nowIso,
+      lastMessageReadBy: [],
       updatedAt: nowIso,
     });
   } catch (error) {
@@ -834,8 +990,11 @@ export async function deleteGroupChatPermanently(chatId: string): Promise<void> 
   try {
     const messagesRef = collection(db, 'chats', chatId, 'messages');
     const msgsSnap = await getDocs(messagesRef);
-    const deletePromises = msgsSnap.docs.map((docItem) => deleteDoc(docItem.ref));
-    await Promise.all(deletePromises);
+    if (!msgsSnap.empty) {
+      await deleteDocRefsInChunks(msgsSnap.docs.map((docItem) => docItem.ref));
+    }
+
+    await deleteCallsAndCandidates(chatId);
 
     const chatRef = doc(db, 'chats', chatId);
     await deleteDoc(chatRef);

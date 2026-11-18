@@ -271,6 +271,11 @@
           "description": "Display name of suspended participant",
           "maxLength": 150
         },
+        "lastMessageId": {
+          "type": "string",
+          "description": "ID of the most recent message",
+          "maxLength": 128
+        },
         "lastMessageText": {
           "type": "string",
           "description": "Snippet of the most recent message",
@@ -285,6 +290,10 @@
           "type": "string",
           "description": "ISO timestamp of the last message",
           "maxLength": 64
+        },
+        "lastMessageReadBy": {
+          "type": "array",
+          "description": "Bounded list of participant UIDs who have read the most recent message"
         },
         "createdAt": {
           "type": "string",

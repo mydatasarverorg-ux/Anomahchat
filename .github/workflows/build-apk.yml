@@ -81,9 +81,9 @@ jobs:
             APK_PATH=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
           fi
           if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
-            cp "$APK_PATH" build-output/AnomahChat-v1.0.9.apk
+            cp "$APK_PATH" build-output/AnomahChat-v1.0.10.apk
             cp "$APK_PATH" build-output/AnomahChat.apk
-            cp "$APK_PATH" build-output/Anomah-Chat-vMahi-A09.apk
+            cp "$APK_PATH" build-output/Anomah-Chat-vMahi-A10.apk
             SHA256=$(sha256sum build-output/AnomahChat.apk | awk '{print $1}')
             echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
             echo "Prepared APK from $APK_PATH (SHA-256: $SHA256)"
@@ -95,7 +95,7 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AnomahChat-v1.0.9-APK
+          name: AnomahChat-v1.0.10-APK
           path: build-output/*.apk
           retention-days: 30
 
@@ -103,11 +103,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         with:
-          tag_name: v1.0.9
-          name: Anomah Chat v1.0.9 (Mahi A09 Release)
+          tag_name: v1.0.10
+          name: Anomah Chat v1.0.10 (Mahi A10 Release)
           body: |
-            ## Anomah Chat Android APK v1.0.9 (Mahi A09)
+            ## Anomah Chat Android APK v1.0.10 (Mahi A10)
             Direct installation package for Android devices.
+            - Accurate Real-Time DM Seen/Read Receipts (`lastMessageReadBy` Sync, Batched `arrayUnion` Updates, Foreground-Only Marking & Unified Message Info Drawer)
             - Super Admin Google Drive Chat Backup (`anomahchatsarverorg@gmail.com`) & Safe 1 GiB Firestore Storage Cleanup + Offline Archive Viewer
             - Automatic In-Chat Audio/Video Call History Cards (Answered Duration, Missed, Declined, Cancelled + 1-Tap Callback)
             - Native Android Notification Channels (`Chat Messages` & `Incoming Calls`) with Tap-to-Open Chat Deep-Linking
@@ -118,7 +119,7 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            build-output/AnomahChat-v1.0.9.apk
+            build-output/AnomahChat-v1.0.10.apk
             build-output/AnomahChat.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

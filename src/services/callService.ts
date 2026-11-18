@@ -2,11 +2,13 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
   onSnapshot,
   query,
   where,
+  writeBatch,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
@@ -96,6 +98,30 @@ export async function updateCallSignalStatus(
     });
   } catch (err) {
     console.warn('Call status update notice:', err);
+  }
+}
+
+export async function cleanupCallIceCandidates(chatId: string, callId: string): Promise<void> {
+  if (!chatId || !callId) return;
+  try {
+    const [offerSnap, answerSnap] = await Promise.all([
+      getDocs(collection(db, 'chats', chatId, 'calls', callId, 'offerCandidates')).catch(() => null),
+      getDocs(collection(db, 'chats', chatId, 'calls', callId, 'answerCandidates')).catch(() => null),
+    ]);
+
+    const refs = [
+      ...(offerSnap?.docs.map((d) => d.ref) || []),
+      ...(answerSnap?.docs.map((d) => d.ref) || []),
+    ];
+
+    const CHUNK_SIZE = 400;
+    for (let i = 0; i < refs.length; i += CHUNK_SIZE) {
+      const batch = writeBatch(db);
+      refs.slice(i, i + CHUNK_SIZE).forEach((ref) => batch.delete(ref));
+      await batch.commit();
+    }
+  } catch (err) {
+    console.warn('ICE candidate cleanup notice:', err);
   }
 }
 
@@ -298,13 +324,17 @@ export async function logCallToChat(params: {
       createdAt: effectiveIso,
     };
 
-    await setDoc(messageRef, messageData);
-    await updateDoc(parentChatRef, {
+    const batch = writeBatch(db);
+    batch.set(messageRef, messageData);
+    batch.update(parentChatRef, {
+      lastMessageId: messageId,
       lastMessageText: inboxSnippet.slice(0, 500),
       lastMessageSenderId: params.currentUser.userId,
       lastMessageTime: effectiveIso,
+      lastMessageReadBy: [params.currentUser.userId],
       updatedAt: effectiveIso,
     });
+    await batch.commit();
   } catch (err) {
     console.warn('Call log write notice:', err);
   }

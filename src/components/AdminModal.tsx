@@ -3,6 +3,7 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { useModalHistory } from '../hooks/useModalHistory';
 import {
   banUser,
   unbanUser,
@@ -82,33 +83,21 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   >('overview');
 
   const [currentLiveRelease, setCurrentLiveRelease] = useState<AppReleaseInfo | null>(null);
-  const [releaseVersionName, setReleaseVersionName] = useState('1.0.9');
-  const [releaseVersionCode, setReleaseVersionCode] = useState('109');
+  const [releaseVersionName, setReleaseVersionName] = useState('1.0.10');
+  const [releaseVersionCode, setReleaseVersionCode] = useState('110');
   const [releaseApkUrl, setReleaseApkUrl] = useState('https://github.com/mydatasarverorg-ux/Anomahchat/releases/latest/download/AnomahChat.apk');
   const [releaseApkSha256, setReleaseApkSha256] = useState('');
   const [releaseFileSizeText, setReleaseFileSizeText] = useState('');
   const [releaseChangelogEn, setReleaseChangelogEn] = useState(
-    '• Super Admin Google Drive Backup & Safe 1 GiB Firestore Cleanup\n• Automatic In-Chat Audio/Video Call Logs (Duration, Missed, Declined & Callback)\n• Native Android Camera, Audio & Background Notification Support (Mahi A09)'
+    '• Fixed DM & Inbox Read Receipts (accurate seen/unread status, visibility-aware read marking & atomic sync)\n• Super Admin Google Drive Backup, Safe 1 GiB Cleanup & 1-Click Cloud Restore\n• Automatic In-Chat Call Logs, Native Notifications & WebRTC Calling (Mahi A10)'
   );
   const [releaseChangelogBn, setReleaseChangelogBn] = useState(
-    '• সুপার অ্যাডমিন Google Drive চ্যাট ব্যাকআপ ও নিরাপদ ১ GiB স্টোরেজ ক্লিনআপ\n• চ্যাটের ভেতর অটোমেটিক অডিও/ভিডিও কল লগ ও কলব্যাক সুবিধা\n• অ্যান্ড্রয়েড ক্যামেরা, অডিও ও ব্যাকগ্রাউন্ড নোটিফিকেশন সাপোর্ট (Mahi A09)'
+    '• ডিএম ও ইনবক্সের Seen / কে দেখেছে সিস্টেম ফিক্স (সঠিক ব্লু টিক, আনরিড ইন্ডিকেটর ও ব্যাকগ্রাউন্ড সুরক্ষা)\n• সুপার অ্যাডমিন Google Drive ব্যাকআপ, ১ GiB ক্লিনআপ ও ১-ক্লিক রিস্টোর\n• অটোমেটিক কল লগ, নেটিভ নোটিফিকেশন ও অডিও/ভিডিও কল সাপোর্ট (Mahi A10)'
   );
   const [releaseForceUpdate, setReleaseForceUpdate] = useState(false);
   const [publishingRelease, setPublishingRelease] = useState(false);
 
-  useEffect(() => {
-    window.history.pushState({ modal: 'adminModal' }, '');
-    const handlePopState = () => onClose();
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('popstate', handlePopState);
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [onClose]);
+  useModalHistory(true, onClose);
 
   const [usersList, setUsersList] = useState<UserProfile[]>([]);
   const [userSearch, setUserSearch] = useState('');
@@ -241,9 +230,15 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     setPublishingRelease(true);
     setActionErrorMsg(null);
     try {
-      let parsedCode = parseInt(releaseVersionCode, 10) || 109;
-      if (parsedCode < 10) {
-        parsedCode = parsedCode * 100 + (parsedCode === 2 ? 2 : 0);
+      const parsedCode = parseInt(releaseVersionCode, 10);
+      if (!Number.isFinite(parsedCode) || parsedCode < 100) {
+        setActionErrorMsg(
+          language === 'bn'
+            ? 'ভার্সন কোড অবশ্যই কমপক্ষে ১০০ (যেমন: 110) হতে হবে।'
+            : 'Version code must be a valid number >= 100 (e.g. 110).'
+        );
+        setPublishingRelease(false);
+        return;
       }
       await publishAppRelease(
         {

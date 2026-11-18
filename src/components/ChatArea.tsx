@@ -12,6 +12,7 @@ import {
   subscribeToDirectoryUser,
   formatLastSeenStatus,
 } from '../services/chatService';
+import { isAppInBackground, cancelAppNotification } from '../services/notificationService';
 import type { ChatRoom, ChatMessage, CallSession, UserProfile, DirectoryUser } from '../types/chat';
 import { sounds } from '../utils/audioEffects';
 import { compressImageForChat } from '../utils/imageCompressor';
@@ -153,28 +154,100 @@ export function ChatArea({
       ? 'https://api.dicebear.com/7.x/bottts/svg?seed=deleted_user'
       : partnerUser?.photoURL || partnerDetails?.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${partnerId}`;
 
+  const userRef = useRef(user);
+  userRef.current = user;
+  const chatRef = useRef(chat);
+  chatRef.current = chat;
+  const ghostUserRef = useRef(ghostUser);
+  ghostUserRef.current = ghostUser;
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const lastSoundMsgIdRef = useRef<string | null>(null);
+  const initialMessagesLoadedRef = useRef(false);
+
   useEffect(() => {
     if (!chat.id) return;
+    initialMessagesLoadedRef.current = false;
+    lastSoundMsgIdRef.current = null;
+
+    const markVisibleMessagesAsRead = (msgs: ChatMessage[]) => {
+      const currentUser = userRef.current;
+      const currentChat = chatRef.current;
+      const currentGhost = ghostUserRef.current;
+      if (!currentUser || currentGhost || isAppInBackground()) return;
+      const isParticipant =
+        Array.isArray(currentChat.participantIds) &&
+        currentChat.participantIds.includes(currentUser.userId);
+      if (!isParticipant) return;
+      cancelAppNotification(`msg_${currentChat.id}`);
+      markChatMessagesAsRead(currentChat.id, currentUser, msgs, currentChat);
+    };
+
     const unsubscribe = subscribeToChatMessages(chat.id, (msgs) => {
+      messagesRef.current = msgs;
       setMessages(msgs);
 
-      if (msgs.length > 0) {
+      const currentUser = userRef.current;
+      if (msgs.length > 0 && currentUser) {
         const last = msgs[msgs.length - 1];
-        if (user && last.senderId !== user.userId && !last.readBy.includes(user.userId)) {
+        const readByArr = Array.isArray(last.readBy) ? last.readBy : [];
+        if (
+          initialMessagesLoadedRef.current &&
+          last.id !== lastSoundMsgIdRef.current &&
+          last.senderId !== currentUser.userId &&
+          !readByArr.includes(currentUser.userId)
+        ) {
+          lastSoundMsgIdRef.current = last.id;
           sounds.playMessageReceived();
+        } else if (!initialMessagesLoadedRef.current) {
+          lastSoundMsgIdRef.current = last.id;
         }
       }
+      initialMessagesLoadedRef.current = true;
 
-      if (user && !ghostUser) {
-        const isParticipant = Array.isArray(chat.participantIds) && chat.participantIds.includes(user.userId);
-        if (isParticipant) {
-          markChatMessagesAsRead(chat.id, user, msgs);
-        }
-      }
+      markVisibleMessagesAsRead(msgs);
     });
 
-    return () => unsubscribe();
-  }, [chat.id, chat.participantIds, user, ghostUser]);
+    const handleVisibilityOrFocus = () => {
+      if (!isAppInBackground()) {
+        markVisibleMessagesAsRead(messagesRef.current);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    return () => {
+      unsubscribe();
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
+  }, [chat.id, ghostUser?.userId]);
+
+  // Re-sync room lastMessageReadBy when chat snapshot updates after messages snapshot
+  useEffect(() => {
+    if (!chat.id || !user || ghostUser || isAppInBackground()) return;
+    if (messagesRef.current.length === 0) return;
+    const isParticipant =
+      Array.isArray(chat.participantIds) && chat.participantIds.includes(user.userId);
+    if (!isParticipant) return;
+    if (
+      chat.lastMessageSenderId &&
+      chat.lastMessageSenderId !== 'system' &&
+      chat.lastMessageSenderId !== user.userId &&
+      (!Array.isArray(chat.lastMessageReadBy) || !chat.lastMessageReadBy.includes(user.userId))
+    ) {
+      markChatMessagesAsRead(chat.id, user, messagesRef.current, chat);
+    }
+  }, [
+    chat,
+    chat.id,
+    chat.lastMessageId,
+    chat.lastMessageSenderId,
+    chat.lastMessageTime,
+    chat.lastMessageReadBy,
+    ghostUser,
+    user,
+  ]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -333,6 +406,21 @@ export function ChatArea({
       return (a.id || '').localeCompare(b.id || '');
     });
   }, [messages, searchQuery]);
+
+  // For 1-on-1 DMs, identify only the latest outgoing non-call message seen by partner
+  // so the mini seen avatar sits cleanly under the last read message instead of every bubble.
+  const lastSeenOutgoingDmMessageId = useMemo(() => {
+    if (chat.type !== 'direct' || !effectiveUser?.userId) return null;
+    for (let i = filteredMessages.length - 1; i >= 0; i--) {
+      const m = filteredMessages[i];
+      if (m.senderId !== effectiveUser.userId || m.type === 'call') continue;
+      const readByPartner =
+        (Array.isArray(m.readBy) && m.readBy.some((uid) => uid !== m.senderId)) ||
+        Object.keys(m.seenByDetails || {}).some((uid) => uid !== m.senderId);
+      if (readByPartner) return m.id;
+    }
+    return null;
+  }, [chat.type, effectiveUser?.userId, filteredMessages]);
 
   return (
     <div
@@ -647,6 +735,9 @@ export function ChatArea({
                 t={t}
                 user={user}
                 ghostUser={ghostUser}
+                partnerUser={partnerUser}
+                isPartnerDeleted={isPartnerDeleted}
+                isLastSeenInDm={chat.type !== 'direct' || msg.id === lastSeenOutgoingDmMessageId}
                 editingMessage={editingMessage}
                 editText={editText}
                 setEditText={setEditText}
@@ -701,6 +792,7 @@ export function ChatArea({
           message={activeMenuMessage}
           position={menuPosition}
           chatId={chat.id}
+          chatType={chat.type}
           user={user}
           ghostUser={ghostUser}
           language={language}
@@ -1110,6 +1202,8 @@ export function ChatArea({
           onClose={() => setMessageInfoTarget(null)}
           message={messageInfoTarget}
           chat={chat}
+          partnerUser={partnerUser}
+          isPartnerDeleted={isPartnerDeleted}
         />
       )}
     </div>

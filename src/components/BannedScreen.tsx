@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { claimExpiredSuspension } from '../services/adminService';
@@ -11,7 +11,7 @@ export function BannedScreen() {
     expired: boolean;
     text: string;
   } | null>(null);
-  const [isReactivating, setIsReactivating] = useState(false);
+  const reactivatingRef = useRef(false);
 
   useEffect(() => {
     if (!user?.bannedUntil) {
@@ -25,12 +25,12 @@ export function BannedScreen() {
 
       if (diffMs <= 0) {
         setTimeLeft({ expired: true, text: '' });
-        // Automatically reinstate user when temporary suspension timer expires
-        if (!isReactivating && user) {
-          setIsReactivating(true);
+        // Automatically reinstate user when temporary suspension timer expires (10s interval handles server-time skew)
+        if (!reactivatingRef.current && user) {
+          reactivatingRef.current = true;
           claimExpiredSuspension(user.userId).catch((err) => {
             console.warn('Temporary suspension expiry claim retry queued:', err);
-            setIsReactivating(false);
+            reactivatingRef.current = false;
           });
         }
         return;
@@ -58,7 +58,7 @@ export function BannedScreen() {
     calculateTime();
     const timer = setInterval(calculateTime, 10000); // Check every 10s so server-time skew resolves quickly
     return () => clearInterval(timer);
-  }, [user, language, isReactivating]);
+  }, [user, language]);
 
   const formattedDate = user?.bannedAt
     ? new Date(user.bannedAt).toLocaleDateString(language === 'bn' ? 'bn-BD' : 'en-US', {

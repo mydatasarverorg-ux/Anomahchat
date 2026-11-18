@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { LoginScreen } from './components/LoginScreen';
@@ -12,12 +12,14 @@ import { ChatArea } from './components/ChatArea';
 import { NewChatModal } from './components/NewChatModal';
 import { ProfileModal } from './components/ProfileModal';
 import { ShareLinkModal } from './components/ShareLinkModal';
-import { CallModal } from './components/CallModal';
 import { BannedScreen } from './components/BannedScreen';
 import { WarningNoticeModal } from './components/WarningNoticeModal';
 import { AnnouncementBanner } from './components/AnnouncementBanner';
-import { AdminModal } from './components/AdminModal';
 import { UpdateModal } from './components/UpdateModal';
+import { useModalHistory } from './hooks/useModalHistory';
+
+const AdminModal = lazy(() => import('./components/AdminModal').then((m) => ({ default: m.AdminModal })));
+const CallModal = lazy(() => import('./components/CallModal').then((m) => ({ default: m.CallModal })));
 import { subscribeToUserChats } from './services/chatService';
 import { subscribeToIncomingDirectCalls } from './services/callService';
 import {
@@ -233,6 +235,10 @@ function ChatDashboard({ user }: { user: UserProfile }) {
 
   // Ghost Inspection State (Admin enters user DM without login)
   const [ghostUser, setGhostUser] = useState<UserProfile | null>(null);
+  const ghostUserRef = useRef<UserProfile | null>(null);
+  ghostUserRef.current = ghostUser;
+  const languageRef = useRef(language);
+  languageRef.current = language;
 
   const isPasswordAccount = Boolean(
     firebaseUser?.providerData?.some((p) => p.providerId === 'password')
@@ -258,14 +264,14 @@ function ChatDashboard({ user }: { user: UserProfile }) {
 
   // Subscribe to all chats where current user (or ghost inspected user) is a participant
   useEffect(() => {
-    const targetUserId = ghostUser ? ghostUser.userId : user.userId;
+    const targetUserId = ghostUser?.userId || user.userId;
     if (!targetUserId) return;
     chatsInitializedRef.current = false;
     lastNotifiedMsgTimeRef.current.clear();
 
     const unsubscribe = subscribeToUserChats(targetUserId, (data) => {
       setChats(data);
-      if (ghostUser) return;
+      if (ghostUserRef.current) return;
 
       if (!chatsInitializedRef.current) {
         chatsInitializedRef.current = true;
@@ -285,7 +291,9 @@ function ChatDashboard({ user }: { user: UserProfile }) {
         lastNotifiedMsgTimeRef.current.set(chat.id, latestTime);
 
         const isFromOther = Boolean(
-          chat.lastMessageSenderId && chat.lastMessageSenderId !== user.userId
+          chat.lastMessageSenderId &&
+          chat.lastMessageSenderId !== 'system' &&
+          chat.lastMessageSenderId !== user.userId
         );
         const shouldAlert = isAppInBackground() || activeChatIdRef.current !== chat.id;
         if (!isFromOther || !shouldAlert) return;
@@ -304,9 +312,10 @@ function ChatDashboard({ user }: { user: UserProfile }) {
           }
         }
 
+        const currentLang = languageRef.current;
         const body = chat.lastMessageText?.trim()
           ? chat.lastMessageText
-          : language === 'bn'
+          : currentLang === 'bn'
           ? 'নতুন মেসেজ এসেছে'
           : 'Sent you a message';
 
@@ -326,12 +335,22 @@ function ChatDashboard({ user }: { user: UserProfile }) {
     });
 
     return () => unsubscribe();
-  }, [user.userId, ghostUser, language]);
+  }, [user.userId, ghostUser?.userId]);
+
+  const directChatIdsKey = useMemo(
+    () =>
+      chats
+        .filter((c) => c.type === 'direct' && !c.isSuspended)
+        .map((c) => c.id)
+        .sort()
+        .join(','),
+    [chats]
+  );
 
   // Listen for incoming 1-on-1 WebRTC calls across active direct chats
   useEffect(() => {
-    if (ghostUser || user.isBanned) return;
-    const directChats = chats.filter((c) => c.type === 'direct' && !c.isSuspended);
+    if (ghostUser?.userId || user.isBanned || !directChatIdsKey) return;
+    const directChats = chatsRef.current.filter((c) => c.type === 'direct' && !c.isSuspended);
     if (directChats.length === 0) return;
 
     const unsubscribe = subscribeToIncomingDirectCalls(user.userId, directChats, (incoming) => {
@@ -339,15 +358,16 @@ function ChatDashboard({ user }: { user: UserProfile }) {
 
       if (!callActiveRef.current && activeIncomingCallNotifRef.current !== incoming.id && isAppInBackground()) {
         activeIncomingCallNotifRef.current = incoming.id;
+        const currentLang = languageRef.current;
         showChatOrCallNotification({
           id: incoming.id,
           title: incoming.callerName || 'Anomah Chat',
           body:
             incoming.type === 'video'
-              ? language === 'bn'
+              ? currentLang === 'bn'
                 ? 'ইনকামিং ভিডিও কল আসছে...'
                 : 'Incoming video call...'
-              : language === 'bn'
+              : currentLang === 'bn'
               ? 'ইনকামিং অডিও কল আসছে...'
               : 'Incoming voice call...',
           type: 'call',
@@ -380,30 +400,17 @@ function ChatDashboard({ user }: { user: UserProfile }) {
     });
 
     return () => unsubscribe();
-  }, [chats, user.userId, user.isBanned, ghostUser, language]);
+  }, [directChatIdsKey, user.userId, user.isBanned, ghostUser?.userId]);
+
+  const handleExitGhostMode = useCallback(() => {
+    setGhostUser(null);
+    setActiveChatId(null);
+    setSelectedChat(null);
+    setShowAdmin(true);
+  }, []);
 
   // Handle mobile hardware back and Escape key while in Ghost Mode
-  useEffect(() => {
-    if (!ghostUser) return;
-    window.history.pushState({ modal: 'ghostMode' }, '');
-    const handlePopState = () => {
-      setGhostUser(null);
-      setActiveChatId(null);
-      setSelectedChat(null);
-      setShowAdmin(true);
-    };
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        handlePopState();
-      }
-    };
-    window.addEventListener('popstate', handlePopState);
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [ghostUser]);
+  useModalHistory(Boolean(ghostUser), handleExitGhostMode);
 
   const activeChat =
     (activeChatId ? chats.find((c) => c.id === activeChatId) : null) ||
@@ -568,12 +575,7 @@ function ChatDashboard({ user }: { user: UserProfile }) {
 
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => {
-                setGhostUser(null);
-                setActiveChatId(null);
-                setSelectedChat(null);
-                setShowAdmin(true);
-              }}
+              onClick={handleExitGhostMode}
               className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-medium text-xs cursor-pointer shadow-xs transition flex items-center gap-1.5 active:scale-[0.99]"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
@@ -605,12 +607,7 @@ function ChatDashboard({ user }: { user: UserProfile }) {
             if (canAccessAdminPanel) setShowAdmin(true);
           }}
           ghostUser={ghostUser}
-          onExitGhostMode={() => {
-            setGhostUser(null);
-            setActiveChatId(null);
-            setSelectedChat(null);
-            setShowAdmin(true);
-          }}
+          onExitGhostMode={handleExitGhostMode}
         />
       </div>
 
@@ -626,12 +623,7 @@ function ChatDashboard({ user }: { user: UserProfile }) {
             }}
             onStartCall={(session) => setCallSession(session)}
             ghostUser={ghostUser}
-            onExitGhostMode={() => {
-              setGhostUser(null);
-              setActiveChatId(null);
-              setSelectedChat(null);
-              setShowAdmin(true);
-            }}
+            onExitGhostMode={handleExitGhostMode}
           />
         ) : (
           /* Normalized Empty State - Clean Telegram/WhatsApp style */
@@ -678,19 +670,21 @@ function ChatDashboard({ user }: { user: UserProfile }) {
 
       {/* Super Admin Control Panel Modal (Requires verified Super Admin email) */}
       {showAdmin && canAccessAdminPanel && (
-        <AdminModal
-          onClose={() => setShowAdmin(false)}
-          onEnterGhostMode={(targetUser, targetChatId) => {
-            setGhostUser(targetUser);
-            setShowAdmin(false);
-            if (targetChatId) {
-              setActiveChatId(targetChatId);
-            } else {
-              setActiveChatId(null);
-              setSelectedChat(null);
-            }
-          }}
-        />
+        <Suspense fallback={null}>
+          <AdminModal
+            onClose={() => setShowAdmin(false)}
+            onEnterGhostMode={(targetUser, targetChatId) => {
+              setGhostUser(targetUser);
+              setShowAdmin(false);
+              if (targetChatId) {
+                setActiveChatId(targetChatId);
+              } else {
+                setActiveChatId(null);
+                setSelectedChat(null);
+              }
+            }}
+          />
+        </Suspense>
       )}
 
       {/* Modals */}
@@ -718,11 +712,13 @@ function ChatDashboard({ user }: { user: UserProfile }) {
       {showShare && <ShareLinkModal onClose={() => setShowShare(false)} />}
 
       {callSession && (
-        <CallModal
-          session={callSession}
-          currentUser={user}
-          onEndCall={() => setCallSession(null)}
-        />
+        <Suspense fallback={null}>
+          <CallModal
+            session={callSession}
+            currentUser={user}
+            onEndCall={() => setCallSession(null)}
+          />
+        </Suspense>
       )}
     </div>
   );

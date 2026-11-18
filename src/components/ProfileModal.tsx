@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { useModalHistory } from '../hooks/useModalHistory';
 import { isUsernameAvailable } from '../services/chatService';
 import { isSuperAdmin, SUPER_ADMIN_EMAIL } from '../services/adminService';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -173,19 +174,7 @@ export function ProfileModal({
     setSuccessMessage(null);
   }, [user?.userId, user?.hasAppLockPin, user?.username, user?.displayName, user?.about, user?.photoURL]);
 
-  useEffect(() => {
-    window.history.pushState({ modal: 'profileModal' }, '');
-    const handlePopState = () => onClose();
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('popstate', handlePopState);
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [onClose]);
+  useModalHistory(true, onClose);
 
   useEffect(() => {
     const clean = username.trim().toLowerCase().replace(/^@/, '');

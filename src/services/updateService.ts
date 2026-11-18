@@ -42,9 +42,13 @@ async function fetchGitHubLatestRelease(): Promise<AppReleaseInfo | null> {
     const tag = (data.tag_name || '').replace(/^v/i, '').trim();
     if (!tag) return null;
 
-    // Convert tag e.g. "1.0.6" into versionCode 106
+    // Convert tag cleanly without 1.0.10 <-> 1.1.0 collisions (1.0.10 => 110, 1.1.0 => 10100)
     const parts = tag.split('.').map((p: string) => parseInt(p, 10) || 0);
-    const calculatedCode = (parts[0] || 1) * 100 + (parts[1] || 0) * 10 + (parts[2] || 0);
+    const major = parts[0] || 0;
+    const minor = parts[1] || 0;
+    const patch = parts[2] || 0;
+    const calculatedCode =
+      major === 1 && minor === 0 ? 100 + patch : major * 10000 + minor * 100 + patch;
 
     // Look for APK in assets
     const apkAsset = Array.isArray(data.assets)

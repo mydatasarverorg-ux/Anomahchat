@@ -395,7 +395,22 @@ export function Sidebar({
           filteredChats.map((chat) => {
             const display = getChatDisplay(chat);
             const isActive = chat.id === activeChatId;
-            const isSentByMe = chat.lastMessageSenderId === user?.userId;
+            const viewerId = displayUser?.userId;
+            const isSentByMe = Boolean(viewerId && chat.lastMessageSenderId === viewerId);
+            const lastReadBy = Array.isArray(chat.lastMessageReadBy) ? chat.lastMessageReadBy : [];
+            const isLastMessageSeen = Boolean(
+              isSentByMe && viewerId && lastReadBy.some((id) => id !== viewerId)
+            );
+            const isUnreadForMe = Boolean(
+              !isSentByMe &&
+              !isActive &&
+              !ghostUser &&
+              viewerId &&
+              chat.lastMessageSenderId &&
+              chat.lastMessageSenderId !== 'system' &&
+              Array.isArray(chat.lastMessageReadBy) &&
+              !chat.lastMessageReadBy.includes(viewerId)
+            );
 
             return (
               <div
@@ -438,32 +453,44 @@ export function Sidebar({
                         </span>
                       ) : null}
                     </div>
-                    <span className="text-[10px] text-slate-400 shrink-0 font-medium">
+                    <span className={`text-[10px] shrink-0 font-medium ${isUnreadForMe ? 'text-emerald-400 font-semibold' : 'text-slate-400'}`}>
                       {formatTime(chat.lastMessageTime || chat.updatedAt)}
                     </span>
                   </div>
 
-                  <div className="flex items-center justify-between text-xs text-slate-400">
-                    <div className="flex items-center gap-1 truncate text-[11px]">
+                  <div className="flex items-center justify-between text-xs text-slate-400 gap-2">
+                    <div className={`flex items-center gap-1 truncate text-[11px] ${isUnreadForMe ? 'text-emerald-200 font-semibold' : ''}`}>
                       {isSentByMe && (
-                        <CheckCheck className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                        <CheckCheck
+                          className={`w-3.5 h-3.5 shrink-0 ${
+                            isLastMessageSeen ? 'text-sky-400' : 'text-slate-500'
+                          }`}
+                        />
                       )}
                       <span className="truncate">{chat.lastMessageText || t('noMessageYet')}</span>
                     </div>
 
-                    {!ghostUser && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setChatToDelete(chat);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/15 transition cursor-pointer shrink-0"
-                        title={t('deleteChatTooltip')}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {isUnreadForMe && (
+                        <span
+                          className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 shadow-xs"
+                          title={language === 'bn' ? 'নতুন অপঠিত বার্তা' : 'Unread message'}
+                        />
+                      )}
+                      {!ghostUser && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setChatToDelete(chat);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-1 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/15 transition cursor-pointer shrink-0"
+                          title={t('deleteChatTooltip')}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

@@ -1,6 +1,6 @@
 import type React from 'react';
 import { CheckCheck, Pause, Play, Phone, Video, PhoneIncoming, PhoneOutgoing, PhoneMissed } from 'lucide-react';
-import type { ChatMessage, ChatRoom, UserProfile } from '../../types/chat';
+import type { ChatMessage, ChatRoom, DirectoryUser, UserProfile } from '../../types/chat';
 
 interface MessageBubbleProps {
   msg: ChatMessage;
@@ -12,6 +12,9 @@ interface MessageBubbleProps {
   t: (key: any, params?: Record<string, any>) => string;
   user: UserProfile | null;
   ghostUser?: UserProfile | null;
+  partnerUser?: DirectoryUser | null;
+  isPartnerDeleted?: boolean;
+  isLastSeenInDm?: boolean;
   editingMessage: ChatMessage | null;
   editText: string;
   setEditText: (val: string) => void;
@@ -56,6 +59,9 @@ export function MessageBubble({
   t,
   user,
   ghostUser,
+  partnerUser,
+  isPartnerDeleted,
+  isLastSeenInDm = true,
   editingMessage,
   editText,
   setEditText,
@@ -74,9 +80,50 @@ export function MessageBubble({
   onOpenMessageInfo,
   onCallBack,
 }: MessageBubbleProps) {
-  const seenList = Object.entries(msg.seenByDetails || {}).filter(
-    ([uid]) => uid !== msg.senderId
-  );
+  const readByArr = Array.isArray(msg.readBy) ? msg.readBy : [];
+  const detailsMap = msg.seenByDetails || {};
+  const seenUidSet = new Set<string>();
+  Object.keys(detailsMap).forEach((uid) => {
+    if (uid && uid !== msg.senderId) seenUidSet.add(uid);
+  });
+  readByArr.forEach((uid) => {
+    if (uid && uid !== msg.senderId) seenUidSet.add(uid);
+  });
+
+  const seenList: Array<[string, { displayName: string; photoURL?: string; seenAt?: string }]> =
+    Array.from(seenUidSet).map((uid) => {
+      const saved = detailsMap[uid];
+      const participantInfo = chat.participantDetails?.[uid];
+      if (chat.type === 'direct' && isPartnerDeleted) {
+        return [
+          uid,
+          {
+            displayName: t('deletedAccountName'),
+            photoURL: 'https://api.dicebear.com/7.x/bottts/svg?seed=deleted_user',
+            seenAt: saved?.seenAt,
+          },
+        ];
+      }
+      const liveMatch = partnerUser && partnerUser.userId === uid ? partnerUser : null;
+      return [
+        uid,
+        {
+          displayName:
+            liveMatch?.displayName ||
+            participantInfo?.displayName ||
+            saved?.displayName ||
+            (language === 'bn' ? 'ব্যবহারকারী' : 'User'),
+          photoURL:
+            liveMatch?.photoURL ||
+            participantInfo?.photoURL ||
+            saved?.photoURL ||
+            `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`,
+          seenAt: saved?.seenAt,
+        },
+      ];
+    });
+
+  const isReadByOther = seenList.length > 0;
   const viewerId = ghostUser?.userId || user?.userId;
   const isCallMessage = msg.type === 'call';
   const isOutgoingCall = isCallMessage
@@ -406,7 +453,7 @@ export function MessageBubble({
               <span>
                 <CheckCheck
                   className={`w-3.5 h-3.5 ${
-                    msg.readBy.length > 1 ? 'text-sky-300' : 'text-emerald-200'
+                    isReadByOther ? 'text-sky-300' : 'text-emerald-200'
                   }`}
                 />
               </span>
@@ -438,7 +485,7 @@ export function MessageBubble({
           )}
         </div>
 
-        {isMine && seenList.length > 0 && (
+        {isMine && !isCallMessage && seenList.length > 0 && (chat.type === 'group' || isLastSeenInDm) && (
           <div
             onClick={(e) => {
               e.stopPropagation();

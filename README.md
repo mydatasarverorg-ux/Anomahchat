@@ -1,9 +1,9 @@
-# Anomah Chat (`v1.0.9` · `Mahi A09`)
+# Anomah Chat (`v1.0.10` · `Mahi A10`)
 
 > **Developer & Owner:** Mahi Muhtasim  
 > **Package ID:** `com.mahimuhtasim.anomahchat`  
 > **Platforms:** Web (PWA) & Android Native APK (Capacitor 8)  
-> **Release Channel:** Stable (`versionCode: 109`)
+> **Release Channel:** Stable (`versionCode: 110`)
 
 Anomah Chat is a real-time cross-platform cloud messenger built with React, TypeScript, Tailwind CSS, Firebase Authentication, Cloud Firestore, WebRTC, and Capacitor Android. Users can connect worldwide via 1-on-1 direct messaging, group chats, voice notes, compressed image sharing, and peer-to-peer audio/video calls, backed by strict Zero-Trust Firestore Security Rules.
 
@@ -52,9 +52,16 @@ Anomah Chat is a real-time cross-platform cloud messenger built with React, Type
 
 ---
 
-## Changelog (`v1.0.9 · Mahi A09`)
+## Changelog (`v1.0.10 · Mahi A10`)
+- **Fixed Direct Message & Inbox Read Receipts (`Sidebar`, `ChatArea`, `chatService`, `MessageBubble`, `MessageInfoModal`, `MessageContextMenu`):**
+  - Replaced misleading always-blue double-ticks in `Sidebar` with real `lastMessageReadBy` tracking (slate ticks until partner reads, sky-blue after read, plus live unread indicator dot for incoming unread messages).
+  - Prevented background/minimized auto-seen by gating `markChatMessagesAsRead` on `isAppInBackground()` and syncing read status on `visibilitychange` / `focus`.
+  - Eliminated `onSnapshot` resubscription churn on message updates and replaced sequential `readBy` writes with atomic batched `arrayUnion` + dot-notation `seenByDetails.<uid>` writes guarded by in-flight deduplication.
+  - Unified `readBy` and `seenByDetails` across `MessageBubble` and `MessageInfoModal`, resolved live/deleted partner profiles, excluded call logs from seen avatars, and anchored the DM seen avatar cleanly to the latest seen outgoing message.
+
+### Previous (`v1.0.9 · Mahi A09`)
 - Added **Super Admin Google Drive Chat Backup & Safe 1 GiB Firestore Cleanup** (`AdminBackupTab` & `driveBackupService`) using an isolated in-memory Drive OAuth session (`drive.file` least-privilege scope targeting `anomahchatsarverorg@gmail.com`) without touching the Super Admin (`chinisdramaorg@gmail.com`) login session.
-- Added **Firestore 1 GiB Storage Scanner**, **Local JSON Export**, **Explicit Confirmation Cleanup** (with recursive WebRTC `calls`/`offerCandidates`/`answerCandidates` purging), and an **In-Panel Google Drive Archive Reader**.
+- Added **Firestore 1 GiB Storage Scanner**, **Local JSON Export**, **Explicit Confirmation Cleanup** (with recursive WebRTC `calls`/`offerCandidates`/`answerCandidates` purging), **In-Panel Google Drive Archive Reader**, and **1-Click Restore to Firebase**.
 - Added **Automatic In-Chat Audio & Video Call Logs** (`calllog_<callId>`) recording answered call duration, missed, declined, and cancelled calls with 1-tap callback controls.
 
 ### Previous (`v1.0.8 · Mahi A08`)
@@ -114,8 +121,8 @@ The workflow in `.github/workflows/build-apk.yml` automatically builds an Androi
    - `ANDROID_KEY_ALIAS`
    - `ANDROID_KEY_PASSWORD`
    *(Falls back to a Debug APK if keystore secrets are not set.)*
-3. Computes the APK **SHA-256** digest, uploads `AnomahChat-v1.0.9-APK` as a workflow artifact, and publishes `v1.0.9` (`AnomahChat-v1.0.9.apk` & `AnomahChat.apk`) to **GitHub Releases**.
+3. Computes the APK **SHA-256** digest, uploads `AnomahChat-v1.0.10-APK` as a workflow artifact, and publishes `v1.0.10` (`AnomahChat-v1.0.10.apk` & `AnomahChat.apk`) to **GitHub Releases**.
 
 ---
 
-*Built & maintained by **Mahi Muhtasim** · Anomah Chat `v1.0.9` (`Mahi A09`)*
+*Built & maintained by **Mahi Muhtasim** · Anomah Chat `v1.0.10` (`Mahi A10`)*

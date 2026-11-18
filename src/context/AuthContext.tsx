@@ -188,8 +188,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               prev.isBanned !== fresh.isBanned ||
               prev.banReason !== fresh.banReason ||
               prev.bannedUntil !== fresh.bannedUntil ||
+              prev.bannedUntilMs !== fresh.bannedUntilMs ||
               prev.warningNotice !== fresh.warningNotice ||
+              prev.warningDismissed !== fresh.warningDismissed ||
+              prev.warningIssuedAt !== fresh.warningIssuedAt ||
+              prev.status !== fresh.status ||
               prev.displayName !== fresh.displayName ||
+              prev.about !== fresh.about ||
               prev.photoURL !== fresh.photoURL ||
               prev.username !== fresh.username ||
               prev.hasAppLockPin !== fresh.hasAppLockPin

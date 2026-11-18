@@ -1,13 +1,15 @@
 import React from 'react';
 import { X, CheckCheck, Clock, MessageSquare } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
-import type { ChatMessage, ChatRoom } from '../types/chat';
+import type { ChatMessage, ChatRoom, DirectoryUser } from '../types/chat';
 
 interface MessageInfoModalProps {
   isOpen: boolean;
   onClose: () => void;
   message: ChatMessage | null;
   chat: ChatRoom;
+  partnerUser?: DirectoryUser | null;
+  isPartnerDeleted?: boolean;
 }
 
 export const MessageInfoModal: React.FC<MessageInfoModalProps> = ({
@@ -15,6 +17,8 @@ export const MessageInfoModal: React.FC<MessageInfoModalProps> = ({
   onClose,
   message,
   chat,
+  partnerUser,
+  isPartnerDeleted,
 }) => {
   const { t, language } = useLanguage();
 
@@ -22,23 +26,47 @@ export const MessageInfoModal: React.FC<MessageInfoModalProps> = ({
 
   const isGroup = chat.type === 'group';
   const seenDetailsMap = message.seenByDetails || {};
+  const readByArr = Array.isArray(message.readBy) ? message.readBy : [];
+
+  const seenUidSet = new Set<string>();
+  Object.keys(seenDetailsMap).forEach((uid) => {
+    if (uid && uid !== message.senderId) seenUidSet.add(uid);
+  });
+  readByArr.forEach((uid) => {
+    if (uid && uid !== message.senderId) seenUidSet.add(uid);
+  });
 
   // All members who have seen the message (excluding the sender themselves)
-  const seenMembers = Object.entries(seenDetailsMap)
-    .filter(([uid]) => uid !== message.senderId)
-    .map(([uid, details]) => ({
+  const seenMembers = Array.from(seenUidSet).map((uid) => {
+    const details = seenDetailsMap[uid];
+    const participantInfo = chat.participantDetails?.[uid];
+    if (!isGroup && isPartnerDeleted) {
+      return {
+        userId: uid,
+        displayName: t('deletedAccountName'),
+        photoURL: 'https://api.dicebear.com/7.x/bottts/svg?seed=deleted_user',
+        seenAt: details?.seenAt,
+      };
+    }
+    const liveMatch = partnerUser && partnerUser.userId === uid ? partnerUser : null;
+    return {
       userId: uid,
-      displayName: details.displayName || chat.participantDetails?.[uid]?.displayName || 'User',
-      photoURL: details.photoURL || chat.participantDetails?.[uid]?.photoURL,
-      seenAt: details.seenAt,
-    }));
+      displayName:
+        liveMatch?.displayName ||
+        participantInfo?.displayName ||
+        details?.displayName ||
+        (language === 'bn' ? 'ব্যবহারকারী' : 'User'),
+      photoURL: liveMatch?.photoURL || participantInfo?.photoURL || details?.photoURL,
+      seenAt: details?.seenAt,
+    };
+  });
 
   // Identify who hasn't seen the message yet
   const notSeenMembers = (chat.participantIds || [])
-    .filter((uid) => uid !== message.senderId && !message.readBy.includes(uid))
+    .filter((uid) => uid !== message.senderId && !seenUidSet.has(uid))
     .map((uid) => ({
       userId: uid,
-      displayName: chat.participantDetails?.[uid]?.displayName || 'User',
+      displayName: chat.participantDetails?.[uid]?.displayName || (language === 'bn' ? 'ব্যবহারকারী' : 'User'),
       photoURL: chat.participantDetails?.[uid]?.photoURL,
     }));
 
@@ -106,6 +134,11 @@ export const MessageInfoModal: React.FC<MessageInfoModalProps> = ({
                 <span>🎤 {language === 'bn' ? 'ভয়েস মেসেজ' : 'Voice Message'}</span>
               </div>
             )}
+            {(message.type === 'file' || message.type === 'call') && (
+              <p className="whitespace-pre-wrap break-words text-slate-200 font-normal leading-relaxed line-clamp-2">
+                {message.text}
+              </p>
+            )}
           </div>
         </div>
 
@@ -145,7 +178,11 @@ export const MessageInfoModal: React.FC<MessageInfoModalProps> = ({
                           {member.displayName}
                         </span>
                         <span className="block text-[10px] text-slate-400 font-mono mt-0.5">
-                          {t('seenAt')}: {formatTimestamp(member.seenAt)}
+                          {member.seenAt
+                            ? `${t('seenAt')}: ${formatTimestamp(member.seenAt)}`
+                            : language === 'bn'
+                            ? 'দেখেছে'
+                            : 'Seen'}
                         </span>
                       </div>
                     </div>

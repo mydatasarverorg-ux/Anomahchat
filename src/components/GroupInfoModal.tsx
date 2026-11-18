@@ -70,6 +70,29 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
     setEditedTitle(chat.name || '');
   }, [chat.name]);
 
+  // Close nested dialogs or modal on Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (confirmLeave) {
+        setConfirmLeave(false);
+      } else if (confirmDelete) {
+        setConfirmDelete(false);
+      } else if (confirmRemoveId) {
+        setConfirmRemoveId(null);
+      } else if (showAddMembers) {
+        setShowAddMembers(false);
+      } else if (isEditingTitle) {
+        setIsEditingTitle(false);
+      } else {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, confirmLeave, confirmDelete, confirmRemoveId, showAddMembers, isEditingTitle, onClose]);
+
   // Load available users for adding to group
   useEffect(() => {
     if (showAddMembers && currentUser) {

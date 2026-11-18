@@ -188,9 +188,11 @@ export interface ChatRoom {
   isSuspended?: boolean;
   suspendedUserId?: string | null;
   suspendedUserName?: string | null;
+  lastMessageId?: string;
   lastMessageText?: string;
   lastMessageSenderId?: string;
   lastMessageTime?: string;
+  lastMessageReadBy?: string[];
   createdAt: string;
   updatedAt: string;
 }

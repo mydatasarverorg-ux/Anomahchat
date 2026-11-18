@@ -1,10 +1,10 @@
 import { Capacitor } from '@capacitor/core';
 
 export const APP_VERSION = {
-  versionName: '1.0.9',
-  versionCode: 109,
+  versionName: '1.0.10',
+  versionCode: 110,
   channel: 'Stable',
-  buildDate: '2026-11-15',
+  buildDate: '2026-11-17',
 };
 
 /**
@@ -48,11 +48,7 @@ export function isUpdateAvailable(
 
   // Fallback / same-versionName build bump via numeric versionCode
   if (remoteCode !== undefined && !isNaN(remoteCode)) {
-    let normalizedCode = remoteCode;
-    if (normalizedCode < 10 && APP_VERSION.versionCode >= 100) {
-      normalizedCode = normalizedCode * 100 + (remoteCode === 2 ? 2 : 0);
-    }
-    return normalizedCode > APP_VERSION.versionCode;
+    return remoteCode > APP_VERSION.versionCode;
   }
 
   return false;

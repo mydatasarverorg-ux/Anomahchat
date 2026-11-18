@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useLanguage } from '../context/LanguageContext';
+import { useModalHistory } from '../hooks/useModalHistory';
 import { APP_VERSION } from '../utils/appVersion';
 import { isAllowedApkUrl, type AppReleaseInfo } from '../services/updateService';
 import {
@@ -37,20 +38,8 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
   const [copiedLink, setCopiedLink] = useState(false);
   const [urlError, setUrlError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if ((release.forceUpdate || downloadStarted) && !isManualCheck) return;
-    window.history.pushState({ modal: 'updateModal' }, '');
-    const handlePopState = () => onClose();
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('popstate', handlePopState);
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [onClose, release.forceUpdate, isManualCheck, downloadStarted]);
+  const allowBackDismiss = !(release.forceUpdate && !isManualCheck) && !downloadStarted;
+  useModalHistory(allowBackDismiss, onClose);
 
   useEffect(() => {
     const win = window as unknown as { onNativeApkDownloadComplete?: (() => void) | null };

@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { handleFirestoreError, OperationType } from '../firebase/errorHandler';
+import { syncChatLastMessageFromLatest } from './chatService';
 import type {
   UserProfile,
   UserReport,
@@ -528,6 +529,7 @@ export async function deleteAdminMessage(
   const path = `chats/${chatId}/messages/${messageId}`;
   try {
     await deleteDoc(doc(db, 'chats', chatId, 'messages', messageId));
+    await syncChatLastMessageFromLatest(chatId, messageId);
     await logAdminAction(
       'delete_message',
       `Admin removed inappropriate message. Reason: "${reason || 'Safety moderation'}"`,

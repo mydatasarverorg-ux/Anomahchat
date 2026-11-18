@@ -23,6 +23,7 @@ import {
 import firebaseConfig from '../../firebase-applet-config.json';
 import { auth as primaryAuth, db } from '../firebase/config';
 import { isSuperAdmin, logAdminAction } from './adminService';
+import { syncChatLastMessageFromLatest } from './chatService';
 import { APP_VERSION } from '../utils/appVersion';
 import type { ChatMessage, ChatRoom } from '../types/chat';
 
@@ -759,6 +760,12 @@ export async function cleanupFirestoreAfterBackup(
           result.quotaHit = true;
           break;
         }
+        if (
+          res.count > 0 &&
+          (options.mode === 'media_messages' || options.mode === 'old_messages')
+        ) {
+          await syncChatLastMessageFromLatest(chatDoc.id).catch(() => {});
+        }
       }
     }
 
@@ -864,9 +871,13 @@ function sanitizeChatRoomForRestore(raw: ChatRoom): Record<string, unknown> | nu
   if (raw.suspendedUserName !== undefined) {
     clean.suspendedUserName = typeof raw.suspendedUserName === 'string' ? raw.suspendedUserName.slice(0, 150) : null;
   }
+  if (typeof raw.lastMessageId === 'string') clean.lastMessageId = raw.lastMessageId.slice(0, 128);
   if (typeof raw.lastMessageText === 'string') clean.lastMessageText = raw.lastMessageText.slice(0, 500);
   if (typeof raw.lastMessageSenderId === 'string') clean.lastMessageSenderId = raw.lastMessageSenderId.slice(0, 128);
   if (typeof raw.lastMessageTime === 'string') clean.lastMessageTime = raw.lastMessageTime.slice(0, 64);
+  if (Array.isArray(raw.lastMessageReadBy)) {
+    clean.lastMessageReadBy = raw.lastMessageReadBy.filter((id): id is string => typeof id === 'string').slice(0, 100);
+  }
 
   return clean;
 }

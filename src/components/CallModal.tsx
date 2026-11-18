@@ -11,6 +11,7 @@ import {
   subscribeToCallSignal,
   subscribeToIceCandidates,
   logCallToChat,
+  cleanupCallIceCandidates,
 } from '../services/callService';
 import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff, Volume2, AlertTriangle } from 'lucide-react';
 import { cancelAppNotification } from '../services/notificationService';
@@ -46,6 +47,8 @@ export function CallModal({ session, currentUser, onEndCall }: CallModalProps) {
   const unsubSignalRef = useRef<(() => void) | null>(null);
   const unsubIceRef = useRef<(() => void) | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const ringTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const callerId = session.role === 'caller' ? currentUser.userId : session.partnerId;
 
@@ -82,6 +85,14 @@ export function CallModal({ session, currentUser, onEndCall }: CallModalProps) {
   };
 
   const cleanupMediaAndPeer = () => {
+    if (ringTimeoutRef.current) {
+      clearTimeout(ringTimeoutRef.current);
+      ringTimeoutRef.current = null;
+    }
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
     unsubSignalRef.current?.();
     unsubSignalRef.current = null;
     unsubIceRef.current?.();
@@ -116,6 +127,7 @@ export function CallModal({ session, currentUser, onEndCall }: CallModalProps) {
     cleanupMediaAndPeer();
     if (activeCallId && session.chatId) {
       await updateCallSignalStatus(session.chatId, activeCallId, nextStatus);
+      cleanupCallIceCandidates(session.chatId, activeCallId).catch(() => {});
     }
     if (closeImmediately) {
       onEndCall();
@@ -218,7 +230,6 @@ export function CallModal({ session, currentUser, onEndCall }: CallModalProps) {
   // Caller initialization + Callee incoming signal watcher
   useEffect(() => {
     let mounted = true;
-    let ringTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const startOutgoingCall = async () => {
       try {
@@ -307,29 +318,30 @@ export function CallModal({ session, currentUser, onEndCall }: CallModalProps) {
             }
           }
 
-          if (data.status === 'declined') {
-            setCallState('declined');
+          if (data.status === 'declined' || data.status === 'ended' || data.status === 'missed') {
+            if (endedRef.current) return;
+            endedRef.current = true;
+            const finalStatus = data.status as 'declined' | 'ended' | 'missed';
+            const activeCallId = callIdRef.current;
+            setCallState(finalStatus);
+            cancelAppNotification(activeCallId || session.callId);
+            recordCallLogOnce(finalStatus);
             cleanupMediaAndPeer();
-            setTimeout(() => {
-              recordCallLogOnce('declined');
+            if (activeCallId && session.chatId) {
+              cleanupCallIceCandidates(session.chatId, activeCallId).catch(() => {});
+            }
+            closeTimeoutRef.current = setTimeout(() => {
               if (mounted) onEndCall();
-            }, 1400);
-          } else if (data.status === 'ended' || data.status === 'missed') {
-            setCallState(data.status);
-            cleanupMediaAndPeer();
-            setTimeout(() => {
-              recordCallLogOnce(data.status as 'ended' | 'missed');
-              if (mounted) onEndCall();
-            }, 950);
+            }, finalStatus === 'declined' ? 1400 : 950);
           }
         });
 
-        ringTimeout = setTimeout(() => {
+        ringTimeoutRef.current = setTimeout(() => {
           if (mounted && !endedRef.current && callIdRef.current) {
             setCallState((curr) => {
               if (curr === 'calling' || curr === 'ringing') {
                 finishCall('missed', false);
-                setTimeout(() => {
+                closeTimeoutRef.current = setTimeout(() => {
                   if (mounted) onEndCall();
                 }, 1500);
                 return 'missed';
@@ -358,10 +370,18 @@ export function CallModal({ session, currentUser, onEndCall }: CallModalProps) {
       unsubSignalRef.current = subscribeToCallSignal(session.chatId, session.callId, (data) => {
         if (!mounted || !data) return;
         if (data.status === 'ended' || data.status === 'missed' || data.status === 'declined') {
-          setCallState(data.status);
+          if (endedRef.current) return;
+          endedRef.current = true;
+          const finalStatus = data.status as 'ended' | 'missed' | 'declined';
+          const activeCallId = callIdRef.current || session.callId;
+          setCallState(finalStatus);
+          cancelAppNotification(activeCallId);
+          recordCallLogOnce(finalStatus);
           cleanupMediaAndPeer();
-          setTimeout(() => {
-            recordCallLogOnce(data.status as 'ended' | 'missed' | 'declined');
+          if (activeCallId && session.chatId) {
+            cleanupCallIceCandidates(session.chatId, activeCallId).catch(() => {});
+          }
+          closeTimeoutRef.current = setTimeout(() => {
             if (mounted) onEndCall();
           }, 900);
         }
@@ -376,15 +396,16 @@ export function CallModal({ session, currentUser, onEndCall }: CallModalProps) {
 
     return () => {
       mounted = false;
-      if (ringTimeout) clearTimeout(ringTimeout);
       if (!endedRef.current) {
+        endedRef.current = true;
         const cid = callIdRef.current;
         if (cid && session.chatId && session.role === 'caller') {
           recordCallLogOnce('ended');
           updateCallSignalStatus(session.chatId, cid, 'ended');
+          cleanupCallIceCandidates(session.chatId, cid).catch(() => {});
         }
-        cleanupMediaAndPeer();
       }
+      cleanupMediaAndPeer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

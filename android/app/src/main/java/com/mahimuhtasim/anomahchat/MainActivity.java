@@ -33,6 +33,7 @@ import androidx.core.content.FileProvider;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebChromeClient;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
@@ -163,8 +164,8 @@ public class MainActivity extends BridgeActivity {
                 String standardChromeUA = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
                 settings.setUserAgentString(standardChromeUA);
 
-                // Strictly grant WebRTC audio/camera permissions ONLY to trusted app origins
-                webView.setWebChromeClient(new WebChromeClient() {
+                // Subclass BridgeWebChromeClient to preserve file chooser (onShowFileChooser) & JS dialogs while keeping trusted-origin media permissions
+                webView.setWebChromeClient(new BridgeWebChromeClient(getBridge()) {
                     @Override
                     public void onPermissionRequest(final PermissionRequest request) {
                         runOnUiThread(new Runnable() {
