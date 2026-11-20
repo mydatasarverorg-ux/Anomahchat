@@ -29,9 +29,31 @@ import {
   subscribeToAllChatsForAdmin,
   subscribeToChatMessagesForAdmin,
   SUPER_ADMIN_EMAIL,
+  isSuperAdmin,
   extractPhoneDigits,
   doPhonesMatch,
+  extractReadableFirestoreError,
+  stampReportTargetSnapshot,
 } from '../services/adminService';
+import { hashPhoneForRegistry } from '../utils/phoneUtils';
+import {
+  subscribeToPhoneRegistries,
+  backfillPhoneRegistryFromUsers,
+  adminSetPhoneManualBlock,
+  adminRemoveUidFromPhoneRegistry,
+  adminUpdatePhoneMaxLimit,
+} from '../services/phoneRegistryService';
+import {
+  DEFAULT_SECURITY_SETTINGS,
+  adminApproveDeviceSession,
+  adminDeleteDeviceSession,
+  adminForceLogoutDeviceSession,
+  adminUnlockPhoneCooldown,
+  adminUpdateGlobalSecuritySettings,
+  adminUpdateUserDeviceLimits,
+  subscribeToGlobalSecuritySettings,
+  subscribeToUserDeviceSessions,
+} from '../services/deviceSessionService';
 import {
   publishAppRelease,
   subscribeToLatestRelease,
@@ -40,10 +62,14 @@ import {
 import type {
   UserProfile,
   UserReport,
+  ReportReason,
   SystemAnnouncement,
   AdminAuditLog,
   AnnouncementType,
   PasswordRecoveryRequest,
+  PhoneRegistryEntry,
+  AppSecuritySettings,
+  DeviceSession,
   ChatRoom,
   ChatMessage,
 } from '../types/chat';
@@ -111,6 +137,15 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   const [isClearingLock, setIsClearingLock] = useState(false);
   const [copiedText, setCopiedText] = useState<string | null>(null);
   const didBackfillRef = useRef(false);
+  const lastPhoneSyncSigRef = useRef<string>('');
+  const stampedReportIdsRef = useRef<Set<string>>(new Set());
+  const [phoneRegistries, setPhoneRegistries] = useState<PhoneRegistryEntry[]>([]);
+  const [phoneHashByUserId, setPhoneHashByUserId] = useState<Record<string, string>>({});
+  const [phoneActionBusy, setPhoneActionBusy] = useState(false);
+  const [globalSecuritySettings, setGlobalSecuritySettings] =
+    useState<AppSecuritySettings>(DEFAULT_SECURITY_SETTINGS);
+  const [dossierDeviceSessions, setDossierDeviceSessions] = useState<DeviceSession[]>([]);
+  const [securityActionBusy, setSecurityActionBusy] = useState(false);
 
   const [allChats, setAllChats] = useState<ChatRoom[]>([]);
   const [chatSearch, setChatSearch] = useState('');
@@ -119,10 +154,12 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   const [chatFilter, setChatFilter] = useState<'all' | 'direct' | 'group'>('all');
   const [targetUserChatFilter, setTargetUserChatFilter] = useState<UserProfile | null>(null);
   const [mobileChatView, setMobileChatView] = useState<'list' | 'messages'>('list');
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
 
   const handleInspectUserChats = (targetUser: UserProfile) => {
     setTargetUserChatFilter(targetUser);
     setSelectedDossierUser(null);
+    setHighlightedMessageId(null);
     setActiveTab('chat_audit');
     setMobileChatView('messages');
     const userChats = allChats.filter(
@@ -131,21 +168,24 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     setSelectedChat(userChats.length > 0 ? userChats[0] : null);
   };
 
-  const handleInspectReportChat = (chatId: string) => {
-    setTargetUserChatFilter(null);
-    setChatSearch('');
-    setChatFilter('all');
+  const handleInspectReportChat = (chatId: string, highlightMessageId?: string) => {
     const foundChat = allChats.find((c) => c.id === chatId) || null;
-    setSelectedChat(foundChat);
-    setActiveTab('chat_audit');
-    setMobileChatView(foundChat ? 'messages' : 'list');
     if (!foundChat) {
       setActionErrorMsg(
         language === 'bn'
           ? 'এই রিপোর্টের সাথে যুক্ত চ্যাট রুমটি আর পাওয়া যায়নি (সম্ভবত ডিলিট করা হয়েছে)।'
           : 'The chat room linked to this report was not found (it may have been deleted).'
       );
+      return;
     }
+    setActionErrorMsg(null);
+    setTargetUserChatFilter(null);
+    setChatSearch('');
+    setChatFilter('all');
+    setSelectedChat(foundChat);
+    setHighlightedMessageId(highlightMessageId || null);
+    setActiveTab('chat_audit');
+    setMobileChatView('messages');
   };
 
   const [recoveryRequests, setRecoveryRequests] = useState<PasswordRecoveryRequest[]>([]);
@@ -157,6 +197,8 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
 
   const [reports, setReports] = useState<UserReport[]>([]);
   const [reportFilter, setReportFilter] = useState<'all' | 'pending' | 'resolved' | 'dismissed'>('all');
+  const [reportSearch, setReportSearch] = useState('');
+  const [reportReasonFilter, setReportReasonFilter] = useState<'all' | ReportReason>('all');
 
   const [announcements, setAnnouncements] = useState<SystemAnnouncement[]>([]);
   const [newAnnTitle, setNewAnnTitle] = useState('');
@@ -200,9 +242,137 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => subscribeToPhoneRegistries((entries) => setPhoneRegistries(entries)), []);
+
+  const [phoneHashReadyVersion, setPhoneHashReadyVersion] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, string> = {};
+      for (const u of usersList) {
+        if (!u.phoneNumber) continue;
+        const h = await hashPhoneForRegistry(u.phoneNumber);
+        if (h) next[u.userId] = h;
+      }
+      if (!cancelled) {
+        setPhoneHashByUserId(next);
+        setPhoneHashReadyVersion((v) => v + 1);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [usersList]);
+
+  useEffect(() => {
+    if (usersList.length === 0 || phoneHashReadyVersion === 0) return;
+    const nowMs = Date.now();
+    const userById = new Map(usersList.map((u) => [u.userId, u]));
+    const isExpiredOrDeleted = (u: UserProfile) =>
+      !u.isBanned &&
+      (u.status === 'deleted' ||
+        (u.status === 'scheduled_for_deletion' &&
+          Boolean(u.deleteScheduledAt) &&
+          Number.isFinite(new Date(u.deleteScheduledAt!).getTime()) &&
+          new Date(u.deleteScheduledAt!).getTime() <= nowMs));
+
+    const mismatchItems: string[] = [];
+    for (const u of usersList) {
+      if (isExpiredOrDeleted(u)) continue;
+      const h = phoneHashByUserId[u.userId];
+      if (!h) continue;
+      const reg = phoneRegistries.find((r) => r.phoneHash === h);
+      const released = reg?.manuallyReleasedUids || [];
+      if (!reg || (!reg.accountUids.includes(u.userId) && !released.includes(u.userId))) {
+        mismatchItems.push(`add:${u.userId}:${h}`);
+      }
+    }
+
+    for (const reg of phoneRegistries) {
+      const seen = new Set<string>();
+      for (const id of reg.accountUids || []) {
+        if (seen.has(id)) {
+          mismatchItems.push(`dup:${id}:${reg.phoneHash}`);
+          continue;
+        }
+        seen.add(id);
+        const owner = userById.get(id);
+        const isBannedHere = Boolean(reg.bannedUids?.includes(id) || owner?.isBanned);
+        if (!owner && !isBannedHere) {
+          mismatchItems.push(`orphan:${id}:${reg.phoneHash}`);
+        } else if (owner && isExpiredOrDeleted(owner)) {
+          mismatchItems.push(`del:${id}:${reg.phoneHash}`);
+        } else if (owner && !isBannedHere && phoneHashByUserId[id] !== reg.phoneHash) {
+          mismatchItems.push(`moved:${id}:${reg.phoneHash}`);
+        }
+      }
+    }
+
+    if (mismatchItems.length === 0) return;
+    const sig = mismatchItems.sort().join('|');
+    if (sig === lastPhoneSyncSigRef.current) return;
+    lastPhoneSyncSigRef.current = sig;
+    backfillPhoneRegistryFromUsers(usersList).catch(() => {});
+  }, [usersList, phoneRegistries, phoneHashByUserId, phoneHashReadyVersion]);
+
+  const userPhoneRegistryMap: Record<string, PhoneRegistryEntry> = {};
+  for (const u of usersList) {
+    const h = phoneHashByUserId[u.userId];
+    if (h) {
+      const reg = phoneRegistries.find((r) => r.phoneHash === h);
+      if (reg) userPhoneRegistryMap[u.userId] = reg;
+    }
+  }
+
+  const originalUidByPhoneHash: Record<string, string> = {};
+  for (const reg of phoneRegistries) {
+    if (!reg.accountUids || reg.accountUids.length === 0) continue;
+    let earliestUid = reg.accountUids[0];
+    let earliestMs = Number.MAX_SAFE_INTEGER;
+    for (const uid of reg.accountUids) {
+      const matchUser = usersList.find((u) => u.userId === uid);
+      if (matchUser?.createdAt) {
+        const ms = new Date(matchUser.createdAt).getTime();
+        if (Number.isFinite(ms) && ms < earliestMs) {
+          earliestMs = ms;
+          earliestUid = uid;
+        }
+      }
+    }
+    originalUidByPhoneHash[reg.phoneHash] = earliestUid;
+  }
+
   const activeDossierUser = selectedDossierUser
     ? usersList.find((u) => u.userId === selectedDossierUser.userId) || selectedDossierUser
     : null;
+  const activeDossierPhoneRegistry = activeDossierUser
+    ? userPhoneRegistryMap[activeDossierUser.userId] || null
+    : null;
+
+  useEffect(() => subscribeToGlobalSecuritySettings((settings) => setGlobalSecuritySettings(settings)), []);
+
+  useEffect(() => {
+    if (!activeDossierUser?.userId) {
+      setDossierDeviceSessions([]);
+      return;
+    }
+    return subscribeToUserDeviceSessions(activeDossierUser.userId, (sessions) => {
+      setDossierDeviceSessions(sessions);
+    });
+  }, [activeDossierUser?.userId]);
+
+  useEffect(() => {
+    if (reports.length === 0 || usersList.length === 0) return;
+    for (const rep of reports) {
+      if (rep.targetPhoneNumber || stampedReportIdsRef.current.has(rep.id)) continue;
+      const target = usersList.find((u) => u.userId === rep.targetUserId);
+      if (target && (target.phoneNumber || target.initialPhoneNumber)) {
+        stampedReportIdsRef.current.add(rep.id);
+        stampReportTargetSnapshot(rep.id, target).catch(() => {});
+      }
+    }
+  }, [reports, usersList]);
 
   useEffect(() => subscribeToAllChatsForAdmin((data) => setAllChats(data)), []);
 
@@ -235,30 +405,238 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     });
   }, []);
 
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+    };
+  }, []);
+
   const showSuccessBanner = (msg: string) => {
+    if (successTimerRef.current) clearTimeout(successTimerRef.current);
     setActionErrorMsg(null);
     setActionSuccessMsg(msg);
-    setTimeout(() => setActionSuccessMsg(null), 3500);
+    successTimerRef.current = setTimeout(() => setActionSuccessMsg(null), 3500);
   };
 
-  const extractReadableError = (err: unknown, fallback: string) => {
-    if (err instanceof Error && err.message) {
-      try {
-        const parsed = JSON.parse(err.message);
-        if (parsed && typeof parsed.error === 'string' && parsed.error.trim()) {
-          return parsed.error;
-        }
-      } catch {
-        return err.message;
-      }
-    }
-    return fallback;
-  };
+  const extractReadableError = (err: unknown, fallback: string) =>
+    extractReadableFirestoreError(err, language, fallback);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedText(text);
     setTimeout(() => setCopiedText(null), 2000);
+  };
+
+  const handleTogglePhoneManualBlock = async (
+    phoneHash: string,
+    blocked: boolean,
+    displayPhone?: string
+  ) => {
+    if (!user?.email) return;
+    setPhoneActionBusy(true);
+    setActionErrorMsg(null);
+    try {
+      await adminSetPhoneManualBlock(
+        phoneHash,
+        blocked,
+        blocked ? 'Manually locked by administrator' : '',
+        user.email,
+        displayPhone
+      );
+      showSuccessBanner(
+        blocked
+          ? language === 'bn'
+            ? 'এই মোবাইল নম্বরটি অ্যাডমিন লক করা হয়েছে (নতুন অ্যাকাউন্ট খোলা বন্ধ)।'
+            : 'Mobile number manually locked against new registrations.'
+          : language === 'bn'
+          ? 'মোবাইল নম্বরের ম্যানুয়াল লক খুলে দেওয়া হয়েছে।'
+          : 'Manual lock removed from mobile number.'
+      );
+    } catch (err) {
+      setActionErrorMsg(extractReadableError(err, 'Failed to update phone block status.'));
+    } finally {
+      setPhoneActionBusy(false);
+    }
+  };
+
+  const handleReleasePhoneSlot = async (
+    phoneHash: string,
+    targetUid: string,
+    displayPhone?: string
+  ) => {
+    if (!user?.email) return;
+    setPhoneActionBusy(true);
+    setActionErrorMsg(null);
+    try {
+      await adminRemoveUidFromPhoneRegistry(phoneHash, targetUid, user.email, displayPhone);
+      showSuccessBanner(
+        language === 'bn'
+          ? 'নির্বাচিত অ্যাকাউন্টটির ফোন স্লট খালি করা হয়েছে।'
+          : 'Released account slot from mobile registry.'
+      );
+    } catch (err) {
+      setActionErrorMsg(extractReadableError(err, 'Failed to release phone slot.'));
+    } finally {
+      setPhoneActionBusy(false);
+    }
+  };
+
+  const handleUpdatePhoneLimit = async (
+    phoneHash: string,
+    newLimit: number,
+    displayPhone?: string
+  ) => {
+    if (!user?.email) return;
+    setPhoneActionBusy(true);
+    setActionErrorMsg(null);
+    try {
+      await adminUpdatePhoneMaxLimit(phoneHash, newLimit, user.email, displayPhone);
+      showSuccessBanner(
+        language === 'bn'
+          ? `এই মোবাইল নম্বরের সর্বোচ্চ অ্যাকাউন্ট সীমা ${newLimit} করা হয়েছে।`
+          : `Updated mobile number max limit to ${newLimit}.`
+      );
+    } catch (err) {
+      setActionErrorMsg(extractReadableError(err, 'Failed to update phone limit.'));
+    } finally {
+      setPhoneActionBusy(false);
+    }
+  };
+
+  const handleSaveGlobalSecuritySettings = async (settings: {
+    defaultMobileLimit: number;
+    defaultWebLimit: number;
+    requireApprovalForNewDevice: boolean;
+  }) => {
+    if (!user?.email) return;
+    setSecurityActionBusy(true);
+    setActionErrorMsg(null);
+    try {
+      await adminUpdateGlobalSecuritySettings(settings, user.email);
+      showSuccessBanner(
+        language === 'bn'
+          ? `গ্লোবাল ডিভাইস নীতি সেভ হয়েছে (মোবাইল: ${settings.defaultMobileLimit}, ওয়েব/পিসি: ${settings.defaultWebLimit})।`
+          : `Saved global device policy (Mobile: ${settings.defaultMobileLimit}, Web/PC: ${settings.defaultWebLimit}).`
+      );
+    } catch (err) {
+      setActionErrorMsg(extractReadableError(err, 'Failed to save global device policy.'));
+    } finally {
+      setSecurityActionBusy(false);
+    }
+  };
+
+  const handleUpdateUserDeviceLimits = async (
+    targetUser: UserProfile,
+    limits: { mobile?: number; web?: number } | null
+  ) => {
+    if (!user?.email) return;
+    setSecurityActionBusy(true);
+    setActionErrorMsg(null);
+    try {
+      await adminUpdateUserDeviceLimits(
+        targetUser.userId,
+        limits,
+        user.email,
+        targetUser.displayName
+      );
+      showSuccessBanner(
+        limits
+          ? language === 'bn'
+            ? `${targetUser.displayName}-এর ডিভাইস সীমা আপডেট করা হয়েছে।`
+            : `Updated device limits for ${targetUser.displayName}.`
+          : language === 'bn'
+          ? `${targetUser.displayName}-এর ডিভাইস সীমা গ্লোবাল ডিফল্টে রিসেট করা হয়েছে।`
+          : `Reset device limits for ${targetUser.displayName} to global defaults.`
+      );
+    } catch (err) {
+      setActionErrorMsg(extractReadableError(err, 'Failed to update user device limits.'));
+    } finally {
+      setSecurityActionBusy(false);
+    }
+  };
+
+  const handleUnlockPhoneCooldown = async (targetUser: UserProfile) => {
+    if (!user?.email) return;
+    setSecurityActionBusy(true);
+    setActionErrorMsg(null);
+    try {
+      await adminUnlockPhoneCooldown(targetUser.userId, user.email, targetUser.displayName);
+      showSuccessBanner(
+        language === 'bn'
+          ? `${targetUser.displayName}-এর ৩০-দিনের মোবাইল নম্বর পরিবর্তনের বাধা আনলক করা হয়েছে।`
+          : `Unlocked 30-day mobile number cooldown for ${targetUser.displayName}.`
+      );
+    } catch (err) {
+      setActionErrorMsg(extractReadableError(err, 'Failed to unlock cooldown.'));
+    } finally {
+      setSecurityActionBusy(false);
+    }
+  };
+
+  const handleAdminForceLogoutDevice = async (targetUser: UserProfile, deviceId: string) => {
+    if (!user?.email) return;
+    setSecurityActionBusy(true);
+    setActionErrorMsg(null);
+    try {
+      await adminForceLogoutDeviceSession(
+        targetUser.userId,
+        deviceId,
+        user.email,
+        targetUser.displayName
+      );
+      showSuccessBanner(
+        language === 'bn'
+          ? 'নির্বাচিত ডিভাইস সেশনটি ফোর্স লগ-আউট করা হয়েছে।'
+          : 'Device session forced logged out.'
+      );
+    } catch (err) {
+      setActionErrorMsg(extractReadableError(err, 'Failed to force logout device session.'));
+    } finally {
+      setSecurityActionBusy(false);
+    }
+  };
+
+  const handleAdminApproveDevice = async (targetUser: UserProfile, deviceId: string) => {
+    if (!user?.email) return;
+    setSecurityActionBusy(true);
+    setActionErrorMsg(null);
+    try {
+      await adminApproveDeviceSession(targetUser.userId, deviceId, user.email, targetUser);
+      showSuccessBanner(
+        language === 'bn'
+          ? 'ডিভাইস সেশনটি অ্যাডমিন থেকে অনুমোদন দেওয়া হয়েছে।'
+          : 'Approved device session.'
+      );
+    } catch (err) {
+      setActionErrorMsg(extractReadableError(err, 'Failed to approve device session.'));
+    } finally {
+      setSecurityActionBusy(false);
+    }
+  };
+
+  const handleAdminDeleteDevice = async (targetUser: UserProfile, deviceId: string) => {
+    if (!user?.email) return;
+    setSecurityActionBusy(true);
+    setActionErrorMsg(null);
+    try {
+      await adminDeleteDeviceSession(
+        targetUser.userId,
+        deviceId,
+        user.email,
+        targetUser.displayName
+      );
+      showSuccessBanner(
+        language === 'bn'
+          ? 'ডিভাইস সেশন রেকর্ডটি মুছে ফেলা হয়েছে।'
+          : 'Removed device session record.'
+      );
+    } catch (err) {
+      setActionErrorMsg(extractReadableError(err, 'Failed to remove device session record.'));
+    } finally {
+      setSecurityActionBusy(false);
+    }
   };
 
   const handlePublishRelease = async (e: React.FormEvent) => {
@@ -344,6 +722,7 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
       );
     } catch (err) {
       console.error(err);
+      setActionErrorMsg(extractReadableError(err, 'Failed to reactivate account.'));
     }
   };
 
@@ -371,9 +750,12 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     if (!user?.email) return;
     try {
       await clearWarning(u.userId, u.email, u.displayName, user.email);
-      showSuccessBanner(`Cleared warning for ${u.displayName}.`);
+      showSuccessBanner(
+        language === 'bn' ? `${u.displayName}-এর সতর্কবার্তা মুছে ফেলা হয়েছে।` : `Cleared warning for ${u.displayName}.`
+      );
     } catch (err) {
       console.error(err);
+      setActionErrorMsg(extractReadableError(err, 'Failed to clear warning notice.'));
     }
   };
 
@@ -389,6 +771,7 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
       );
     } catch (err) {
       console.error(err);
+      setActionErrorMsg(extractReadableError(err, 'Failed to clear App-Lock PIN.'));
     } finally {
       setIsClearingLock(false);
     }
@@ -419,10 +802,10 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     }
   };
 
-  const handleDismissRecovery = async (reqId: string) => {
+  const handleDismissRecovery = async (reqId: string, notes?: string) => {
     if (!user?.email) return;
     try {
-      await dismissRecoveryRequest(reqId, 'Dismissed by administrator.', user.email);
+      await dismissRecoveryRequest(reqId, notes?.trim() || 'Dismissed by administrator.', user.email);
       showSuccessBanner(language === 'bn' ? 'সাপোর্ট টিকিট বাতিল করা হয়েছে।' : 'Support ticket dismissed.');
       setSelectedRecovery(null);
     } catch (err) {
@@ -472,10 +855,10 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     }
   };
 
-  const handleClearAppLockFromSupport = async (targetUser: UserProfile) => {
+  const handleClearAppLockFromSupport = async (targetUser: UserProfile, ticketId?: string) => {
     if (!user?.email) return;
     try {
-      await adminClearUserAppLock(targetUser.userId, user.email);
+      await adminClearUserAppLock(targetUser.userId, user.email, ticketId);
       showSuccessBanner(
         language === 'bn'
           ? `${targetUser.displayName}-এর অ্যাপ-লক পিন রিসেট করা হয়েছে।`
@@ -502,9 +885,12 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
       );
       setNewAnnTitle('');
       setNewAnnContent('');
-      showSuccessBanner('Published broadcast announcement.');
+      showSuccessBanner(
+        language === 'bn' ? 'ব্রডকাস্ট নোটিশ প্রকাশিত হয়েছে।' : 'Published broadcast announcement.'
+      );
     } catch (err) {
       console.error(err);
+      setActionErrorMsg(extractReadableError(err, 'Failed to publish announcement.'));
     } finally {
       setPublishingAnn(false);
     }
@@ -545,12 +931,19 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     if (!userSearch.trim()) return true;
     const term = userSearch.trim().toLowerCase();
     const digitTerm = extractPhoneDigits(userSearch);
+    const historyPhones = (u.phoneHistory || []).map((h) => h.phone);
+    const allUserPhones = [u.phoneNumber, u.initialPhoneNumber, ...historyPhones].filter(
+      (p): p is string => Boolean(p)
+    );
     return (
       u.displayName?.toLowerCase().includes(term) ||
       u.email?.toLowerCase().includes(term) ||
       u.username?.toLowerCase().includes(term) ||
-      u.phoneNumber?.toLowerCase().includes(term) ||
-      (digitTerm.length >= 3 && extractPhoneDigits(u.phoneNumber).includes(digitTerm)) ||
+      allUserPhones.some(
+        (p) =>
+          p.toLowerCase().includes(term) ||
+          (digitTerm.length >= 3 && extractPhoneDigits(p).includes(digitTerm))
+      ) ||
       u.userId.toLowerCase().includes(term)
     );
   });
@@ -591,17 +984,22 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     const directMatch =
       r.email?.toLowerCase().includes(term) ||
       r.name?.toLowerCase().includes(term) ||
-      r.username?.toLowerCase().includes(cleanTermHandle) ||
+      (cleanTermHandle.length > 0 && r.username?.toLowerCase().includes(cleanTermHandle)) ||
       r.contactPhone?.toLowerCase().includes(term) ||
       (digitTerm.length >= 3 && extractPhoneDigits(r.contactPhone).includes(digitTerm)) ||
+      r.topic?.toLowerCase().includes(term) ||
+      r.requesterUid?.toLowerCase().includes(term) ||
       r.details?.toLowerCase().includes(term) ||
       r.adminNotes?.toLowerCase().includes(term) ||
       r.id.toLowerCase().includes(term);
 
     if (directMatch) return true;
 
+    const uidMatch = r.details?.match(/UID:\s*([A-Za-z0-9_-]{6,128})/i)?.[1];
+    const resolvedUid = r.requesterUid || (uidMatch && uidMatch !== 'unknown' ? uidMatch : undefined);
     const matchedUser = usersList.find(
       (u) =>
+        (resolvedUid && u.userId === resolvedUid) ||
         (r.email && u.email?.trim().toLowerCase() === r.email.trim().toLowerCase()) ||
         (r.username && u.username?.trim().toLowerCase() === r.username.trim().replace(/^@/, '').toLowerCase()) ||
         doPhonesMatch(r.contactPhone, u.phoneNumber)
@@ -610,7 +1008,7 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     return (
       matchedUser.displayName?.toLowerCase().includes(term) ||
       matchedUser.email?.toLowerCase().includes(term) ||
-      matchedUser.username?.toLowerCase().includes(cleanTermHandle) ||
+      (cleanTermHandle.length > 0 && matchedUser.username?.toLowerCase().includes(cleanTermHandle)) ||
       (digitTerm.length >= 3 && extractPhoneDigits(matchedUser.phoneNumber).includes(digitTerm))
     );
   });
@@ -626,7 +1024,41 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     if (reportFilter === 'pending' && r.status !== 'pending') return false;
     if (reportFilter === 'resolved' && r.status !== 'resolved') return false;
     if (reportFilter === 'dismissed' && r.status !== 'dismissed') return false;
-    return true;
+    if (reportReasonFilter !== 'all' && r.reason !== reportReasonFilter) return false;
+
+    if (!reportSearch.trim()) return true;
+    const term = reportSearch.trim().toLowerCase();
+    const digitTerm = extractPhoneDigits(reportSearch);
+    const targetUser = usersList.find((u) => u.userId === r.targetUserId);
+    const reporterUser = usersList.find((u) => u.userId === r.reporterId);
+    const phoneCandidates = [
+      r.targetPhoneNumber,
+      r.targetInitialPhoneNumber,
+      r.reporterPhoneNumber,
+      r.reporterInitialPhoneNumber,
+      targetUser?.phoneNumber,
+      targetUser?.initialPhoneNumber,
+      ...(targetUser?.phoneHistory || []).map((h) => h.phone),
+      reporterUser?.phoneNumber,
+      reporterUser?.initialPhoneNumber,
+      ...(reporterUser?.phoneHistory || []).map((h) => h.phone),
+    ].filter((p): p is string => Boolean(p));
+
+    return (
+      r.id.toLowerCase().includes(term) ||
+      r.targetUserName?.toLowerCase().includes(term) ||
+      r.targetUserEmail?.toLowerCase().includes(term) ||
+      r.reporterName?.toLowerCase().includes(term) ||
+      r.reporterEmail?.toLowerCase().includes(term) ||
+      r.messageText?.toLowerCase().includes(term) ||
+      r.details?.toLowerCase().includes(term) ||
+      r.resolutionNotes?.toLowerCase().includes(term) ||
+      phoneCandidates.some(
+        (p) =>
+          p.toLowerCase().includes(term) ||
+          (digitTerm.length >= 3 && extractPhoneDigits(p).includes(digitTerm))
+      )
+    );
   });
 
   return (
@@ -685,9 +1117,20 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
         )}
 
         {actionErrorMsg && (
-          <div className="bg-rose-600 text-white text-xs py-2 px-4 flex items-center justify-center gap-2 font-medium shadow z-30">
-            <AlertTriangle className="w-4 h-4" />
-            <span>{actionErrorMsg}</span>
+          <div className="bg-rose-600 text-white text-xs py-2 px-4 flex items-center justify-between gap-2 font-medium shadow z-30">
+            <div className="w-4 shrink-0" />
+            <div className="flex items-center justify-center gap-2 text-center">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{actionErrorMsg}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActionErrorMsg(null)}
+              className="p-0.5 rounded hover:bg-rose-500/50 text-white cursor-pointer shrink-0"
+              title={t('close')}
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         )}
 
@@ -766,14 +1209,21 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
               onEnterGhostMode={onEnterGhostMode}
               onUnban={handleConfirmUnban}
               onOpenBan={(u) => {
+                if (isSuperAdmin(u.email)) return;
                 setBanTarget(u);
                 setBanReason('');
+                setBanDuration('7');
               }}
               onClearWarning={handleClearWarning}
               onOpenWarn={(u) => {
                 setWarnTarget(u);
                 setWarnText('');
               }}
+              userPhoneRegistryMap={userPhoneRegistryMap}
+              allUsersList={usersList}
+              globalSecuritySettings={globalSecuritySettings}
+              securityPolicyBusy={securityActionBusy}
+              onSaveGlobalSecuritySettings={handleSaveGlobalSecuritySettings}
             />
           )}
 
@@ -785,8 +1235,12 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
               allChats={allChats}
               filteredChats={filteredChats}
               selectedChat={selectedChat}
-              setSelectedChat={setSelectedChat}
+              setSelectedChat={(c) => {
+                setHighlightedMessageId(null);
+                setSelectedChat(c);
+              }}
               chatMessages={chatMessages}
+              highlightedMessageId={highlightedMessageId}
               chatSearch={chatSearch}
               setChatSearch={setChatSearch}
               chatFilter={chatFilter}
@@ -802,13 +1256,18 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
                 setWarnText(text);
               }}
               onOpenBan={(u, reason) => {
+                if (isSuperAdmin(u.email)) return;
                 setBanTarget(u);
-                setBanReason(reason);
+                setBanReason(reason.slice(0, 500));
+                setBanDuration('7');
               }}
               onDeleteMessage={async (chatId, msgId) => {
                 if (!user?.email) return;
                 try {
-                  const deleted = await deleteAdminMessage(chatId, msgId, user.email, 'Admin moderation violation');
+                  const linkedIds = reports
+                    .filter((r) => r.chatId === chatId && r.messageId === msgId)
+                    .map((r) => r.id);
+                  const deleted = await deleteAdminMessage(chatId, msgId, user.email, 'Admin moderation violation', linkedIds);
                   if (deleted) {
                     showSuccessBanner(
                       language === 'bn' ? 'চ্যাট রুম থেকে মেসেজ ডিলিট করা হয়েছে।' : 'Deleted message from chat room.'
@@ -862,29 +1321,47 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
               reportCounts={reportCounts}
               reportFilter={reportFilter}
               setReportFilter={setReportFilter}
+              reportSearch={reportSearch}
+              setReportSearch={setReportSearch}
+              reportReasonFilter={reportReasonFilter}
+              setReportReasonFilter={setReportReasonFilter}
+              copiedText={copiedText}
+              onCopy={copyToClipboard}
+              userPhoneRegistryMap={userPhoneRegistryMap}
+              originalUidByPhoneHash={originalUidByPhoneHash}
               onOpenBan={(u, reason) => {
+                if (isSuperAdmin(u.email)) return;
                 setBanTarget(u);
-                setBanReason(reason);
+                setBanReason(reason.slice(0, 500));
+                setBanDuration('7');
               }}
               onOpenWarn={(u, text) => {
                 setWarnTarget(u);
-                setWarnText(text);
+                setWarnText(text.slice(0, 1000));
               }}
               onOpenDossier={(u) => setSelectedDossierUser(u)}
               onInspectChat={handleInspectReportChat}
-              onDeleteReportedMessage={async (chatId, msgId, reason) => {
+              onDeleteReportedMessage={async (chatId, msgId, reason, reportId) => {
                 if (!user?.email) return;
                 try {
-                  const deleted = await deleteAdminMessage(chatId, msgId, user.email, reason);
+                  const linkedIds = Array.from(
+                    new Set([
+                      reportId,
+                      ...reports
+                        .filter((r) => r.chatId === chatId && r.messageId === msgId)
+                        .map((r) => r.id),
+                    ])
+                  );
+                  const deleted = await deleteAdminMessage(chatId, msgId, user.email, reason, linkedIds);
                   if (deleted) {
                     showSuccessBanner(
                       language === 'bn' ? 'অপরাধমূলক মেসেজটি ডিলিট করা হয়েছে।' : 'Deleted offending message.'
                     );
                   } else {
-                    setActionErrorMsg(
+                    showSuccessBanner(
                       language === 'bn'
-                        ? 'এই মেসেজটি ইতিমধ্যেই ডিলিট করা হয়েছে বা আর পাওয়া যাচ্ছে না।'
-                        : 'This message has already been deleted or no longer exists.'
+                        ? 'মেসেজটি আগেই ডিলিট করা হয়েছিল — রিপোর্ট স্ট্যাটাস আপডেট করা হয়েছে।'
+                        : 'Message was already deleted — synced report record.'
                     );
                   }
                 } catch (err) {
@@ -946,10 +1423,20 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
               publishingAnn={publishingAnn}
               onCreateAnnouncement={handleCreateAnnouncement}
               onToggleAnnouncement={async (id, nextActive) => {
-                if (user?.email) await toggleAnnouncement(id, nextActive, user.email);
+                if (!user?.email) return;
+                try {
+                  await toggleAnnouncement(id, nextActive, user.email);
+                } catch (err) {
+                  setActionErrorMsg(extractReadableError(err, 'Failed to toggle announcement.'));
+                }
               }}
               onDeleteAnnouncement={async (id) => {
-                if (user?.email) await deleteAnnouncement(id, user.email);
+                if (!user?.email) return;
+                try {
+                  await deleteAnnouncement(id, user.email);
+                } catch (err) {
+                  setActionErrorMsg(extractReadableError(err, 'Failed to delete announcement.'));
+                }
               }}
             />
           )}
@@ -1005,6 +1492,21 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
         isClearingLock={isClearingLock}
         onClearUserAppLock={handleClearUserAppLock}
         get7DayActivity={get7DayActivity}
+        dossierPhoneRegistry={activeDossierPhoneRegistry}
+        allUsersList={usersList}
+        phoneActionBusy={phoneActionBusy}
+        onTogglePhoneManualBlock={handleTogglePhoneManualBlock}
+        onReleasePhoneSlot={handleReleasePhoneSlot}
+        onUpdatePhoneLimit={handleUpdatePhoneLimit}
+        onSelectDossierUser={(u) => setSelectedDossierUser(u)}
+        globalSecuritySettings={globalSecuritySettings}
+        dossierDeviceSessions={dossierDeviceSessions}
+        securityActionBusy={securityActionBusy}
+        onUnlockPhoneCooldown={handleUnlockPhoneCooldown}
+        onUpdateUserDeviceLimits={handleUpdateUserDeviceLimits}
+        onAdminForceLogoutDevice={handleAdminForceLogoutDevice}
+        onAdminApproveDevice={handleAdminApproveDevice}
+        onAdminDeleteDevice={handleAdminDeleteDevice}
         selectedRecovery={selectedRecovery}
         onCloseRecovery={() => setSelectedRecovery(null)}
         recoveryAdminNotes={recoveryAdminNotes}
@@ -1012,7 +1514,11 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
         resolvingRecovery={resolvingRecovery}
         onResolveRecovery={handleResolveRecovery}
         banTarget={banTarget}
-        onCloseBan={() => setBanTarget(null)}
+        onCloseBan={() => {
+          setBanTarget(null);
+          setBanReason('');
+          setBanDuration('7');
+        }}
         banDuration={banDuration}
         setBanDuration={setBanDuration}
         banReason={banReason}

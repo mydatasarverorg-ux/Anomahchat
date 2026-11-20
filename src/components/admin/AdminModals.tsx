@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import {
   Activity,
   AlertOctagon,
@@ -6,14 +7,31 @@ import {
   CheckCircle2,
   Copy,
   Eye,
+  History,
   KeyRound,
+  Laptop,
   Lock,
+  LogOut,
   MessageSquare,
   Phone,
+  RotateCcw,
+  Save,
+  ShieldAlert,
+  ShieldCheck,
   ShieldOff,
+  Smartphone,
+  Trash2,
+  Unlock,
   X,
 } from 'lucide-react';
-import type { PasswordRecoveryRequest, UserProfile } from '../../types/chat';
+import { isSuperAdmin } from '../../services/adminService';
+import type {
+  AppSecuritySettings,
+  DeviceSession,
+  PasswordRecoveryRequest,
+  PhoneRegistryEntry,
+  UserProfile,
+} from '../../types/chat';
 
 interface AdminModalsProps {
   t: (key: any) => string;
@@ -30,6 +48,21 @@ interface AdminModalsProps {
   isClearingLock: boolean;
   onClearUserAppLock: () => void;
   get7DayActivity: (u: UserProfile) => { days: { dateStr: string; label: string; minutes: number }[]; maxVal: number };
+  dossierPhoneRegistry?: PhoneRegistryEntry | null;
+  allUsersList?: UserProfile[];
+  phoneActionBusy?: boolean;
+  onTogglePhoneManualBlock?: (phoneHash: string, blocked: boolean, displayPhone?: string) => void;
+  onReleasePhoneSlot?: (phoneHash: string, targetUid: string, displayPhone?: string) => void;
+  onUpdatePhoneLimit?: (phoneHash: string, newLimit: number, displayPhone?: string) => void;
+  onSelectDossierUser?: (u: UserProfile) => void;
+  globalSecuritySettings?: AppSecuritySettings;
+  dossierDeviceSessions?: DeviceSession[];
+  securityActionBusy?: boolean;
+  onUnlockPhoneCooldown?: (u: UserProfile) => void;
+  onUpdateUserDeviceLimits?: (u: UserProfile, limits: { mobile?: number; web?: number } | null) => void;
+  onAdminForceLogoutDevice?: (targetUser: UserProfile, deviceId: string) => void;
+  onAdminApproveDevice?: (targetUser: UserProfile, deviceId: string) => void;
+  onAdminDeleteDevice?: (targetUser: UserProfile, deviceId: string) => void;
 
   // Recovery Modal
   selectedRecovery: PasswordRecoveryRequest | null;
@@ -71,6 +104,21 @@ export function AdminModals({
   isClearingLock,
   onClearUserAppLock,
   get7DayActivity,
+  dossierPhoneRegistry,
+  allUsersList = [],
+  phoneActionBusy = false,
+  onTogglePhoneManualBlock,
+  onReleasePhoneSlot,
+  onUpdatePhoneLimit,
+  onSelectDossierUser,
+  globalSecuritySettings,
+  dossierDeviceSessions = [],
+  securityActionBusy = false,
+  onUnlockPhoneCooldown,
+  onUpdateUserDeviceLimits,
+  onAdminForceLogoutDevice,
+  onAdminApproveDevice,
+  onAdminDeleteDevice,
   selectedRecovery,
   onCloseRecovery,
   recoveryAdminNotes,
@@ -92,6 +140,29 @@ export function AdminModals({
   isWarning,
   onConfirmWarn,
 }: AdminModalsProps) {
+  const [userMobileLimitDraft, setUserMobileLimitDraft] = useState<string>('');
+  const [userWebLimitDraft, setUserWebLimitDraft] = useState<string>('');
+
+  useEffect(() => {
+    if (!selectedDossierUser) return;
+    setUserMobileLimitDraft(
+      typeof selectedDossierUser.deviceLimits?.mobile === 'number'
+        ? String(selectedDossierUser.deviceLimits.mobile)
+        : String(globalSecuritySettings?.defaultMobileLimit ?? 1)
+    );
+    setUserWebLimitDraft(
+      typeof selectedDossierUser.deviceLimits?.web === 'number'
+        ? String(selectedDossierUser.deviceLimits.web)
+        : String(globalSecuritySettings?.defaultWebLimit ?? 1)
+    );
+  }, [
+    selectedDossierUser?.userId,
+    selectedDossierUser?.deviceLimits?.mobile,
+    selectedDossierUser?.deviceLimits?.web,
+    globalSecuritySettings?.defaultMobileLimit,
+    globalSecuritySettings?.defaultWebLimit,
+  ]);
+
   return (
     <>
       {selectedDossierUser && (
@@ -275,6 +346,472 @@ export function AdminModals({
               </div>
             </div>
 
+            {selectedDossierUser.phoneNumber && dossierPhoneRegistry && (
+              <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <Phone className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs font-bold text-white">
+                      {language === 'bn'
+                        ? 'মোবাইল নম্বর কোটা ও নিরাপত্তা নিয়ন্ত্রণ'
+                        : 'Mobile Number Quota & Ban-Lock Control'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        dossierPhoneRegistry.isBlocked
+                          ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                          : dossierPhoneRegistry.accountUids.length >= dossierPhoneRegistry.maxLimit
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                          : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                      }`}
+                    >
+                      {dossierPhoneRegistry.accountUids.length} / {dossierPhoneRegistry.maxLimit}{' '}
+                      {language === 'bn' ? 'অ্যাকাউন্ট' : 'Accounts'}
+                    </span>
+                    {dossierPhoneRegistry.isBlocked && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-600/25 text-rose-200 border border-rose-500/40 inline-flex items-center gap-1">
+                        <ShieldAlert className="w-3 h-3" />
+                        <span>{language === 'bn' ? 'নম্বর ব্লকড' : 'LOCKED'}</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {dossierPhoneRegistry.isBlocked && dossierPhoneRegistry.blockedReason && (
+                  <p className="text-[11px] text-rose-300 bg-rose-950/40 border border-rose-500/30 rounded-xl px-3 py-2">
+                    {dossierPhoneRegistry.blockedReason}
+                  </p>
+                )}
+
+                <div className="flex items-center justify-between gap-2 flex-wrap text-[11px]">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-400">
+                      {language === 'bn' ? 'সর্বোচ্চ সীমা:' : 'Max Limit:'}
+                    </span>
+                    {[2, 3, 5].map((lim) => (
+                      <button
+                        key={lim}
+                        type="button"
+                        disabled={phoneActionBusy || dossierPhoneRegistry.maxLimit === lim}
+                        onClick={() =>
+                          onUpdatePhoneLimit?.(
+                            dossierPhoneRegistry.phoneHash,
+                            lim,
+                            selectedDossierUser.phoneNumber
+                          )
+                        }
+                        className={`px-2 py-0.5 rounded-lg border font-mono cursor-pointer transition disabled:opacity-60 ${
+                          dossierPhoneRegistry.maxLimit === lim
+                            ? 'bg-emerald-600 text-white border-emerald-500 font-bold'
+                            : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
+                        }`}
+                      >
+                        {lim}
+                      </button>
+                    ))}
+                  </div>
+
+                  {onTogglePhoneManualBlock && (
+                    <button
+                      type="button"
+                      disabled={phoneActionBusy}
+                      onClick={() =>
+                        onTogglePhoneManualBlock(
+                          dossierPhoneRegistry.phoneHash,
+                          !dossierPhoneRegistry.manualBlock,
+                          selectedDossierUser.phoneNumber
+                        )
+                      }
+                      className={`px-2.5 py-1 rounded-xl text-[11px] font-semibold border transition cursor-pointer inline-flex items-center gap-1 disabled:opacity-50 ${
+                        dossierPhoneRegistry.manualBlock
+                          ? 'bg-emerald-600/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-600/30'
+                          : 'bg-rose-600/20 text-rose-300 border-rose-500/40 hover:bg-rose-600/30'
+                      }`}
+                    >
+                      {dossierPhoneRegistry.manualBlock ? (
+                        <>
+                          <Unlock className="w-3 h-3" />
+                          <span>{language === 'bn' ? 'ম্যানুয়াল লক খুলুন' : 'Unlock Number'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Lock className="w-3 h-3" />
+                          <span>{language === 'bn' ? 'নম্বর ব্লক করুন' : 'Lock Number'}</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                {dossierPhoneRegistry.accountUids.length > 0 && (
+                  <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
+                    <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                      {language === 'bn'
+                        ? 'এই নম্বরে যুক্ত অ্যাকাউন্টসমূহ'
+                        : 'Accounts Linked to This Mobile Number'}
+                    </div>
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {dossierPhoneRegistry.accountUids.map((linkedUid) => {
+                        const sibling = allUsersList.find((item) => item.userId === linkedUid);
+                        const isCurrent = linkedUid === selectedDossierUser.userId;
+                        const isLinkedBanned =
+                          Boolean(sibling?.isBanned) ||
+                          Boolean(dossierPhoneRegistry.bannedUids?.includes(linkedUid));
+
+                        return (
+                          <div
+                            key={linkedUid}
+                            className="flex items-center justify-between gap-2 bg-slate-900/90 border border-slate-800 rounded-xl px-2.5 py-1.5 text-[11px]"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-semibold text-white truncate">
+                                  {sibling ? sibling.displayName : `UID: ${linkedUid.slice(0, 12)}...`}
+                                </span>
+                                {isCurrent && (
+                                  <span className="px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300 text-[9px] font-bold">
+                                    {language === 'bn' ? 'বর্তমান' : 'CURRENT'}
+                                  </span>
+                                )}
+                                {!sibling && (
+                                  <span className="px-1.5 py-0.2 rounded bg-slate-700 text-slate-300 text-[9px] font-bold">
+                                    {language === 'bn' ? 'অরফান UID' : 'ORPHAN UID'}
+                                  </span>
+                                )}
+                                {sibling?.status === 'scheduled_for_deletion' && (
+                                  <span className="px-1.5 py-0.2 rounded bg-orange-500/20 text-orange-300 text-[9px] font-bold">
+                                    {language === 'bn' ? 'ডিলিট পেন্ডিং' : 'PENDING DELETE'}
+                                  </span>
+                                )}
+                                {sibling?.status === 'deleted' && (
+                                  <span className="px-1.5 py-0.2 rounded bg-slate-700 text-slate-300 text-[9px] font-bold">
+                                    {language === 'bn' ? 'ডিলিট' : 'DELETED'}
+                                  </span>
+                                )}
+                                {isLinkedBanned && (
+                                  <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 text-[9px] font-bold">
+                                    {language === 'bn' ? 'ব্যানড' : 'BANNED'}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-slate-400 truncate">
+                                {sibling?.email || linkedUid}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              {sibling && !isCurrent && onSelectDossierUser && (
+                                <button
+                                  type="button"
+                                  onClick={() => onSelectDossierUser(sibling)}
+                                  className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-medium cursor-pointer inline-flex items-center gap-1"
+                                >
+                                  <Eye className="w-3 h-3 text-sky-400" />
+                                  <span>{language === 'bn' ? 'দেখুন' : 'View'}</span>
+                                </button>
+                              )}
+                              {onReleasePhoneSlot && (
+                                <button
+                                  type="button"
+                                  disabled={phoneActionBusy}
+                                  onClick={() =>
+                                    onReleasePhoneSlot(
+                                      dossierPhoneRegistry.phoneHash,
+                                      linkedUid,
+                                      selectedDossierUser.phoneNumber
+                                    )
+                                  }
+                                  title={
+                                    language === 'bn'
+                                      ? 'স্লট খালি করুন'
+                                      : 'Release slot from this number'
+                                  }
+                                  className="p-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 cursor-pointer disabled:opacity-50"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Immutable Initial Number, Change History & 30-Day Cooldown Unlock */}
+            {(selectedDossierUser.initialPhoneNumber ||
+              selectedDossierUser.phoneNumber ||
+              (selectedDossierUser.phoneHistory && selectedDossierUser.phoneHistory.length > 0)) && (
+              <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl space-y-3 text-xs">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <History className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-bold text-white">
+                      {language === 'bn'
+                        ? 'সর্বপ্রথম ও পরিবর্তিত মোবাইল নম্বরের ইতিহাস'
+                        : 'Immutable First Number & Phone Change History'}
+                    </span>
+                  </div>
+                  {selectedDossierUser.phoneChangeCooldownBypass ? (
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold">
+                      {language === 'bn' ? 'কুলডাউন আনলকড' : 'Cooldown Unlocked'}
+                    </span>
+                  ) : (
+                    (() => {
+                      if (!selectedDossierUser.lastPhoneChangedAt || !onUnlockPhoneCooldown) return null;
+                      const ms = new Date(selectedDossierUser.lastPhoneChangedAt).getTime();
+                      const cooldownMs = 30 * 24 * 60 * 60 * 1000;
+                      if (!Number.isFinite(ms) || Date.now() - ms >= cooldownMs) return null;
+                      return (
+                        <button
+                          type="button"
+                          disabled={securityActionBusy}
+                          onClick={() => onUnlockPhoneCooldown(selectedDossierUser)}
+                          className="px-2.5 py-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/35 rounded-xl text-[10px] font-bold cursor-pointer inline-flex items-center gap-1 disabled:opacity-50"
+                        >
+                          <Unlock className="w-3 h-3" />
+                          <span>
+                            {language === 'bn' ? '৩০-দিনের কুলডাউন আনলক' : 'Unlock 30-Day Cooldown'}
+                          </span>
+                        </button>
+                      );
+                    })()
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="p-2.5 bg-slate-900/90 border border-slate-800 rounded-xl">
+                    <span className="text-[10px] text-slate-400 block">
+                      {language === 'bn' ? 'সর্বপ্রথম সংরক্ষিত নম্বর (স্থায়ী)' : 'First Registered Number (Immutable)'}
+                    </span>
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <span className="font-mono font-bold text-amber-300">
+                        {selectedDossierUser.initialPhoneNumber || selectedDossierUser.phoneNumber || '—'}
+                      </span>
+                      {(selectedDossierUser.initialPhoneNumber || selectedDossierUser.phoneNumber) && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onCopy((selectedDossierUser.initialPhoneNumber || selectedDossierUser.phoneNumber)!)
+                          }
+                          className="p-0.5 text-slate-400 hover:text-white cursor-pointer"
+                        >
+                          <Copy className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-slate-900/90 border border-slate-800 rounded-xl">
+                    <span className="text-[10px] text-slate-400 block">
+                      {language === 'bn' ? 'বর্তমান অ্যাক্টিভ নম্বর' : 'Current Active Number'}
+                    </span>
+                    <span className="font-mono font-bold text-emerald-300 block mt-0.5">
+                      {selectedDossierUser.phoneNumber || '—'}
+                    </span>
+                  </div>
+                </div>
+
+                {selectedDossierUser.phoneHistory && selectedDossierUser.phoneHistory.length > 0 && (
+                  <div className="space-y-1 max-h-32 overflow-y-auto pr-1 pt-1 border-t border-slate-800/80">
+                    {selectedDossierUser.phoneHistory.map((h, i) => (
+                      <div
+                        key={`${h.changedAt}_${i}`}
+                        className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-slate-900/70 border border-slate-800/80 rounded-lg text-[11px]"
+                      >
+                        <div className="font-mono truncate">
+                          {h.previousPhone && (
+                            <span className="text-slate-500">{h.previousPhone} → </span>
+                          )}
+                          <span className="text-sky-300 font-semibold">{h.phone}</span>
+                        </div>
+                        <span className="text-[10px] text-slate-500 shrink-0">
+                          {new Date(h.changedAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Per-User Device Limits & Live Sessions Control */}
+            <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl space-y-3 text-xs">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 text-sky-400" />
+                  <span className="text-xs font-bold text-white">
+                    {language === 'bn'
+                      ? 'ডিভাইস সীমা ও সক্রিয় সেশন নিয়ন্ত্রণ'
+                      : 'Per-User Device Limit & Active Sessions'}
+                  </span>
+                </div>
+                {selectedDossierUser.deviceLimits && onUpdateUserDeviceLimits && (
+                  <button
+                    type="button"
+                    disabled={securityActionBusy}
+                    onClick={() => onUpdateUserDeviceLimits(selectedDossierUser, null)}
+                    className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-semibold cursor-pointer inline-flex items-center gap-1"
+                  >
+                    <RotateCcw className="w-2.5 h-2.5" />
+                    <span>{language === 'bn' ? 'গ্লোবাল ডিফল্ট' : 'Reset Default'}</span>
+                  </button>
+                )}
+              </div>
+
+              {onUpdateUserDeviceLimits && (
+                <div className="grid grid-cols-3 gap-2 items-end">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-slate-400 block">
+                      {language === 'bn' ? 'মোবাইল সীমা' : 'Mobile Limit'}
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={20}
+                      value={userMobileLimitDraft}
+                      onChange={(e) => setUserMobileLimitDraft(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-slate-400 block">
+                      {language === 'bn' ? 'ওয়েব/পিসি সীমা' : 'Web/PC Limit'}
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={20}
+                      value={userWebLimitDraft}
+                      onChange={(e) => setUserWebLimitDraft(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white font-mono"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    disabled={securityActionBusy}
+                    onClick={() =>
+                      onUpdateUserDeviceLimits(selectedDossierUser, {
+                        mobile: Math.min(20, Math.max(0, Number(userMobileLimitDraft) || 0)),
+                        web: Math.min(20, Math.max(0, Number(userWebLimitDraft) || 0)),
+                      })
+                    }
+                    className="py-1.5 px-3 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{language === 'bn' ? 'সেভ' : 'Save'}</span>
+                  </button>
+                </div>
+              )}
+
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 pt-1 border-t border-slate-800/80">
+                {dossierDeviceSessions.length === 0 ? (
+                  <p className="text-[11px] text-slate-500 py-1">
+                    {language === 'bn'
+                      ? 'এখনো কোনো ডিভাইস সেশন লগ পাওয়া যায়নি।'
+                      : 'No recorded device sessions for this user yet.'}
+                  </p>
+                ) : (
+                  dossierDeviceSessions.map((sess) => {
+                    const rtBadge =
+                      sess.runtimeType === 'apk'
+                        ? 'APK'
+                        : sess.runtimeType === 'pwa'
+                        ? 'PWA'
+                        : 'Web';
+                    return (
+                      <div
+                        key={sess.deviceId}
+                        className="p-2 bg-slate-900/90 border border-slate-800 rounded-xl flex items-center justify-between gap-2 text-[11px]"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {sess.platformCategory === 'mobile' ? (
+                              <Smartphone className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            ) : (
+                              <Laptop className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                            )}
+                            <span className="font-semibold text-white truncate max-w-[160px]">
+                              {sess.deviceLabel}
+                            </span>
+                            <span className="px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 text-[9px] font-mono">
+                              {rtBadge}
+                            </span>
+                            <span
+                              className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                                sess.status === 'active'
+                                  ? 'bg-emerald-500/20 text-emerald-300'
+                                  : sess.status === 'pending_approval'
+                                  ? 'bg-amber-500/20 text-amber-300'
+                                  : sess.status === 'rejected'
+                                  ? 'bg-rose-500/20 text-rose-300'
+                                  : 'bg-slate-800 text-slate-400'
+                              }`}
+                            >
+                              {sess.status.toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                            {sess.approxLocation ? `${sess.approxLocation} · ` : ''}
+                            {new Date(sess.lastActiveAt || sess.createdAt).toLocaleString()}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          {(sess.status === 'pending_approval' || sess.status === 'rejected') &&
+                            onAdminApproveDevice && (
+                              <button
+                                type="button"
+                                disabled={securityActionBusy}
+                                onClick={() =>
+                                  onAdminApproveDevice(selectedDossierUser, sess.deviceId)
+                                }
+                                title={language === 'bn' ? 'অনুমোদন দিন' : 'Approve'}
+                                className="p-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/30 cursor-pointer"
+                              >
+                                <ShieldCheck className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          {(sess.status === 'active' || sess.status === 'pending_approval') &&
+                            onAdminForceLogoutDevice && (
+                              <button
+                                type="button"
+                                disabled={securityActionBusy}
+                                onClick={() =>
+                                  onAdminForceLogoutDevice(selectedDossierUser, sess.deviceId)
+                                }
+                                title={language === 'bn' ? 'ফোর্স লগ-আউট' : 'Force Logout'}
+                                className="p-1.5 rounded-lg bg-amber-600/20 hover:bg-amber-600/35 text-amber-300 border border-amber-500/30 cursor-pointer"
+                              >
+                                <LogOut className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          {onAdminDeleteDevice && (
+                            <button
+                              type="button"
+                              disabled={securityActionBusy}
+                              onClick={() =>
+                                onAdminDeleteDevice(selectedDossierUser, sess.deviceId)
+                              }
+                              title={language === 'bn' ? 'সেশন মুছুন' : 'Delete Record'}
+                              className="p-1.5 rounded-lg bg-rose-600/15 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
             <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -354,12 +891,18 @@ export function AdminModals({
 
             <form onSubmit={onResolveRecovery} className="space-y-3">
               <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-300 block">{t('adminNotesLabel')}</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-slate-300 block">{t('adminNotesLabel')}</label>
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    {recoveryAdminNotes.length}/1000
+                  </span>
+                </div>
                 <textarea
                   rows={3}
+                  maxLength={1000}
                   placeholder={t('adminNotesPlaceholder')}
                   value={recoveryAdminNotes}
-                  onChange={(e) => setRecoveryAdminNotes(e.target.value)}
+                  onChange={(e) => setRecoveryAdminNotes(e.target.value.slice(0, 1000))}
                   className="w-full p-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500 resize-none"
                   required
                 />
@@ -426,15 +969,29 @@ export function AdminModals({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs text-slate-300 font-semibold block">{t('banReasonLabel')}</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-slate-300 font-semibold block">{t('banReasonLabel')}</label>
+                <span className="text-[10px] text-slate-500 font-mono">
+                  {banReason.length}/500
+                </span>
+              </div>
               <textarea
                 value={banReason}
-                onChange={(e) => setBanReason(e.target.value)}
+                maxLength={500}
+                onChange={(e) => setBanReason(e.target.value.slice(0, 500))}
                 placeholder={t('banReasonPlaceholder')}
                 rows={3}
                 className="w-full p-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-red-500 resize-none"
               />
             </div>
+
+            {isSuperAdmin(banTarget.email) && (
+              <div className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-[11px] text-amber-300 text-center">
+                {language === 'bn'
+                  ? 'সুপার এডমিন অ্যাকাউন্ট স্থগিত করা সম্ভব নয়।'
+                  : 'Super Admin account cannot be suspended.'}
+              </div>
+            )}
 
             <div className="flex gap-2">
               <button
@@ -447,7 +1004,7 @@ export function AdminModals({
               <button
                 type="button"
                 onClick={onConfirmBan}
-                disabled={isBanning}
+                disabled={isBanning || isSuperAdmin(banTarget.email)}
                 className="flex-1 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold cursor-pointer"
               >
                 {isBanning ? 'Suspending...' : t('confirmBanBtn')}
@@ -469,10 +1026,16 @@ export function AdminModals({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs text-slate-300 font-semibold block">{t('warningNoticeLabel')}</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-slate-300 font-semibold block">{t('warningNoticeLabel')}</label>
+                <span className="text-[10px] text-slate-500 font-mono">
+                  {warnText.length}/1000
+                </span>
+              </div>
               <textarea
                 value={warnText}
-                onChange={(e) => setWarnText(e.target.value)}
+                maxLength={1000}
+                onChange={(e) => setWarnText(e.target.value.slice(0, 1000))}
                 placeholder={t('warningNoticePlaceholder')}
                 rows={3}
                 className="w-full p-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 resize-none"

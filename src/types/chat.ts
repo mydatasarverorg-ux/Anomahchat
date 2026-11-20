@@ -1,10 +1,53 @@
 export type ThemeMode = 'deep-slate' | 'minimal-light' | 'telegram-blue';
 
+export interface PhoneChangeHistoryEntry {
+  phone: string;
+  previousPhone?: string;
+  changedAt: string;
+}
+
+export interface UserDeviceLimits {
+  mobile?: number;
+  web?: number;
+}
+
+export interface DeviceSession {
+  deviceId: string;
+  userId: string;
+  platformCategory: 'mobile' | 'web';
+  runtimeType: 'apk' | 'pwa' | 'web';
+  deviceLabel: string;
+  approxLocation?: string | null;
+  status: 'active' | 'pending_approval' | 'rejected' | 'logged_out';
+  isPrimaryTrusted?: boolean;
+  limitBlocked?: boolean;
+  approvedByDeviceId?: string | null;
+  rejectedByDeviceId?: string | null;
+  rejectionNote?: string | null;
+  createdAt: string;
+  lastActiveAt: string;
+  loginAt?: string;
+}
+
+export interface AppSecuritySettings {
+  defaultMobileLimit: number;
+  defaultWebLimit: number;
+  requireApprovalForNewDevice: boolean;
+  updatedAt: string;
+  updatedBy: string;
+}
+
 export interface UserProfile {
   userId: string;
   displayName: string;
   email: string;
   phoneNumber?: string;
+  initialPhoneNumber?: string;
+  initialPhoneSetAt?: string;
+  phoneHistory?: PhoneChangeHistoryEntry[];
+  lastPhoneChangedAt?: string;
+  phoneChangeCooldownBypass?: boolean;
+  deviceLimits?: UserDeviceLimits | null;
   discoverableByPhone?: boolean;
   photoURL: string;
   about?: string;
@@ -55,15 +98,34 @@ export interface UserSecurityLock {
   updatedAt: string;
 }
 
+export interface PhoneRegistryEntry {
+  phoneHash: string;
+  accountUids: string[];
+  maxLimit: number;
+  isBlocked: boolean;
+  manualBlock?: boolean;
+  blockedReason?: string | null;
+  bannedUids?: string[];
+  manuallyReleasedUids?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type RecoveryTopic = 'app_lock' | 'lost_email' | 'suspended' | 'other';
+
 export interface PasswordRecoveryRequest {
   id: string;
   email: string;
   name?: string;
   username?: string;
   contactPhone?: string;
+  topic?: RecoveryTopic;
+  requesterUid?: string;
   details?: string;
   status: 'pending' | 'resolved' | 'dismissed';
   adminNotes?: string;
+  resetEmailSentAt?: string;
+  resetEmailSentTo?: string;
   resolvedAt?: string;
   resolvedBy?: string;
   createdAt: string;
@@ -83,12 +145,20 @@ export interface UserReport {
   reporterId: string;
   reporterName: string;
   reporterEmail: string;
+  reporterPhoneNumber?: string;
+  reporterInitialPhoneNumber?: string;
   targetUserId: string;
   targetUserName: string;
   targetUserEmail?: string;
+  targetPhoneNumber?: string;
+  targetInitialPhoneNumber?: string;
+  targetAccountCreatedAt?: string;
+  targetPhoneChangeCount?: number;
   chatId?: string;
   messageId?: string;
   messageText?: string;
+  reportedMessageType?: 'text' | 'image' | 'audio' | 'file';
+  targetMessageDeleted?: boolean;
   reason: ReportReason;
   details: string;
   status: 'pending' | 'resolved' | 'dismissed';
@@ -138,7 +208,14 @@ export interface AdminAuditLog {
     | 'delete_announcement'
     | 'backup_chats'
     | 'cleanup_storage'
-    | 'restore_chats';
+    | 'restore_chats'
+    | 'block_phone_number'
+    | 'unblock_phone_number'
+    | 'manage_phone_slots'
+    | 'update_device_policy'
+    | 'force_logout_device'
+    | 'approve_device_session'
+    | 'unlock_phone_cooldown';
   targetId?: string;
   targetName?: string;
   details: string;

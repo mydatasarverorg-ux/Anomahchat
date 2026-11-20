@@ -20,6 +20,7 @@ import {
 import { db } from '../firebase/config';
 import { handleFirestoreError, OperationType } from '../firebase/errorHandler';
 import { extractChatTargetFromInput } from '../utils/accountShortcut';
+import { ensureExistingUserPhoneInRegistry } from './phoneRegistryService';
 import type {
   UserProfile,
   DirectoryUser,
@@ -128,6 +129,13 @@ export async function syncUserProfile(user: {
       }
       if (cleanPhone.length >= 6 && !data.phoneNumber) {
         updated.phoneNumber = cleanPhone;
+        if (!data.initialPhoneNumber) {
+          updated.initialPhoneNumber = cleanPhone;
+          updated.initialPhoneSetAt = nowIso;
+        }
+      } else if (data.phoneNumber && !data.initialPhoneNumber) {
+        updated.initialPhoneNumber = data.phoneNumber;
+        updated.initialPhoneSetAt = data.createdAt || nowIso;
       }
       await updateDoc(userRef, updated);
 
@@ -153,6 +161,9 @@ export async function syncUserProfile(user: {
           isBanned: merged.isBanned,
         })
       );
+      if (merged.phoneNumber && !merged.isBanned && merged.status !== 'deleted') {
+        ensureExistingUserPhoneInRegistry(user.uid, merged.phoneNumber, merged.isBanned).catch(() => {});
+      }
       return merged;
     } else {
       const initialPhoneHash = cleanPhone.length >= 6 ? await hashPhoneForDirectory(cleanPhone) : null;
@@ -160,7 +171,15 @@ export async function syncUserProfile(user: {
         userId: user.uid,
         displayName: fallbackName.slice(0, 100),
         email: cleanEmail,
-        ...(cleanPhone.length >= 6 ? { phoneNumber: cleanPhone, discoverableByPhone: true } : {}),
+        ...(cleanPhone.length >= 6
+          ? {
+              phoneNumber: cleanPhone,
+              initialPhoneNumber: cleanPhone,
+              initialPhoneSetAt: nowIso,
+              phoneHistory: [],
+              discoverableByPhone: true,
+            }
+          : {}),
         photoURL: fallbackPhoto.slice(0, 1000),
         about: 'Available | Using Anomah Chat',
         status: 'active',

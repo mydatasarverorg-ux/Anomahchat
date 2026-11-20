@@ -16,6 +16,14 @@ import { sendPasswordResetEmail } from 'firebase/auth';
 import { db, auth } from '../firebase/config';
 import { handleFirestoreError, OperationType } from '../firebase/errorHandler';
 import { syncChatLastMessageFromLatest } from './chatService';
+import {
+  normalizePhoneNumber,
+  extractPhoneDigits,
+} from '../utils/phoneUtils';
+import {
+  syncBanStateToPhoneRegistry,
+  clearExpiredSelfBanFromPhoneRegistry,
+} from './phoneRegistryService';
 import type {
   UserProfile,
   UserReport,
@@ -23,6 +31,7 @@ import type {
   AdminAuditLog,
   AnnouncementType,
   ReportReason,
+  RecoveryTopic,
   PasswordRecoveryRequest,
   ChatRoom,
   ChatMessage,
@@ -31,15 +40,43 @@ import type {
 export const SUPER_ADMIN_EMAIL = 'chinisdramaorg@gmail.com';
 export const SUPPORT_DESK_ADDRESS = 'support@anomah.me';
 
-export function normalizePhoneNumber(phone?: string | null): string {
-  if (!phone) return '';
-  return phone.trim().replace(/\s+/g, ' ').slice(0, 50);
+function safeTimeMs(iso?: string | null): number {
+  if (!iso) return 0;
+  const ms = new Date(iso).getTime();
+  return Number.isFinite(ms) ? ms : 0;
 }
 
-export function extractPhoneDigits(phone?: string | null): string {
-  if (!phone) return '';
-  return phone.replace(/\D/g, '');
+export function extractReadableFirestoreError(
+  err: unknown,
+  language: 'en' | 'bn' = 'en',
+  fallback = 'Operation failed. Please try again.'
+): string {
+  if (!(err instanceof Error) || !err.message) return fallback;
+  let message = err.message;
+  try {
+    const parsed = JSON.parse(err.message);
+    if (parsed && typeof parsed.error === 'string' && parsed.error.trim()) {
+      message = parsed.error.trim();
+    }
+  } catch {
+    // Plain error message
+  }
+
+  const lower = message.toLowerCase();
+  if (lower.includes('permission') || lower.includes('insufficient')) {
+    return language === 'bn'
+      ? 'নিরাপত্তা নীতি বা অনুমতির কারণে কাজটি সম্পন্ন করা যায়নি। তথ্য যাচাই করে আবার চেষ্টা করুন।'
+      : 'Action was rejected by security rules. Please verify the inputs and your admin permissions.';
+  }
+  if (lower.includes('offline') || lower.includes('unavailable') || lower.includes('network')) {
+    return language === 'bn'
+      ? 'ইন্টারনেট সংযোগ বিচ্ছিন্ন রয়েছে। সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।'
+      : 'Network unavailable. Please check your connection and try again.';
+  }
+  return message || fallback;
 }
+
+export { normalizePhoneNumber, extractPhoneDigits };
 
 export function doPhonesMatch(a?: string | null, b?: string | null): boolean {
   const da = extractPhoneDigits(a);
@@ -55,7 +92,7 @@ export function isSuperAdmin(email?: string | null): boolean {
   return email.trim().toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
 }
 
-// Log admin action to immutable audit trail
+// Log admin action to immutable audit trail (strictly bounded to firestore.rules limits)
 export async function logAdminAction(
   action: AdminAuditLog['action'],
   details: string,
@@ -65,16 +102,20 @@ export async function logAdminAction(
 ): Promise<void> {
   const logId = `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   try {
+    const cleanAdmin = (adminEmail || SUPER_ADMIN_EMAIL).trim().slice(0, 150) || SUPER_ADMIN_EMAIL;
+    const cleanDetails = (details || action).trim().slice(0, 1000) || action;
     const logEntry: Record<string, unknown> = {
       id: logId,
-      adminEmail,
-      action,
-      details,
+      adminEmail: cleanAdmin,
+      action: action.slice(0, 100),
+      details: cleanDetails,
       timestamp: new Date().toISOString(),
     };
 
-    if (targetId) logEntry.targetId = targetId;
-    if (targetName) logEntry.targetName = targetName;
+    const cleanTargetId = targetId?.trim().slice(0, 128);
+    const cleanTargetName = targetName?.trim().slice(0, 150);
+    if (cleanTargetId) logEntry.targetId = cleanTargetId;
+    if (cleanTargetName) logEntry.targetName = cleanTargetName;
 
     await setDoc(doc(db, 'admin_logs', logId), logEntry as unknown as AdminAuditLog);
   } catch (error) {
@@ -98,8 +139,17 @@ export async function banUser(
   const path = `users/${targetUserId}`;
   try {
     const userRef = doc(db, 'users', targetUserId);
+    const existingUserSnap = await getDoc(userRef).catch(() => null);
+    const targetPhone = existingUserSnap?.exists()
+      ? (existingUserSnap.data() as UserProfile).phoneNumber
+      : undefined;
+
     const now = new Date();
     const nowIso = now.toISOString();
+    const cleanReason = (
+      reason.trim() || 'Violating platform guidelines and community safety standards.'
+    ).slice(0, 500);
+    const cleanAdminEmail = (adminEmail || SUPER_ADMIN_EMAIL).trim().slice(0, 150);
 
     let bannedUntil: string | null = null;
     let bannedUntilMs: number | null = null;
@@ -115,15 +165,16 @@ export async function banUser(
 
     const updates: Record<string, unknown> = {
       isBanned: true,
-      banReason: reason.trim() || 'Violating platform guidelines and community safety standards.',
+      banReason: cleanReason,
       bannedAt: nowIso,
-      bannedBy: adminEmail,
+      bannedBy: cleanAdminEmail,
       bannedUntil,
       bannedUntilMs,
       isOnline: false,
     };
 
     await updateDoc(userRef, updates);
+    await syncBanStateToPhoneRegistry(targetUserId, targetPhone, true);
     await setDoc(
       doc(db, 'directory', targetUserId),
       { isBanned: true, isOnline: false },
@@ -142,7 +193,7 @@ export async function banUser(
         if (cdata.type === 'direct') {
           chatUpdates.isSuspended = true;
           chatUpdates.suspendedUserId = targetUserId;
-          chatUpdates.suspendedUserName = targetName || targetEmail;
+          chatUpdates.suspendedUserName = (targetName || targetEmail || 'User').slice(0, 150);
         }
         await updateDoc(doc(db, 'chats', chatDoc.id), chatUpdates);
       }
@@ -152,8 +203,8 @@ export async function banUser(
 
     await logAdminAction(
       'ban_user',
-      `Suspended user account for ${durationLogText}. Reason: "${reason.trim()}"`,
-      adminEmail,
+      `Suspended user account for ${durationLogText}. Reason: "${cleanReason}"`.slice(0, 1000),
+      cleanAdminEmail,
       targetUserId,
       targetName || targetEmail
     );
@@ -172,6 +223,11 @@ export async function unbanUser(
   const path = `users/${targetUserId}`;
   try {
     const userRef = doc(db, 'users', targetUserId);
+    const existingUserSnap = await getDoc(userRef).catch(() => null);
+    const targetPhone = existingUserSnap?.exists()
+      ? (existingUserSnap.data() as UserProfile).phoneNumber
+      : undefined;
+
     await updateDoc(userRef, {
       isBanned: false,
       banReason: null,
@@ -180,6 +236,7 @@ export async function unbanUser(
       bannedUntil: null,
       bannedUntilMs: null,
     });
+    await syncBanStateToPhoneRegistry(targetUserId, targetPhone, false);
 
     await setDoc(
       doc(db, 'directory', targetUserId),
@@ -223,7 +280,13 @@ export async function unbanUser(
 export async function claimExpiredSuspension(userId: string): Promise<void> {
   const path = `users/${userId}`;
   try {
-    await updateDoc(doc(db, 'users', userId), {
+    const userRef = doc(db, 'users', userId);
+    const existingUserSnap = await getDoc(userRef).catch(() => null);
+    const targetPhone = existingUserSnap?.exists()
+      ? (existingUserSnap.data() as UserProfile).phoneNumber
+      : undefined;
+
+    await updateDoc(userRef, {
       isBanned: false,
       banReason: null,
       bannedAt: null,
@@ -231,6 +294,7 @@ export async function claimExpiredSuspension(userId: string): Promise<void> {
       bannedUntil: null,
       bannedUntilMs: null,
     });
+    await clearExpiredSelfBanFromPhoneRegistry(userId, targetPhone);
 
     await setDoc(
       doc(db, 'directory', userId),
@@ -267,18 +331,23 @@ export async function issueWarning(
   adminEmail: string
 ): Promise<void> {
   const path = `users/${targetUserId}`;
+  const cleanNotice = warningNotice.trim().slice(0, 1000);
+  if (!cleanNotice) {
+    throw new Error('Warning message cannot be empty.');
+  }
+
   try {
     const userRef = doc(db, 'users', targetUserId);
     const nowIso = new Date().toISOString();
     await updateDoc(userRef, {
-      warningNotice: warningNotice.trim(),
+      warningNotice: cleanNotice,
       warningIssuedAt: nowIso,
       warningDismissed: false,
     });
 
     await logAdminAction(
       'issue_warning',
-      `Issued official administrative warning: "${warningNotice.trim()}"`,
+      `Issued official administrative warning: "${cleanNotice}"`.slice(0, 1000),
       adminEmail,
       targetUserId,
       targetName || targetEmail
@@ -339,20 +408,25 @@ const ALLOWED_REPORT_REASONS: ReportReason[] = [
   'other',
 ];
 
+const ALLOWED_REPORT_MSG_TYPES = ['text', 'image', 'audio', 'file'] as const;
+
 // Submit a new abuse / conduct report
 export async function submitReport(reportData: {
   reporterId: string;
   reporterName: string;
   reporterEmail: string;
+  reporterPhoneNumber?: string;
+  reporterInitialPhoneNumber?: string;
   targetUserId: string;
   targetUserName: string;
   targetUserEmail?: string;
   chatId?: string;
   messageId?: string;
   messageText?: string;
+  reportedMessageType?: 'text' | 'image' | 'audio' | 'file';
   reason: ReportReason;
   details: string;
-}): Promise<void> {
+}): Promise<string> {
   const reporterId = (reportData.reporterId || '').trim().slice(0, 128);
   const targetUserId = (reportData.targetUserId || '').trim().slice(0, 128);
 
@@ -383,19 +457,58 @@ export async function submitReport(reportData: {
       createdAt: new Date().toISOString(),
     };
 
+    const cleanReporterPhone = reportData.reporterPhoneNumber?.trim().slice(0, 50);
+    const cleanReporterInitial = reportData.reporterInitialPhoneNumber?.trim().slice(0, 50);
     const cleanTargetEmail = reportData.targetUserEmail?.trim().slice(0, 150);
     const cleanChatId = reportData.chatId?.trim().slice(0, 128);
     const cleanMessageId = reportData.messageId?.trim().slice(0, 128);
     const cleanMessageText = reportData.messageText?.trim().slice(0, 1000);
 
+    if (cleanReporterPhone) newReport.reporterPhoneNumber = cleanReporterPhone;
+    if (cleanReporterInitial) newReport.reporterInitialPhoneNumber = cleanReporterInitial;
     if (cleanTargetEmail) newReport.targetUserEmail = cleanTargetEmail;
     if (cleanChatId) newReport.chatId = cleanChatId;
     if (cleanMessageId) newReport.messageId = cleanMessageId;
     if (cleanMessageText) newReport.messageText = cleanMessageText;
+    if (
+      reportData.reportedMessageType &&
+      ALLOWED_REPORT_MSG_TYPES.includes(reportData.reportedMessageType)
+    ) {
+      newReport.reportedMessageType = reportData.reportedMessageType;
+    }
 
     await setDoc(doc(db, 'reports', reportId), newReport as unknown as UserReport);
+    return reportId;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
+    throw error;
+  }
+}
+
+export async function stampReportTargetSnapshot(
+  reportId: string,
+  targetUser: UserProfile
+): Promise<void> {
+  try {
+    const updates: Record<string, unknown> = {};
+    if (targetUser.phoneNumber) {
+      updates.targetPhoneNumber = targetUser.phoneNumber.trim().slice(0, 50);
+    }
+    const initPhone = targetUser.initialPhoneNumber || targetUser.phoneNumber;
+    if (initPhone) {
+      updates.targetInitialPhoneNumber = initPhone.trim().slice(0, 50);
+    }
+    if (targetUser.createdAt) {
+      updates.targetAccountCreatedAt = targetUser.createdAt.trim().slice(0, 64);
+    }
+    if (Array.isArray(targetUser.phoneHistory)) {
+      updates.targetPhoneChangeCount = Math.min(100, targetUser.phoneHistory.length);
+    }
+    if (Object.keys(updates).length > 0) {
+      await updateDoc(doc(db, 'reports', reportId), updates);
+    }
+  } catch {
+    // Non-blocking snapshot preservation
   }
 }
 
@@ -407,7 +520,7 @@ export function subscribeToReports(callback: (reports: UserReport[]) => void): U
     q,
     (snapshot) => {
       const reports = snapshot.docs.map((docSnap) => docSnap.data() as UserReport);
-      reports.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      reports.sort((a, b) => safeTimeMs(b.createdAt) - safeTimeMs(a.createdAt));
       callback(reports);
     },
     (error) => {
@@ -420,7 +533,7 @@ export function subscribeToReports(callback: (reports: UserReport[]) => void): U
   );
 }
 
-// Update report status (Admin only)
+// Update report status (Admin only) — preserves prior notes when reopening
 export async function updateReportStatus(
   reportId: string,
   status: 'pending' | 'resolved' | 'dismissed',
@@ -430,14 +543,23 @@ export async function updateReportStatus(
   const path = `reports/${reportId}`;
   try {
     const reportRef = doc(db, 'reports', reportId);
-    const defaultNote =
-      status === 'resolved'
-        ? 'Addressed by admin.'
-        : status === 'dismissed'
-        ? 'Dismissed as false report.'
-        : 'Reopened for further review.';
-    const cleanNotes = (resolutionNotes.trim() || defaultNote).slice(0, 1000);
     const cleanAdminEmail = (adminEmail || SUPER_ADMIN_EMAIL).trim().slice(0, 150);
+
+    let cleanNotes: string;
+    if (status === 'pending') {
+      const snap = await getDoc(reportRef);
+      const existingNotes = snap.exists() ? (snap.data() as UserReport).resolutionNotes?.trim() : '';
+      const reopenEntry = `[Reopened ${new Date().toLocaleDateString()} by ${cleanAdminEmail}]`;
+      cleanNotes = existingNotes
+        ? `${existingNotes}\n${reopenEntry}`.slice(0, 1000)
+        : (resolutionNotes.trim() || 'Reopened for further review.').slice(0, 1000);
+    } else {
+      const defaultNote =
+        status === 'resolved'
+          ? 'Addressed by admin.'
+          : 'Dismissed by admin.';
+      cleanNotes = (resolutionNotes.trim() || defaultNote).slice(0, 1000);
+    }
 
     await updateDoc(reportRef, {
       status,
@@ -455,7 +577,7 @@ export async function updateReportStatus(
 
     await logAdminAction(
       auditAction,
-      `${status === 'pending' ? 'Reopened report for review' : `Marked report as ${status}`}. Notes: "${cleanNotes}"`,
+      `${status === 'pending' ? 'Reopened report for review' : `Marked report as ${status}`}. Notes: "${cleanNotes}"`.slice(0, 1000),
       cleanAdminEmail,
       reportId
     );
@@ -492,7 +614,7 @@ export function subscribeToAnnouncements(
       if (activeOnly) {
         items = items.filter((a) => a.active);
       }
-      items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      items.sort((a, b) => safeTimeMs(b.createdAt) - safeTimeMs(a.createdAt));
       callback(items);
     },
     (error) => {
@@ -517,18 +639,19 @@ export async function createAnnouncement(
   const annId = `ann_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const path = `announcements/${annId}`;
   try {
+    const cleanTitle = title.trim().slice(0, 150);
     const ann: SystemAnnouncement = {
       id: annId,
-      title: title.trim(),
-      content: content.trim(),
+      title: cleanTitle,
+      content: content.trim().slice(0, 3000),
       type,
       active: true,
       createdAt: new Date().toISOString(),
-      createdBy: adminUid,
-      authorName: adminName,
+      createdBy: adminUid.slice(0, 128),
+      authorName: (adminName || 'Super Admin').trim().slice(0, 100),
     };
     await setDoc(doc(db, 'announcements', annId), ann);
-    await logAdminAction('create_announcement', `Published announcement: "${title.trim()}"`, adminEmail, annId);
+    await logAdminAction('create_announcement', `Published announcement: "${cleanTitle}"`.slice(0, 1000), adminEmail, annId);
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
   }
@@ -573,7 +696,7 @@ export function subscribeToAdminLogs(callback: (logs: AdminAuditLog[]) => void):
     q,
     (snapshot) => {
       const logs = snapshot.docs.map((docSnap) => docSnap.data() as AdminAuditLog);
-      logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      logs.sort((a, b) => safeTimeMs(b.timestamp) - safeTimeMs(a.timestamp));
       callback(logs);
     },
     (error) => {
@@ -586,30 +709,40 @@ export function subscribeToAdminLogs(callback: (logs: AdminAuditLog[]) => void):
   );
 }
 
-// Admin message deletion (moderation) — returns false if message was already deleted
+// Admin message deletion (moderation) — returns false if message was already deleted; optionally syncs reports
 export async function deleteAdminMessage(
   chatId: string,
   messageId: string,
   adminEmail: string,
-  reason?: string
+  reason?: string,
+  linkedReportIds?: string[]
 ): Promise<boolean> {
   const path = `chats/${chatId}/messages/${messageId}`;
   try {
     const msgRef = doc(db, 'chats', chatId, 'messages', messageId);
     const snap = await getDoc(msgRef);
-    if (!snap.exists()) {
-      return false;
+    const existed = snap.exists();
+
+    if (existed) {
+      await deleteDoc(msgRef);
+      await syncChatLastMessageFromLatest(chatId, messageId);
+      await logAdminAction(
+        'delete_message',
+        `Admin removed inappropriate message in chat ${chatId.slice(0, 40)}. Reason: "${(reason || 'Safety moderation').slice(0, 300)}"`.slice(0, 1000),
+        adminEmail,
+        messageId
+      );
     }
 
-    await deleteDoc(msgRef);
-    await syncChatLastMessageFromLatest(chatId, messageId);
-    await logAdminAction(
-      'delete_message',
-      `Admin removed inappropriate message. Reason: "${(reason || 'Safety moderation').slice(0, 300)}"`,
-      adminEmail,
-      messageId
-    );
-    return true;
+    if (linkedReportIds && linkedReportIds.length > 0) {
+      await Promise.all(
+        linkedReportIds.map((repId) =>
+          updateDoc(doc(db, 'reports', repId), { targetMessageDeleted: true }).catch(() => {})
+        )
+      );
+    }
+
+    return existed;
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
     return false;
@@ -620,11 +753,15 @@ export async function deleteAdminMessage(
 // PASSWORD RECOVERY DESK (Support Ticket Only - Zero Plaintext Secrets)
 // ----------------------------------------------------
 
+const ALLOWED_RECOVERY_TOPICS: RecoveryTopic[] = ['app_lock', 'lost_email', 'suspended', 'other'];
+
 export async function submitRecoveryRequest(data: {
   email?: string;
   name?: string;
   username?: string;
   contactPhone?: string;
+  topic?: RecoveryTopic;
+  requesterUid?: string;
   details?: string;
 }): Promise<string> {
   const cleanEmail = (data.email || '').trim().toLowerCase().slice(0, 150);
@@ -652,6 +789,13 @@ export async function submitRecoveryRequest(data: {
   if (data.name?.trim()) reqDoc.name = data.name.trim().slice(0, 100);
   if (cleanUsername) reqDoc.username = cleanUsername;
   if (cleanPhone) reqDoc.contactPhone = cleanPhone;
+  if (data.topic && ALLOWED_RECOVERY_TOPICS.includes(data.topic)) {
+    reqDoc.topic = data.topic;
+  }
+  const cleanUid = data.requesterUid?.trim().slice(0, 128);
+  if (cleanUid && auth.currentUser?.uid === cleanUid) {
+    reqDoc.requesterUid = cleanUid;
+  }
   if (data.details?.trim()) reqDoc.details = data.details.trim().slice(0, 1000);
 
   try {
@@ -672,12 +816,13 @@ export function subscribeToRecoveryRequests(
     q,
     (snapshot) => {
       const items = snapshot.docs.map((docSnap) => docSnap.data() as PasswordRecoveryRequest);
-      items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      items.sort((a, b) => safeTimeMs(b.createdAt) - safeTimeMs(a.createdAt));
       callback(items);
     },
     (error) => {
       console.warn('Recovery requests subscription notice:', error);
-      if (!error.message.includes('offline') && !error.message.includes('unavailable')) {
+      const msg = error.message.toLowerCase();
+      if (!msg.includes('offline') && !msg.includes('unavailable') && !msg.includes('could not reach') && !msg.includes('timeout')) {
         handleFirestoreError(error, OperationType.GET, path);
       }
     }
@@ -705,7 +850,7 @@ export async function resolveRecoveryRequest(
 
     await logAdminAction(
       'resolve_recovery',
-      `Resolved support recovery ticket. Notes: "${cleanNotes}"`,
+      `Resolved support recovery ticket. Notes: "${cleanNotes}"`.slice(0, 1000),
       cleanAdminEmail,
       requestId
     );
@@ -734,7 +879,7 @@ export async function dismissRecoveryRequest(
 
     await logAdminAction(
       'dismiss_recovery',
-      `Dismissed support ticket. Notes: "${cleanNotes}"`,
+      `Dismissed support ticket. Notes: "${cleanNotes}"`.slice(0, 1000),
       cleanAdminEmail,
       requestId
     );
@@ -750,9 +895,19 @@ export async function reopenRecoveryRequest(
   const path = `recovery_requests/${requestId}`;
   try {
     const cleanAdminEmail = (adminEmail || SUPER_ADMIN_EMAIL).trim().slice(0, 150);
-    await updateDoc(doc(db, 'recovery_requests', requestId), {
+    const reqRef = doc(db, 'recovery_requests', requestId);
+    const snap = await getDoc(reqRef);
+    const existingNotes = snap.exists()
+      ? (snap.data() as PasswordRecoveryRequest).adminNotes?.trim()
+      : '';
+    const reopenEntry = `[Reopened ${new Date().toLocaleDateString()} by ${cleanAdminEmail}]`;
+    const nextNotes = existingNotes
+      ? `${existingNotes}\n${reopenEntry}`.slice(0, 1000)
+      : 'Reopened for further support.';
+
+    await updateDoc(reqRef, {
       status: 'pending',
-      adminNotes: 'Reopened for further support.',
+      adminNotes: nextNotes,
       resolvedAt: new Date().toISOString(),
       resolvedBy: cleanAdminEmail,
     });
@@ -791,14 +946,40 @@ export async function sendAdminPasswordResetEmail(
   adminEmail: string,
   ticketId?: string
 ): Promise<void> {
-  const cleanEmail = targetEmail.trim().toLowerCase();
+  const cleanEmail = targetEmail.trim().toLowerCase().slice(0, 150);
   if (!cleanEmail || !cleanEmail.includes('@')) {
     throw new Error('Invalid email address for password reset.');
   }
-  await sendPasswordResetEmail(auth, cleanEmail);
+  try {
+    await sendPasswordResetEmail(auth, cleanEmail);
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code || '';
+    if (code === 'auth/user-not-found') {
+      throw new Error(`No Firebase Auth account exists for ${cleanEmail}.`);
+    }
+    if (code === 'auth/invalid-email') {
+      throw new Error(`Invalid email format: ${cleanEmail}`);
+    }
+    if (code === 'auth/too-many-requests') {
+      throw new Error('Too many password reset emails sent recently. Please wait a few minutes.');
+    }
+    if (code === 'auth/network-request-failed') {
+      throw new Error('Network error while sending password reset email.');
+    }
+    throw new Error(`Failed to send password reset email to ${cleanEmail}.`);
+  }
+
+  const nowIso = new Date().toISOString();
+  if (ticketId) {
+    await updateDoc(doc(db, 'recovery_requests', ticketId), {
+      resetEmailSentAt: nowIso,
+      resetEmailSentTo: cleanEmail,
+    }).catch(() => {});
+  }
+
   await logAdminAction(
     'send_password_reset',
-    `Triggered Firebase Password Reset email to ${cleanEmail}.`,
+    `Triggered Firebase Password Reset email to ${cleanEmail}.`.slice(0, 1000),
     adminEmail,
     ticketId || cleanEmail,
     cleanEmail
@@ -808,7 +989,8 @@ export async function sendAdminPasswordResetEmail(
 // Clear a user's Quick App-Lock PIN (Admin recovery support without exposing/storing plaintext PIN)
 export async function adminClearUserAppLock(
   targetUserId: string,
-  adminEmail: string
+  adminEmail: string,
+  ticketId?: string
 ): Promise<void> {
   const path = `users/${targetUserId}`;
   try {
@@ -818,7 +1000,7 @@ export async function adminClearUserAppLock(
     });
     await logAdminAction(
       'clear_app_lock',
-      'Cleared Quick App-Lock PIN for user account recovery.',
+      `Cleared Quick App-Lock PIN for user account recovery${ticketId ? ` (Ticket: ${ticketId})` : ''}.`.slice(0, 1000),
       adminEmail,
       targetUserId
     );
@@ -868,12 +1050,13 @@ export function subscribeToAllChatsForAdmin(
       snapshot.forEach((d) => {
         chats.push({ id: d.id, ...(d.data() as Omit<ChatRoom, 'id'>) });
       });
-      chats.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+      chats.sort((a, b) => safeTimeMs(b.updatedAt || b.createdAt) - safeTimeMs(a.updatedAt || a.createdAt));
       callback(chats);
     },
     (error) => {
       console.warn('Admin all chats subscription notice:', error);
-      if (!error.message.includes('offline') && !error.message.includes('unavailable')) {
+      const msg = error.message.toLowerCase();
+      if (!msg.includes('offline') && !msg.includes('unavailable') && !msg.includes('could not reach') && !msg.includes('timeout')) {
         handleFirestoreError(error, OperationType.GET, path);
       }
     }
@@ -897,7 +1080,8 @@ export function subscribeToChatMessagesForAdmin(
     },
     (error) => {
       console.warn('Admin chat messages subscription notice:', error);
-      if (!error.message.includes('offline') && !error.message.includes('unavailable')) {
+      const msg = error.message.toLowerCase();
+      if (!msg.includes('offline') && !msg.includes('unavailable') && !msg.includes('could not reach') && !msg.includes('timeout')) {
         handleFirestoreError(error, OperationType.GET, path);
       }
     }

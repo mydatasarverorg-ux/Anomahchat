@@ -24,8 +24,9 @@ import {
 import {
   submitRecoveryRequest,
   SUPPORT_DESK_ADDRESS,
-  extractPhoneDigits,
+  extractReadableFirestoreError,
 } from '../services/adminService';
+import { validateMobileNumber, extractPhoneDigits } from '../utils/phoneUtils';
 import {
   getSavedDeviceAccounts,
   removeSavedDeviceAccount,
@@ -68,6 +69,7 @@ export function LoginScreen() {
   // Recovery Support Desk Form Fields
   const [recoveryTab, setRecoveryTab] = useState<'email' | 'request'>('email');
   const [recoveryTopic, setRecoveryTopic] = useState<'app_lock' | 'lost_email' | 'suspended' | 'other'>('app_lock');
+  const [supportEmail, setSupportEmail] = useState('');
   const [recoveryName, setRecoveryName] = useState('');
   const [recoveryUsername, setRecoveryUsername] = useState('');
   const [recoveryPhone, setRecoveryPhone] = useState('');
@@ -109,11 +111,13 @@ export function LoginScreen() {
           setLocalError(language === 'bn' ? 'আপনার পুরো নাম লিখুন।' : 'Please enter your full name or nickname.');
           return;
         }
-        if (extractPhoneDigits(signupPhone).length < 7) {
+        const phoneCheck = validateMobileNumber(signupPhone, language);
+        if (!phoneCheck.valid) {
           setLocalError(
-            language === 'bn'
-              ? 'অ্যাকাউন্টের নিরাপত্তা ও পরিচয় যাচাইয়ের জন্য অন্তত ৭ ডিজিটের সঠিক মোবাইল নম্বর দিন।'
-              : 'Please enter a valid mobile number (at least 7 digits) for identity verification.'
+            phoneCheck.error ||
+              (language === 'bn'
+                ? 'সঠিক মোবাইল নম্বর দিন (একই নম্বরে সর্বোচ্চ ৩টি অ্যাকাউন্ট খোলা যাবে)।'
+                : 'Please enter a valid mobile number (max 3 accounts per number).')
           );
           return;
         }
@@ -155,13 +159,12 @@ export function LoginScreen() {
     setModalError(null);
     try {
       await sendPasswordReset(forgotEmail.trim());
-      setInfoMessage(t('recoveryEmailSent', { email: forgotEmail }));
+      setInfoMessage(t('recoveryEmailSent', { email: forgotEmail.trim() }));
       setShowForgotModal(false);
       setForgotEmail('');
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : t('recoveryEmailFailed');
+      const msg = extractReadableFirestoreError(err, language, t('recoveryEmailFailed'));
       setModalError(msg);
-      setLocalError(msg);
     } finally {
       setForgotLoading(false);
     }
@@ -416,6 +419,11 @@ export function LoginScreen() {
                         maxLength={50}
                       />
                     </div>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      {language === 'bn'
+                        ? 'একই নম্বরে সর্বোচ্চ ৩টি অ্যাকাউন্ট খোলা যাবে (ভুয়া নম্বর গ্রহণযোগ্য নয়)'
+                        : 'Max 3 accounts per number · Fake numbers blocked'}
+                    </p>
                   </div>
 
                   <div>
@@ -491,8 +499,10 @@ export function LoginScreen() {
                   <button
                     type="button"
                     onClick={() => {
+                      setModalError(null);
                       if (selectedSavedAccount?.email) {
                         setForgotEmail(selectedSavedAccount.email);
+                        setSupportEmail(selectedSavedAccount.email);
                       }
                       setShowForgotModal(true);
                     }}
@@ -701,7 +711,7 @@ export function LoginScreen() {
                 onSubmit={async (e) => {
                   e.preventDefault();
                   setModalError(null);
-                  const cleanEmail = forgotEmail.trim();
+                  const cleanEmail = supportEmail.trim();
                   const hasEmail = cleanEmail.length >= 3 && cleanEmail.includes('@');
                   const hasPhone = extractPhoneDigits(recoveryPhone).length >= 6;
                   const hasUsername = recoveryUsername.trim().replace(/^@/, '').length >= 3;
@@ -745,24 +755,25 @@ export function LoginScreen() {
                     : `[${topicLabels[recoveryTopic]}] User requested administrator assistance.`;
 
                   try {
-                    await submitRecoveryRequest({
+                    const ticketId = await submitRecoveryRequest({
                       email: cleanEmail,
                       name: recoveryName.trim() || undefined,
                       username: recoveryUsername.trim() || undefined,
                       contactPhone: recoveryPhone.trim() || undefined,
+                      topic: recoveryTopic,
                       details: combinedDetails.slice(0, 1000),
                     });
-                    setInfoMessage(t('recoverySubmittedSuccess'));
+                    setInfoMessage(`${t('recoverySubmittedSuccess')} (Ticket ID: ${ticketId})`);
                     setShowForgotModal(false);
                     setRecoveryDetails('');
                     setRecoveryName('');
                     setRecoveryUsername('');
                     setRecoveryPhone('');
-                    setForgotEmail('');
+                    setSupportEmail('');
                   } catch (err: unknown) {
-                    const msg =
-                      err instanceof Error ? err.message : 'Failed to submit support ticket.';
-                    setModalError(msg);
+                    setModalError(
+                      extractReadableFirestoreError(err, language, 'Failed to submit support ticket.')
+                    );
                   } finally {
                     setRecoverySubmitting(false);
                   }
@@ -857,8 +868,8 @@ export function LoginScreen() {
                           : 'alternate.contact@example.com (optional)'
                         : 'registered.email@example.com'
                     }
-                    value={forgotEmail}
-                    onChange={(e) => setForgotEmail(e.target.value)}
+                    value={supportEmail}
+                    onChange={(e) => setSupportEmail(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -933,8 +944,8 @@ export function LoginScreen() {
                     (recoveryTopic === 'lost_email'
                       ? extractPhoneDigits(recoveryPhone).length < 6 &&
                         recoveryUsername.trim().replace(/^@/, '').length < 3 &&
-                        !(forgotEmail.trim().length >= 3 && forgotEmail.includes('@'))
-                      : !(forgotEmail.trim().length >= 3 && forgotEmail.includes('@')))
+                        !(supportEmail.trim().length >= 3 && supportEmail.includes('@'))
+                      : !(supportEmail.trim().length >= 3 && supportEmail.includes('@')))
                   }
                   className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 transition shadow"
                 >

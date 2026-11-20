@@ -1,6 +1,21 @@
-import { AlertTriangle, BarChart3, CheckCircle2, Eye, Lock, MessageSquare, Phone, Search } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import {
+  AlertTriangle,
+  BarChart3,
+  CheckCircle2,
+  Eye,
+  Laptop,
+  Lock,
+  MessageSquare,
+  Phone,
+  Save,
+  Search,
+  ShieldAlert,
+  ShieldCheck,
+  Smartphone,
+} from 'lucide-react';
 import { SUPER_ADMIN_EMAIL } from '../../services/adminService';
-import type { UserProfile } from '../../types/chat';
+import type { AppSecuritySettings, PhoneRegistryEntry, UserProfile } from '../../types/chat';
 
 interface AdminUsersTabProps {
   t: (key: any) => string;
@@ -18,6 +33,15 @@ interface AdminUsersTabProps {
   onOpenBan: (u: UserProfile) => void;
   onClearWarning: (u: UserProfile) => void;
   onOpenWarn: (u: UserProfile) => void;
+  userPhoneRegistryMap?: Record<string, PhoneRegistryEntry>;
+  allUsersList?: UserProfile[];
+  globalSecuritySettings?: AppSecuritySettings;
+  securityPolicyBusy?: boolean;
+  onSaveGlobalSecuritySettings?: (settings: {
+    defaultMobileLimit: number;
+    defaultWebLimit: number;
+    requireApprovalForNewDevice: boolean;
+  }) => Promise<void>;
 }
 
 export function AdminUsersTab({
@@ -36,9 +60,129 @@ export function AdminUsersTab({
   onOpenBan,
   onClearWarning,
   onOpenWarn,
+  userPhoneRegistryMap,
+  allUsersList = [],
+  globalSecuritySettings,
+  securityPolicyBusy = false,
+  onSaveGlobalSecuritySettings,
 }: AdminUsersTabProps) {
+  const [mobileLimitDraft, setMobileLimitDraft] = useState<string>(
+    String(globalSecuritySettings?.defaultMobileLimit ?? 1)
+  );
+  const [webLimitDraft, setWebLimitDraft] = useState<string>(
+    String(globalSecuritySettings?.defaultWebLimit ?? 1)
+  );
+  const [requireApprovalDraft, setRequireApprovalDraft] = useState<boolean>(
+    globalSecuritySettings?.requireApprovalForNewDevice !== false
+  );
+
+  useEffect(() => {
+    if (!globalSecuritySettings) return;
+    setMobileLimitDraft(String(globalSecuritySettings.defaultMobileLimit));
+    setWebLimitDraft(String(globalSecuritySettings.defaultWebLimit));
+    setRequireApprovalDraft(globalSecuritySettings.requireApprovalForNewDevice !== false);
+  }, [
+    globalSecuritySettings?.defaultMobileLimit,
+    globalSecuritySettings?.defaultWebLimit,
+    globalSecuritySettings?.requireApprovalForNewDevice,
+  ]);
+
   return (
     <div className="space-y-4 max-w-5xl mx-auto">
+      {/* Global Device Limit & Login Approval Control */}
+      {globalSecuritySettings && onSaveGlobalSecuritySettings && (
+        <div className="p-3.5 sm:p-4 bg-slate-950/90 border border-slate-800 rounded-2xl space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              <div>
+                <h4 className="text-xs font-bold text-white">
+                  {language === 'bn'
+                    ? 'গ্লোবাল ডিভাইস সীমা ও নতুন লগইন অনুমোদন নিয়ন্ত্রণ'
+                    : 'Global Device Limits & New Login Approval Policy'}
+                </h4>
+                <p className="text-[10px] text-slate-400">
+                  {language === 'bn'
+                    ? 'প্রতি ইউজার সর্বোচ্চ কয়টি মোবাইল (APK/মোবাইল ব্রাউজার) ও ওয়েব/পিসি চালাতে পারবে তা এখান থেকে নিয়ন্ত্রণ করুন।'
+                    : 'Control how many Mobile (APK/Mobile Browser) and PC/Web sessions each account can run concurrently.'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-end text-xs">
+            <div className="space-y-1">
+              <label className="text-[10px] text-slate-400 font-semibold flex items-center gap-1">
+                <Smartphone className="w-3 h-3 text-emerald-400" />
+                <span>{language === 'bn' ? 'সর্বোচ্চ মোবাইল সংখ্যা' : 'Max Mobile Devices'}</span>
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={20}
+                value={mobileLimitDraft}
+                onChange={(e) => setMobileLimitDraft(e.target.value)}
+                className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] text-slate-400 font-semibold flex items-center gap-1">
+                <Laptop className="w-3 h-3 text-sky-400" />
+                <span>{language === 'bn' ? 'সর্বোচ্চ ওয়েব/পিসি' : 'Max PC / Web'}</span>
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={20}
+                value={webLimitDraft}
+                onChange={(e) => setWebLimitDraft(e.target.value)}
+                className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-sky-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl">
+              <span className="text-[11px] text-slate-300 font-medium">
+                {language === 'bn' ? 'নতুন ডিভাইস অনুমোদন' : 'Require Approval'}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={requireApprovalDraft}
+                onClick={() => setRequireApprovalDraft((prev) => !prev)}
+                className={`w-10 h-5 rounded-full transition relative shrink-0 cursor-pointer ${
+                  requireApprovalDraft ? 'bg-emerald-500' : 'bg-slate-700'
+                }`}
+              >
+                <span
+                  className={`block w-3.5 h-3.5 bg-white rounded-full shadow transition-transform ${
+                    requireApprovalDraft ? 'translate-x-5.5' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              disabled={securityPolicyBusy}
+              onClick={() => {
+                const m = Math.min(20, Math.max(0, Number(mobileLimitDraft) || 0));
+                const w = Math.min(20, Math.max(0, Number(webLimitDraft) || 0));
+                onSaveGlobalSecuritySettings({
+                  defaultMobileLimit: m,
+                  defaultWebLimit: w,
+                  requireApprovalForNewDevice: requireApprovalDraft,
+                });
+              }}
+              className="py-1.5 px-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition shadow"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>{language === 'bn' ? 'নীতি সেভ করুন' : 'Save Policy'}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row gap-2.5 justify-between">
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
@@ -116,6 +260,16 @@ export function AdminUsersTab({
                         {t('userStatusWarned')}
                       </span>
                     ) : null}
+                    {u.status === 'scheduled_for_deletion' && (
+                      <span className="px-1.5 py-0.5 rounded-md bg-orange-500/20 text-orange-300 border border-orange-500/30 text-[9px] font-bold">
+                        {language === 'bn' ? 'ডিলিট পেন্ডিং' : 'DELETION PENDING'}
+                      </span>
+                    )}
+                    {u.status === 'deleted' && (
+                      <span className="px-1.5 py-0.5 rounded-md bg-slate-700/70 text-slate-300 border border-slate-600 text-[9px] font-bold">
+                        {language === 'bn' ? 'ডিলিট হয়েছে' : 'DELETED'}
+                      </span>
+                    )}
                     {u.hasAppLockPin && (
                       <span
                         className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[9px] font-semibold"
@@ -131,12 +285,85 @@ export function AdminUsersTab({
                     {u.username && (
                       <span className="text-[10px] text-slate-500 font-mono">@{u.username}</span>
                     )}
-                    {u.phoneNumber && (
-                      <span className="text-[10px] text-emerald-400/90 font-mono inline-flex items-center gap-1">
-                        <Phone className="w-2.5 h-2.5" />
-                        {u.phoneNumber}
-                      </span>
-                    )}
+                    {u.phoneNumber && (() => {
+                      const reg = userPhoneRegistryMap?.[u.userId];
+                      const used = reg?.accountUids?.length ?? 0;
+                      const limit = reg?.maxLimit ?? 3;
+                      const linkedLabels = (reg?.accountUids || []).map((uid) => {
+                        const match = allUsersList.find((x) => x.userId === uid);
+                        if (!match) return `UID:${uid.slice(0, 6)}...`;
+                        if (match.status === 'deleted') return `${match.displayName} (${language === 'bn' ? 'ডিলিট' : 'Deleted'})`;
+                        if (match.status === 'scheduled_for_deletion') return `${match.displayName} (${language === 'bn' ? 'ডিলিট পেন্ডিং' : 'Pending Del'})`;
+                        return match.displayName;
+                      });
+                      return (
+                        <span className="inline-flex flex-col gap-0.5">
+                          <span className="inline-flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[10px] text-emerald-400/90 font-mono inline-flex items-center gap-1">
+                              <Phone className="w-2.5 h-2.5" />
+                              {u.phoneNumber}
+                            </span>
+                            {reg && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenDossier(u)}
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold inline-flex items-center gap-0.5 border cursor-pointer hover:opacity-90 transition ${
+                                  reg.isBlocked
+                                    ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                                    : used >= limit
+                                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                    : 'bg-slate-800 text-slate-300 border-slate-700'
+                                }`}
+                                title={
+                                  language === 'bn'
+                                    ? `এই নম্বরে যুক্ত (${used}/${limit}): ${linkedLabels.join(', ')} — বিস্তারিত দেখতে ক্লিক করুন`
+                                    : `Linked (${used}/${limit}): ${linkedLabels.join(', ')} — click to manage`
+                                }
+                              >
+                                {reg.isBlocked && <ShieldAlert className="w-2.5 h-2.5" />}
+                                <span>{used}/{limit}</span>
+                                {reg.isBlocked ? (
+                                  <span>LOCK</span>
+                                ) : used >= limit ? (
+                                  <span>FULL</span>
+                                ) : null}
+                              </button>
+                            )}
+                            {u.initialPhoneNumber && u.initialPhoneNumber !== u.phoneNumber && (
+                              <span
+                                className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-500/10 text-amber-300 border border-amber-500/25"
+                                title={
+                                  language === 'bn'
+                                    ? 'সর্বপ্রথম রেজিস্ট্রি করা নম্বর'
+                                    : 'First Registered Phone Number'
+                                }
+                              >
+                                {language === 'bn' ? 'প্রথম:' : '1st:'} {u.initialPhoneNumber}
+                              </span>
+                            )}
+                            {u.deviceLimits &&
+                              (typeof u.deviceLimits.mobile === 'number' ||
+                                typeof u.deviceLimits.web === 'number') && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-sky-500/10 text-sky-300 border border-sky-500/25">
+                                  {language === 'bn' ? 'ডিভাইস:' : 'Dev:'} M:
+                                  {u.deviceLimits.mobile ??
+                                    globalSecuritySettings?.defaultMobileLimit ??
+                                    1}{' '}
+                                  W:
+                                  {u.deviceLimits.web ??
+                                    globalSecuritySettings?.defaultWebLimit ??
+                                    1}
+                                </span>
+                              )}
+                          </span>
+                          {reg && linkedLabels.length > 1 && (
+                            <span className="text-[9px] text-slate-400 leading-tight">
+                              {language === 'bn' ? 'কোটায় যুক্ত:' : 'Linked:'} {linkedLabels.join(', ')}
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>

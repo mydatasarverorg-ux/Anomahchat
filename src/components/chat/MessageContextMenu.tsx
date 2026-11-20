@@ -124,7 +124,7 @@ export function MessageContextMenu({
               </button>
             )}
 
-            {message.senderId !== user?.userId && (
+            {message.senderId !== user?.userId && message.type !== 'call' && (
               <button
                 onClick={() => {
                   onReport(message);

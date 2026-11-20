@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useModalHistory } from '../hooks/useModalHistory';
-import { submitReport } from '../services/adminService';
+import { submitReport, extractReadableFirestoreError } from '../services/adminService';
 import type { ReportReason } from '../types/chat';
 import {
   ShieldAlert,
@@ -21,7 +21,32 @@ interface ReportModalProps {
   chatId?: string;
   messageId?: string;
   messageText?: string;
+  reportedMessageType?: 'text' | 'image' | 'audio' | 'file';
   onClose: () => void;
+}
+
+const RECENT_REPORTS_KEY = 'anomah_recent_reports_v1';
+
+function hasRecentReport(reportKey: string): boolean {
+  try {
+    const raw = sessionStorage.getItem(RECENT_REPORTS_KEY);
+    if (!raw) return false;
+    const list = JSON.parse(raw) as string[];
+    return Array.isArray(list) && list.includes(reportKey);
+  } catch {
+    return false;
+  }
+}
+
+function recordRecentReport(reportKey: string) {
+  try {
+    const raw = sessionStorage.getItem(RECENT_REPORTS_KEY);
+    const list = raw ? (JSON.parse(raw) as string[]) : [];
+    const next = Array.isArray(list) ? [...list.filter((k) => k !== reportKey), reportKey].slice(-50) : [reportKey];
+    sessionStorage.setItem(RECENT_REPORTS_KEY, JSON.stringify(next));
+  } catch {
+    // ignore storage errors
+  }
 }
 
 export function ReportModal({
@@ -31,6 +56,7 @@ export function ReportModal({
   chatId,
   messageId,
   messageText,
+  reportedMessageType,
   onClose,
 }: ReportModalProps) {
   const { user } = useAuth();
@@ -54,6 +80,10 @@ export function ReportModal({
   }, []);
 
   const isSelfReport = Boolean(user?.userId && user.userId === targetUserId);
+  const reportKey = user?.userId
+    ? `${user.userId}:${chatId || 'dm'}:${messageId || targetUserId}`
+    : '';
+  const alreadyReportedRecently = Boolean(reportKey && hasRecentReport(reportKey));
 
   const reportReasons: { id: ReportReason; labelKey: any }[] = [
     { id: 'harassment', labelKey: 'reportReasonHarassment' },
@@ -64,29 +94,6 @@ export function ReportModal({
     { id: 'impersonation', labelKey: 'reportReasonImpersonation' },
     { id: 'other', labelKey: 'reportReasonOther' },
   ];
-
-  const extractReadableError = (err: unknown): string => {
-    const fallback =
-      language === 'bn'
-        ? 'রিপোর্ট জমা দেওয়া যায়নি। দয়া করে ইন্টারনেট সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।'
-        : 'Could not submit report. Please check your connection and try again.';
-
-    if (!(err instanceof Error) || !err.message) return fallback;
-    try {
-      const parsed = JSON.parse(err.message);
-      if (parsed && typeof parsed.error === 'string' && parsed.error.trim()) {
-        if (parsed.error.toLowerCase().includes('permission')) {
-          return language === 'bn'
-            ? 'নিরাপত্তা নীতির কারণে রিপোর্টটি গ্রহণ করা যায়নি।'
-            : 'Report was rejected by security validation.';
-        }
-        return parsed.error;
-      }
-    } catch {
-      // Plain error message
-    }
-    return err.message;
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,6 +106,10 @@ export function ReportModal({
       );
       return;
     }
+    if (alreadyReportedRecently) {
+      setErrorMsg(t('alreadyReportedRecently'));
+      return;
+    }
 
     setErrorMsg(null);
     try {
@@ -107,22 +118,34 @@ export function ReportModal({
         reporterId: user.userId,
         reporterName: user.displayName || 'Anonymous User',
         reporterEmail: user.email || '',
+        reporterPhoneNumber: user.phoneNumber || undefined,
+        reporterInitialPhoneNumber: user.initialPhoneNumber || user.phoneNumber || undefined,
         targetUserId,
         targetUserName,
         targetUserEmail,
         chatId,
         messageId,
         messageText,
+        reportedMessageType,
         reason,
         details,
       });
+      if (reportKey) recordRecentReport(reportKey);
       setSuccess(true);
       closeTimerRef.current = setTimeout(() => {
         onClose();
       }, 1800);
     } catch (err) {
       console.error('Failed to submit report:', err);
-      setErrorMsg(extractReadableError(err));
+      setErrorMsg(
+        extractReadableFirestoreError(
+          err,
+          language,
+          language === 'bn'
+            ? 'রিপোর্ট জমা দেওয়া যায়নি। দয়া করে ইন্টারনেট সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।'
+            : 'Could not submit report. Please check your connection and try again.'
+        )
+      );
     } finally {
       setSubmitting(false);
     }
@@ -187,6 +210,13 @@ export function ReportModal({
                     ? 'আপনি নিজের অ্যাকাউন্টের বিরুদ্ধে রিপোর্ট করতে পারবেন না।'
                     : 'You cannot submit a report against yourself.'}
                 </span>
+              </div>
+            )}
+
+            {alreadyReportedRecently && !isSelfReport && (
+              <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{t('alreadyReportedRecently')}</span>
               </div>
             )}
 
@@ -257,7 +287,7 @@ export function ReportModal({
               </button>
               <button
                 type="submit"
-                disabled={submitting || isSelfReport}
+                disabled={submitting || isSelfReport || alreadyReportedRecently}
                 className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-xs font-semibold text-white cursor-pointer shadow flex items-center gap-2"
               >
                 {submitting ? (

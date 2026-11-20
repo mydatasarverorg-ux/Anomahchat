@@ -19,6 +19,8 @@ import { BannedScreen } from './components/BannedScreen';
 import { WarningNoticeModal } from './components/WarningNoticeModal';
 import { AnnouncementBanner } from './components/AnnouncementBanner';
 import { UpdateModal } from './components/UpdateModal';
+import { PendingDeviceGate } from './components/PendingDeviceGate';
+import { DeviceApprovalModal } from './components/DeviceApprovalModal';
 import { useModalHistory } from './hooks/useModalHistory';
 
 const AdminModal = lazy(() => import('./components/AdminModal').then((m) => ({ default: m.AdminModal })));
@@ -45,9 +47,16 @@ import {
   cancelAppNotification,
   type AppNotificationPermission,
 } from './services/notificationService';
-import { isSuperAdmin, SUPPORT_DESK_ADDRESS, extractPhoneDigits } from './services/adminService';
+import {
+  isSuperAdmin,
+  SUPPORT_DESK_ADDRESS,
+  extractPhoneDigits,
+  submitRecoveryRequest,
+  extractReadableFirestoreError,
+} from './services/adminService';
 import { subscribeToLatestRelease, type AppReleaseInfo } from './services/updateService';
 import { isUpdateAvailable, isNativeApkApp } from './utils/appVersion';
+import { validateMobileNumber } from './utils/phoneUtils';
 import type { ChatRoom, CallSession, Friendship, UserProfile } from './types/chat';
 import {
   MessageSquare,
@@ -68,6 +77,9 @@ import {
   AtSign,
   ScanLine,
   Smartphone,
+  Send,
+  CheckCircle2,
+  Mail,
 } from 'lucide-react';
 
 function AppLockGate() {
@@ -76,6 +88,14 @@ function AppLockGate() {
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+
+  // Support ticket state for locked-out users
+  const [showSupportForm, setShowSupportForm] = useState(false);
+  const [supportPhone, setSupportPhone] = useState(user?.phoneNumber || '');
+  const [supportDetails, setSupportDetails] = useState('');
+  const [submittingSupport, setSubmittingSupport] = useState(false);
+  const [supportTicketId, setSupportTicketId] = useState<string | null>(null);
+  const [supportError, setSupportError] = useState<string | null>(null);
 
   const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,6 +108,39 @@ function AppLockGate() {
       setPin('');
     }
     setChecking(false);
+  };
+
+  const handleSupportSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || submittingSupport) return;
+    setSubmittingSupport(true);
+    setSupportError(null);
+    try {
+      const detailsBody = supportDetails.trim()
+        ? `[App-Lock PIN Reset] ${supportDetails.trim()}`
+        : '[App-Lock PIN Reset] User forgot Quick App-Lock PIN while locked out.';
+      const id = await submitRecoveryRequest({
+        email: user.email || '',
+        name: user.displayName || undefined,
+        username: user.username || undefined,
+        contactPhone: supportPhone.trim() || user.phoneNumber || undefined,
+        topic: 'app_lock',
+        requesterUid: user.userId,
+        details: detailsBody.slice(0, 1000),
+      });
+      setSupportTicketId(id);
+      setShowSupportForm(false);
+    } catch (err) {
+      setSupportError(
+        extractReadableFirestoreError(
+          err,
+          language,
+          language === 'bn' ? 'সাপোর্ট টিকিট পাঠানো যায়নি।' : 'Failed to send support ticket.'
+        )
+      );
+    } finally {
+      setSubmittingSupport(false);
+    }
   };
 
   return (
@@ -117,7 +170,7 @@ function AppLockGate() {
           <input
             type="password"
             inputMode="numeric"
-            autoFocus
+            autoFocus={!showSupportForm}
             value={pin}
             onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
             placeholder="••••"
@@ -133,6 +186,89 @@ function AppLockGate() {
             <span>{language === 'bn' ? 'আনলক করুন' : 'Unlock Messenger'}</span>
           </button>
         </form>
+
+        {supportTicketId ? (
+          <div className="p-3 bg-emerald-950/50 border border-emerald-500/40 rounded-2xl text-left space-y-1 text-xs text-emerald-200">
+            <div className="flex items-center gap-1.5 font-bold text-emerald-300">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>
+                {language === 'bn'
+                  ? `টিকিট ${SUPPORT_DESK_ADDRESS} ডেস্কে পাঠানো হয়েছে`
+                  : `Ticket sent to ${SUPPORT_DESK_ADDRESS}`}
+              </span>
+            </div>
+            <p className="text-[11px] font-mono text-emerald-300/90">ID: {supportTicketId}</p>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              {language === 'bn'
+                ? 'অ্যাডমিন পিন রিসেট করলে এই স্ক্রিন স্বয়ংক্রিয়ভাবে আনলক হয়ে যাবে।'
+                : 'Once the admin clears your App-Lock PIN, this screen will unlock automatically.'}
+            </p>
+          </div>
+        ) : showSupportForm ? (
+          <form
+            onSubmit={handleSupportSubmit}
+            className="p-3 bg-slate-950 border border-slate-800 rounded-2xl text-left space-y-2.5"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-amber-300 inline-flex items-center gap-1">
+                <Mail className="w-3.5 h-3.5" />
+                <span>{language === 'bn' ? 'অ্যাপ-লক রিসেট সহায়তা' : 'Request App-Lock Reset'}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowSupportForm(false)}
+                className="p-1 text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {supportError && (
+              <div className="p-2 rounded-lg bg-rose-950/60 border border-rose-500/40 text-rose-200 text-[11px]">
+                {supportError}
+              </div>
+            )}
+
+            <input
+              type="tel"
+              maxLength={50}
+              placeholder={language === 'bn' ? 'যোগাযোগের মোবাইল নম্বর' : 'Contact mobile number'}
+              value={supportPhone}
+              onChange={(e) => setSupportPhone(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+            />
+            <textarea
+              rows={2}
+              maxLength={850}
+              placeholder={
+                language === 'bn'
+                  ? 'পিন রিসেটের কারণ লিখুন (ঐচ্ছিক)...'
+                  : 'Optional note for admin verification...'
+              }
+              value={supportDetails}
+              onChange={(e) => setSupportDetails(e.target.value.slice(0, 850))}
+              className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
+            />
+            <button
+              type="submit"
+              disabled={submittingSupport}
+              className="w-full py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition"
+            >
+              {submittingSupport ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              <span>{language === 'bn' ? 'অ্যাডমিনকে রিকোয়েস্ট পাঠান' : 'Send Reset Request'}</span>
+            </button>
+          </form>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowSupportForm(true)}
+            className="text-xs text-amber-400 hover:text-amber-300 underline cursor-pointer block mx-auto"
+          >
+            {language === 'bn'
+              ? 'অ্যাপ-লক পিন ভুলে গেছেন? সাপোর্টে অনুরোধ করুন'
+              : 'Forgot App-Lock PIN? Request Support'}
+          </button>
+        )}
 
         <button
           type="button"
@@ -158,24 +294,26 @@ function PhoneNumberGate() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (extractPhoneDigits(phone).length < 7) {
+    const phoneCheck = validateMobileNumber(phone, language);
+    if (!phoneCheck.valid) {
       setError(
-        language === 'bn'
-          ? 'দয়া করে কমপক্ষে ৭ ডিজিটের সঠিক মোবাইল নম্বর দিন।'
-          : 'Please enter a valid mobile number (at least 7 digits).'
+        phoneCheck.error ||
+          (language === 'bn'
+            ? 'দয়া করে সঠিক মোবাইল নম্বর দিন।'
+            : 'Please enter a valid mobile number.')
       );
       return;
     }
     setSaving(true);
     try {
-      await savePhoneNumber(phone, !user?.username && usernameInput.trim() ? usernameInput.trim() : undefined);
+      await savePhoneNumber(phoneCheck.normalized, !user?.username && usernameInput.trim() ? usernameInput.trim() : undefined);
     } catch (err: unknown) {
       setError(
-        err instanceof Error
-          ? err.message
-          : language === 'bn'
-          ? 'মোবাইল নম্বর সংরক্ষণ করতে সমস্যা হয়েছে।'
-          : 'Failed to save mobile number.'
+        extractReadableFirestoreError(
+          err,
+          language,
+          language === 'bn' ? 'মোবাইল নম্বর সংরক্ষণ করতে সমস্যা হয়েছে।' : 'Failed to save mobile number.'
+        )
       );
     } finally {
       setSaving(false);
@@ -194,8 +332,8 @@ function PhoneNumberGate() {
           </h2>
           <p className="text-xs text-slate-400 leading-relaxed">
             {language === 'bn'
-              ? `আপনার অ্যাকাউন্ট পরিচিতি নিশ্চিত করতে এবং ভবিষ্যতে ইমেইল/অ্যাকাউন্ট রিকভারির (${SUPPORT_DESK_ADDRESS}) জন্য মোবাইল নম্বর যুক্ত করা বাধ্যতামূলক। এই নম্বরটি কেবল আপনার ও অ্যাডমিনের কাছেই গোপন থাকবে।`
-              : `A mobile number is required for identity verification and account recovery via ${SUPPORT_DESK_ADDRESS}. Your number remains private and is never shown to other users.`}
+              ? `আপনার অ্যাকাউন্ট পরিচিতি নিশ্চিত করতে এবং ভবিষ্যতে ইমেইল/অ্যাকাউন্ট রিকভারির (${SUPPORT_DESK_ADDRESS}) জন্য মোবাইল নম্বর যুক্ত করা বাধ্যতামূলক। একটি মোবাইল নম্বর দিয়ে সর্বোচ্চ ৩টি অ্যাকাউন্ট খোলা যাবে।`
+              : `A real mobile number is required for identity verification and recovery via ${SUPPORT_DESK_ADDRESS}. Maximum 3 accounts can share one mobile number.`}
           </p>
         </div>
 
@@ -223,6 +361,11 @@ function PhoneNumberGate() {
                 className="w-full pl-10 pr-3 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
               />
             </div>
+            <p className="text-[10px] text-slate-400">
+              {language === 'bn'
+                ? 'একই মোবাইল নম্বরে সর্বোচ্চ ৩টি অ্যাকাউন্ট অনুমোদিত · ভুয়া/ডামি নম্বর নিষিদ্ধ।'
+                : 'Max 3 accounts per number · Dummy numbers are not permitted.'}
+            </p>
           </div>
 
           {!user?.username && (
@@ -246,7 +389,7 @@ function PhoneNumberGate() {
 
           <button
             type="submit"
-            disabled={saving || extractPhoneDigits(phone).length < 7}
+            disabled={saving || extractPhoneDigits(phone).length < 8}
             className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-2 shadow"
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
@@ -270,7 +413,14 @@ function PhoneNumberGate() {
 }
 
 function ChatDashboard({ user }: { user: UserProfile }) {
-  const { deletionNotice, recoverAccount, signOutUser, firebaseUser, resendVerificationEmail } = useAuth();
+  const {
+    deletionNotice,
+    recoverAccount,
+    signOutUser,
+    firebaseUser,
+    resendVerificationEmail,
+    pendingApprovalSessions,
+  } = useAuth();
   const { t, language } = useLanguage();
   const [chats, setChats] = useState<ChatRoom[]>([]);
   const [friendships, setFriendships] = useState<Friendship[]>([]);
@@ -887,6 +1037,9 @@ function ChatDashboard({ user }: { user: UserProfile }) {
       {/* User Warning Modal if Warning Issued */}
       <WarningNoticeModal />
 
+      {/* Real-time New Device Login Approval Alert */}
+      {pendingApprovalSessions.length > 0 && <DeviceApprovalModal />}
+
       {/* Super Admin Control Panel Modal (Requires verified Super Admin email) */}
       {showAdmin && canAccessAdminPanel && (
         <Suspense fallback={null}>
@@ -1043,13 +1196,20 @@ function ChatDashboard({ user }: { user: UserProfile }) {
 }
 
 function MainContent() {
-  const { user, loading, isAppLocked } = useAuth();
+  const { user, loading, isAppLocked, currentDeviceSession } = useAuth();
   const { t, language } = useLanguage();
   const [pendingRelease, setPendingRelease] = useState<AppReleaseInfo | null>(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [androidAppChooserTarget, setAndroidAppChooserTarget] = useState<DeepLinkTarget | null>(null);
 
-  const isDashboardActive = Boolean(user && !user.isBanned && !isAppLocked && user.phoneNumber?.trim());
+  const isDeviceQuarantined = Boolean(
+    currentDeviceSession &&
+      (currentDeviceSession.status === 'pending_approval' ||
+        currentDeviceSession.status === 'rejected')
+  );
+  const isDashboardActive = Boolean(
+    user && !user.isBanned && !isAppLocked && !isDeviceQuarantined && user.phoneNumber?.trim()
+  );
 
   // Capture ?chat= / ?group= deep-link even if user passes through Login / AppLock / PhoneGate first
   useEffect(() => {
@@ -1142,6 +1302,8 @@ function MainContent() {
         <BannedScreen />
       ) : isAppLocked ? (
         <AppLockGate />
+      ) : isDeviceQuarantined ? (
+        <PendingDeviceGate />
       ) : !user.phoneNumber?.trim() ? (
         <PhoneNumberGate />
       ) : (

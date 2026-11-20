@@ -1,4 +1,5 @@
-import { AlertOctagon, AlertTriangle, ArrowLeft, Eye, MessageSquare, Search, Trash2, Users, X } from 'lucide-react';
+import { useEffect, useRef } from 'react';
+import { AlertOctagon, AlertTriangle, ArrowLeft, Eye, Flag, MessageSquare, Search, Trash2, Users, X } from 'lucide-react';
 import type { ChatMessage, ChatRoom, UserProfile } from '../../types/chat';
 
 interface AdminChatAuditTabProps {
@@ -10,6 +11,7 @@ interface AdminChatAuditTabProps {
   selectedChat: ChatRoom | null;
   setSelectedChat: (chat: ChatRoom | null) => void;
   chatMessages: ChatMessage[];
+  highlightedMessageId?: string | null;
   chatSearch: string;
   setChatSearch: (val: string) => void;
   chatFilter: 'all' | 'direct' | 'group';
@@ -34,6 +36,7 @@ export function AdminChatAuditTab({
   selectedChat,
   setSelectedChat,
   chatMessages,
+  highlightedMessageId,
   chatSearch,
   setChatSearch,
   chatFilter,
@@ -48,6 +51,14 @@ export function AdminChatAuditTab({
   onOpenBan,
   onDeleteMessage,
 }: AdminChatAuditTabProps) {
+  const highlightedElRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (highlightedMessageId && highlightedElRef.current) {
+      highlightedElRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [highlightedMessageId, chatMessages.length]);
+
   return (
     <div className="flex-1 min-h-0 w-full max-w-6xl mx-auto flex flex-col gap-3">
       {targetUserChatFilter && (
@@ -377,6 +388,7 @@ export function AdminChatAuditTab({
                   </div>
                 ) : (
                   chatMessages.map((msg) => {
+                    const isHighlighted = Boolean(highlightedMessageId && msg.id === highlightedMessageId);
                     const isFromTarget = targetUserChatFilter && (
                       msg.senderId === targetUserChatFilter.userId ||
                       msg.senderName === targetUserChatFilter.displayName
@@ -389,8 +401,11 @@ export function AdminChatAuditTab({
                     return (
                       <div
                         key={msg.id}
+                        ref={isHighlighted ? highlightedElRef : undefined}
                         className={`p-3.5 rounded-2xl flex items-start justify-between gap-3 group transition border ${
-                          isFromTarget
+                          isHighlighted
+                            ? 'bg-amber-950/35 border-amber-500/70 ring-2 ring-amber-400/50 shadow-md'
+                            : isFromTarget
                             ? 'bg-slate-900 border-sky-500/40 shadow-sm'
                             : 'bg-slate-950/70 border-slate-800/80 hover:border-slate-700'
                         }`}
@@ -400,6 +415,12 @@ export function AdminChatAuditTab({
                             <span className="text-xs font-bold text-white truncate">
                               {msg.senderName}
                             </span>
+                            {isHighlighted && (
+                              <span className="px-1.5 py-0.5 rounded-md bg-amber-500/25 text-amber-300 text-[9px] font-bold border border-amber-500/40 inline-flex items-center gap-1">
+                                <Flag className="w-2.5 h-2.5" />
+                                <span>{language === 'bn' ? 'রিপোর্টকৃত মেসেজ' : 'Reported Message'}</span>
+                              </span>
+                            )}
                             {isFromTarget && (
                               <span className="px-1.5 py-0.2 rounded-md bg-sky-500/20 text-sky-300 text-[9px] font-bold border border-sky-500/30">
                                 {language === 'bn' ? 'পর্যবেক্ষণকৃত ইউজার' : 'Target User'}

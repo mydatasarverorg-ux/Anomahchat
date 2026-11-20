@@ -3,7 +3,9 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useModalHistory } from '../hooks/useModalHistory';
 import { isUsernameAvailable } from '../services/chatService';
-import { isSuperAdmin, SUPER_ADMIN_EMAIL, extractPhoneDigits } from '../services/adminService';
+import { isSuperAdmin, SUPER_ADMIN_EMAIL } from '../services/adminService';
+import { validateMobileNumber } from '../utils/phoneUtils';
+import { getPhoneSlotStatus, type PhoneSlotStatus } from '../services/phoneRegistryService';
 import { PWAInstallButton } from './PWAInstallButton';
 import type { ThemeMode } from '../types/chat';
 import {
@@ -32,6 +34,9 @@ import {
   Phone,
   QrCode,
   Smartphone,
+  Laptop,
+  LogOut,
+  Clock,
 } from 'lucide-react';
 import {
   isDeviceAccountSaved,
@@ -69,6 +74,10 @@ export function ProfileModal({
     theme,
     setTheme,
     requestAccountDeletion,
+    userSessions,
+    currentDeviceId,
+    deviceLimitsSummary,
+    forceLogoutOtherDevice,
   } = useAuth();
 
   const { language, setLanguage, t } = useLanguage();
@@ -82,6 +91,7 @@ export function ProfileModal({
   const [photoURL, setPhotoURL] = useState(user?.photoURL || '');
   const [phoneNumber, setPhoneNumber] = useState(user?.phoneNumber || '');
   const [discoverableByPhone, setDiscoverableByPhone] = useState(user?.discoverableByPhone !== false);
+  const [phoneSlotStatus, setPhoneSlotStatus] = useState<PhoneSlotStatus | null>(null);
 
   // Security Fields (Quick App-Lock PIN is hashed client-side, never stored in plaintext)
   const [username, setUsername] = useState(user?.username || '');
@@ -242,6 +252,23 @@ export function ProfileModal({
     return () => clearTimeout(timer);
   }, [username, user]);
 
+  useEffect(() => {
+    const check = validateMobileNumber(phoneNumber, language);
+    if (!check.valid) {
+      setPhoneSlotStatus(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const st = await getPhoneSlotStatus(check.normalized);
+      if (!cancelled) setPhoneSlotStatus(st);
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [phoneNumber, language]);
+
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!displayName.trim()) return;
@@ -261,11 +288,13 @@ export function ProfileModal({
         }
       }
 
-      if (extractPhoneDigits(phoneNumber).length < 7) {
+      const phoneCheck = validateMobileNumber(phoneNumber, language);
+      if (!phoneCheck.valid) {
         throw new Error(
-          language === 'bn'
-            ? 'অন্তত ৭ ডিজিটের সঠিক মোবাইল নম্বর দিন।'
-            : 'Please enter a valid mobile number (at least 7 digits).'
+          phoneCheck.error ||
+            (language === 'bn'
+              ? 'দয়া করে সঠিক মোবাইল নম্বর দিন।'
+              : 'Please enter a valid mobile number.')
         );
       }
 
@@ -274,7 +303,7 @@ export function ProfileModal({
         about.trim(),
         photoURL,
         cleanUsername,
-        phoneNumber.trim(),
+        phoneCheck.normalized,
         discoverableByPhone
       );
 
@@ -683,9 +712,64 @@ export function ProfileModal({
                     </div>
                     <p className="text-[10px] text-slate-400">
                       {language === 'bn'
-                        ? 'আপনার মোবাইল নম্বর কখনোই কারও প্রোফাইলে প্রদর্শিত হয় না; শুধু অ্যাকাউন্ট পরিচয় ও অ্যাডমিন সাপোর্টের জন্য নিরাপদ থাকে।'
-                        : 'Your number is never shown publicly; it is kept private for identity verification and admin support.'}
+                        ? 'আপনার মোবাইল নম্বর কখনোই কারও প্রোফাইলে প্রদর্শিত হয় না; প্রতি নম্বরে সর্বোচ্চ ৩টি অ্যাকাউন্ট অনুমোদিত।'
+                        : 'Your number is never shown publicly; maximum 3 accounts per mobile number.'}
                     </p>
+                    {phoneSlotStatus && (
+                      <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border ${
+                            phoneSlotStatus.isBlocked && !phoneSlotStatus.containsUid(user?.userId)
+                              ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                              : phoneSlotStatus.usedSlots >= phoneSlotStatus.maxLimit &&
+                                !phoneSlotStatus.containsUid(user?.userId)
+                              ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                              : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25'
+                          }`}
+                        >
+                          {phoneSlotStatus.isBlocked && !phoneSlotStatus.containsUid(user?.userId)
+                            ? language === 'bn'
+                              ? 'এই নম্বরটি ব্লকড রয়েছে'
+                              : 'This number is blocked'
+                            : phoneSlotStatus.usedSlots >= phoneSlotStatus.maxLimit &&
+                              !phoneSlotStatus.containsUid(user?.userId)
+                            ? language === 'bn'
+                              ? `সর্বোচ্চ সীমা পূর্ণ (${phoneSlotStatus.usedSlots}/${phoneSlotStatus.maxLimit})`
+                              : `Slot limit full (${phoneSlotStatus.usedSlots}/${phoneSlotStatus.maxLimit})`
+                            : language === 'bn'
+                            ? `এই নম্বরের স্লট: ${phoneSlotStatus.usedSlots}/${phoneSlotStatus.maxLimit} অ্যাকাউন্ট`
+                            : `Number slots: ${phoneSlotStatus.usedSlots}/${phoneSlotStatus.maxLimit} accounts`}
+                        </span>
+                      </div>
+                    )}
+                    {user?.initialPhoneNumber && user.initialPhoneNumber !== user.phoneNumber && (
+                      <div className="mt-1 px-2.5 py-1.5 bg-slate-950/70 border border-slate-800 rounded-xl text-[10px] text-slate-300 flex items-center justify-between gap-2">
+                        <span className="text-slate-400">
+                          {language === 'bn' ? 'প্রথম রেজিস্ট্রিকৃত মূল নম্বর:' : 'First Registered Number:'}
+                        </span>
+                        <span className="font-mono font-semibold text-amber-300">{user.initialPhoneNumber}</span>
+                      </div>
+                    )}
+                    {(() => {
+                      if (!user?.lastPhoneChangedAt || user.phoneChangeCooldownBypass) return null;
+                      const lastMs = new Date(user.lastPhoneChangedAt).getTime();
+                      const cooldownMs = 30 * 24 * 60 * 60 * 1000;
+                      if (!Number.isFinite(lastMs) || Date.now() - lastMs >= cooldownMs) return null;
+                      const daysLeft = Math.max(
+                        1,
+                        Math.ceil((cooldownMs - (Date.now() - lastMs)) / (24 * 60 * 60 * 1000))
+                      );
+                      return (
+                        <div className="mt-1 px-2.5 py-1.5 bg-amber-950/30 border border-amber-500/30 rounded-xl text-[10px] text-amber-200 flex items-center gap-1.5">
+                          <Clock className="w-3 h-3 text-amber-400 shrink-0" />
+                          <span>
+                            {language === 'bn'
+                              ? `নম্বর পরিবর্তনের ৩০-দিনের নিরাপত্তা কুলডাউন সক্রিয় (আরও ${daysLeft} দিন বাকি)।`
+                              : `30-day number change cooldown active (${daysLeft} day(s) remaining).`}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Privacy-preserving exact mobile lookup toggle */}
@@ -955,6 +1039,111 @@ export function ProfileModal({
                         }`}
                       />
                     </button>
+                  </div>
+
+                  {/* Connected Devices & Active Sessions */}
+                  <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <Smartphone className="w-3.5 h-3.5 text-sky-400" />
+                        <span>
+                          {language === 'bn' ? 'সংযুক্ত ডিভাইসসমূহ' : 'Connected Devices'}
+                        </span>
+                      </h4>
+                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-300">
+                        {(() => {
+                          const activeM = userSessions.filter(
+                            (s) => s.status === 'active' && s.platformCategory === 'mobile'
+                          ).length;
+                          const activeW = userSessions.filter(
+                            (s) => s.status === 'active' && s.platformCategory === 'web'
+                          ).length;
+                          return language === 'bn'
+                            ? `মোবাইল: ${activeM}/${deviceLimitsSummary.mobile} · ওয়েব/পিসি: ${activeW}/${deviceLimitsSummary.web}`
+                            : `Mobile: ${activeM}/${deviceLimitsSummary.mobile} · Web/PC: ${activeW}/${deviceLimitsSummary.web}`;
+                        })()}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {userSessions
+                        .filter((s) => s.status === 'active' || s.status === 'pending_approval')
+                        .map((sess) => {
+                          const isCurrent = sess.deviceId === currentDeviceId;
+                          const rtLabel =
+                            sess.runtimeType === 'apk'
+                              ? 'APK'
+                              : sess.runtimeType === 'pwa'
+                              ? 'PWA'
+                              : 'Web';
+                          return (
+                            <div
+                              key={sess.deviceId}
+                              className="p-2.5 bg-slate-900/90 border border-slate-800 rounded-xl flex items-center justify-between gap-2 text-xs"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-sky-400 shrink-0">
+                                  {sess.platformCategory === 'mobile' ? (
+                                    <Smartphone className="w-4 h-4" />
+                                  ) : (
+                                    <Laptop className="w-4 h-4" />
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-semibold text-white truncate max-w-[170px]">
+                                      {sess.deviceLabel}
+                                    </span>
+                                    <span className="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700 text-[9px] font-mono text-slate-300">
+                                      {rtLabel}
+                                    </span>
+                                    {isCurrent && (
+                                      <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-bold">
+                                        {language === 'bn' ? 'এই ডিভাইস' : 'THIS DEVICE'}
+                                      </span>
+                                    )}
+                                    {sess.status === 'pending_approval' && (
+                                      <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold">
+                                        {language === 'bn' ? 'অপেক্ষমাণ' : 'PENDING'}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 truncate">
+                                    {sess.approxLocation ? `${sess.approxLocation} · ` : ''}
+                                    {new Date(sess.lastActiveAt || sess.createdAt).toLocaleString(
+                                      language === 'bn' ? 'bn-BD' : 'en-US'
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {!isCurrent && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await forceLogoutOtherDevice(sess.deviceId);
+                                    setSuccessMessage(
+                                      language === 'bn'
+                                        ? `${sess.deviceLabel} থেকে সেশন লগ-আউট করা হয়েছে।`
+                                        : `Logged out ${sess.deviceLabel}.`
+                                    );
+                                    setTimeout(() => setSuccessMessage(null), 3000);
+                                  }}
+                                  className="px-2.5 py-1 bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 rounded-lg text-[10px] font-bold cursor-pointer flex items-center gap-1 shrink-0"
+                                >
+                                  <LogOut className="w-3 h-3" />
+                                  <span>{language === 'bn' ? 'লগআউট' : 'Logout'}</span>
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      {userSessions.filter((s) => s.status === 'active' || s.status === 'pending_approval').length === 0 && (
+                        <p className="text-[11px] text-slate-500">
+                          {language === 'bn' ? 'কোনো সক্রিয় ডিভাইস পাওয়া যায়নি।' : 'No active sessions recorded yet.'}
+                        </p>
+                      )}
+                    </div>
                   </div>
 
                   {/* Password Change / Recovery */}

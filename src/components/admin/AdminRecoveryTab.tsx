@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  AlertTriangle,
   Check,
   CheckCircle2,
   Copy,
@@ -7,6 +8,7 @@ import {
   KeyRound,
   Lock,
   Mail,
+  MailCheck,
   Phone,
   RotateCcw,
   Search,
@@ -16,7 +18,7 @@ import {
   UserX,
 } from 'lucide-react';
 import { SUPPORT_DESK_ADDRESS, doPhonesMatch } from '../../services/adminService';
-import type { PasswordRecoveryRequest, UserProfile } from '../../types/chat';
+import type { PasswordRecoveryRequest, RecoveryTopic, UserProfile } from '../../types/chat';
 
 interface AdminRecoveryTabProps {
   t: (key: any) => string;
@@ -36,12 +38,20 @@ interface AdminRecoveryTabProps {
   copiedText: string | null;
   onCopy: (text: string) => void;
   onOpenDossier: (targetUser: UserProfile) => void;
-  onClearAppLock: (targetUser: UserProfile) => Promise<void>;
+  onClearAppLock: (targetUser: UserProfile, ticketId?: string) => Promise<void>;
   onSendResetEmail: (targetEmail: string, ticketId: string) => Promise<void>;
-  onDismiss: (reqId: string) => Promise<void>;
+  onDismiss: (reqId: string, notes?: string) => Promise<void>;
   onReopen: (reqId: string) => Promise<void>;
   onDelete: (reqId: string) => Promise<void>;
   onSelectResolve: (req: PasswordRecoveryRequest) => void;
+}
+
+type MatchSignal = 'uid' | 'email' | 'username' | 'phone';
+
+interface ResolvedMatch {
+  user?: UserProfile;
+  matchedBy: MatchSignal[];
+  hasEmailConflict: boolean;
 }
 
 export function AdminRecoveryTab({
@@ -64,18 +74,107 @@ export function AdminRecoveryTab({
   onDelete,
   onSelectResolve,
 }: AdminRecoveryTabProps) {
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [busyIds, setBusyIds] = useState<Record<string, boolean>>({});
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmDismissId, setConfirmDismissId] = useState<string | null>(null);
+  const [dismissNote, setDismissNote] = useState('');
+  const [confirmResetId, setConfirmResetId] = useState<string | null>(null);
 
-  const findMatchedUser = (req: PasswordRecoveryRequest): UserProfile | undefined => {
+  const resolveMatchDetails = (req: PasswordRecoveryRequest): ResolvedMatch => {
     const cleanEmail = req.email?.trim().toLowerCase();
     const cleanUsername = req.username?.trim().replace(/^@/, '').toLowerCase();
-    return usersList.find(
-      (u) =>
-        (cleanEmail && u.email?.trim().toLowerCase() === cleanEmail) ||
-        (cleanUsername && u.username?.trim().toLowerCase() === cleanUsername) ||
-        doPhonesMatch(req.contactPhone, u.phoneNumber)
+    const uidFromDetails = req.details?.match(/UID:\s*([A-Za-z0-9_-]{6,128})/i)?.[1];
+    const targetUid = req.requesterUid || (uidFromDetails && uidFromDetails !== 'unknown' ? uidFromDetails : undefined);
+
+    const evaluateSignals = (u: UserProfile): MatchSignal[] => {
+      const signals: MatchSignal[] = [];
+      if (targetUid && u.userId === targetUid) signals.push('uid');
+      if (cleanEmail && u.email?.trim().toLowerCase() === cleanEmail) signals.push('email');
+      if (cleanUsername && u.username?.trim().toLowerCase() === cleanUsername) signals.push('username');
+      if (doPhonesMatch(req.contactPhone, u.phoneNumber)) signals.push('phone');
+      return signals;
+    };
+
+    let bestUser: UserProfile | undefined;
+    let bestSignals: MatchSignal[] = [];
+    let bestScore = 0;
+
+    for (const u of usersList) {
+      const signals = evaluateSignals(u);
+      if (signals.length === 0) continue;
+      // Score strongly favors authoritative UID or Email matches over partial handle/phone collisions
+      const score =
+        (signals.includes('uid') ? 100 : 0) +
+        (signals.includes('email') ? 40 : 0) +
+        (signals.includes('phone') ? 20 : 0) +
+        (signals.includes('username') ? 15 : 0);
+      if (score > bestScore) {
+        bestScore = score;
+        bestUser = u;
+        bestSignals = signals;
+      }
+    }
+
+    const hasEmailConflict = Boolean(
+      bestUser &&
+        cleanEmail &&
+        cleanEmail.includes('@') &&
+        bestUser.email?.trim() &&
+        bestUser.email.trim().toLowerCase() !== cleanEmail
     );
+
+    return {
+      user: bestUser,
+      matchedBy: bestSignals,
+      hasEmailConflict,
+    };
+  };
+
+  const inferTopic = (req: PasswordRecoveryRequest): RecoveryTopic => {
+    if (req.topic) return req.topic;
+    const d = (req.details || '').toLowerCase();
+    if (d.includes('[app-lock')) return 'app_lock';
+    if (d.includes('[lost email')) return 'lost_email';
+    if (d.includes('[suspension')) return 'suspended';
+    return 'other';
+  };
+
+  const getTopicMeta = (topic: RecoveryTopic) => {
+    switch (topic) {
+      case 'app_lock':
+        return {
+          label: language === 'bn' ? 'অ্যাপ-লক রিসেট' : 'App-Lock PIN',
+          classes: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+        };
+      case 'lost_email':
+        return {
+          label: language === 'bn' ? 'ইমেইল/অ্যাক্সেস সমস্যা' : 'Lost Email',
+          classes: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
+        };
+      case 'suspended':
+        return {
+          label: language === 'bn' ? 'সাসপেনশন আপিল' : 'Suspension Appeal',
+          classes: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+        };
+      default:
+        return {
+          label: language === 'bn' ? 'সাধারণ সহায়তা' : 'General Help',
+          classes: 'bg-slate-800 text-slate-300 border-slate-700',
+        };
+    }
+  };
+
+  const getSignalLabel = (signal: MatchSignal) => {
+    switch (signal) {
+      case 'uid':
+        return 'UID';
+      case 'email':
+        return language === 'bn' ? 'ইমেইল' : 'Email';
+      case 'username':
+        return '@username';
+      case 'phone':
+        return language === 'bn' ? 'ফোন' : 'Phone';
+    }
   };
 
   const getStatusLabel = (status: PasswordRecoveryRequest['status']) => {
@@ -85,12 +184,16 @@ export function AdminRecoveryTab({
   };
 
   const runBusy = async (id: string, fn: () => Promise<void>) => {
-    if (busyId) return;
-    setBusyId(id);
+    if (busyIds[id]) return;
+    setBusyIds((prev) => ({ ...prev, [id]: true }));
     try {
       await fn();
     } finally {
-      setBusyId(null);
+      setBusyIds((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
     }
   };
 
@@ -148,7 +251,7 @@ export function AdminRecoveryTab({
         </div>
       </div>
 
-      {/* Search Bar for Support Tickets (email, @username, phone number, name) */}
+      {/* Search Bar for Support Tickets (email, @username, phone number, name, ticket ID) */}
       <div className="relative">
         <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
         <input
@@ -157,8 +260,8 @@ export function AdminRecoveryTab({
           onChange={(e) => setRecoverySearch(e.target.value)}
           placeholder={
             language === 'bn'
-              ? 'ইমেইল, @ইউজারনেম, মোবাইল নম্বর বা নাম দিয়ে টিকিট খুঁজুন...'
-              : 'Search tickets by email, @username, mobile number, or name...'
+              ? 'ইমেইল, @ইউজারনেম, মোবাইল নম্বর, নাম বা টিকিট আইডি দিয়ে খুঁজুন...'
+              : 'Search tickets by email, @username, mobile number, name, or ticket ID...'
           }
           className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
         />
@@ -172,13 +275,19 @@ export function AdminRecoveryTab({
       ) : (
         <div className="space-y-3">
           {filteredRecovery.map((req) => {
-            const matchedUser = findMatchedUser(req);
+            const match = resolveMatchDetails(req);
+            const matchedUser = match.user;
+            const topic = inferTopic(req);
+            const topicMeta = getTopicMeta(topic);
             const targetEmail = matchedUser?.email || req.email;
             const primaryIdentifier =
               req.email ||
               req.contactPhone ||
               (req.username ? `@${req.username}` : req.name || req.id);
-            const isBusy = busyId === req.id;
+            const isBusy = Boolean(busyIds[req.id]);
+            const needsResetConfirm =
+              Boolean(targetEmail && targetEmail.includes('@')) &&
+              (topic === 'lost_email' || match.hasEmailConflict);
 
             return (
               <div
@@ -197,6 +306,10 @@ export function AdminRecoveryTab({
                       }`}
                     >
                       {getStatusLabel(req.status)}
+                    </span>
+
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${topicMeta.classes}`}>
+                      {topicMeta.label}
                     </span>
 
                     <span className="text-xs font-bold text-white truncate max-w-[230px]">
@@ -223,7 +336,10 @@ export function AdminRecoveryTab({
                     {matchedUser ? (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 inline-flex items-center gap-1">
                         <UserCheck className="w-3 h-3" />
-                        {language === 'bn' ? 'অ্যাকাউন্ট পাওয়া গেছে' : 'Account Matched'}
+                        <span>
+                          {language === 'bn' ? 'ম্যাচ: ' : 'Matched: '}
+                          {match.matchedBy.map(getSignalLabel).join(' + ')}
+                        </span>
                       </span>
                     ) : (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-400 inline-flex items-center gap-1">
@@ -244,12 +360,43 @@ export function AdminRecoveryTab({
                         {t('userStatusBanned')}
                       </span>
                     )}
+
+                    {req.resetEmailSentAt && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-500/15 text-sky-300 border border-sky-500/30 inline-flex items-center gap-1">
+                        <MailCheck className="w-3 h-3" />
+                        <span>
+                          {language === 'bn' ? 'রিসেট পাঠানো হয়েছে' : 'Reset Sent'}
+                        </span>
+                      </span>
+                    )}
                   </div>
 
-                  <span className="text-[10px] text-slate-500">
-                    {new Date(req.createdAt).toLocaleString(language === 'bn' ? 'bn-BD' : 'en-US')}
-                  </span>
+                  <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                    <button
+                      type="button"
+                      onClick={() => onCopy(req.id)}
+                      className="font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 hover:text-slate-300 cursor-pointer inline-flex items-center gap-1"
+                      title={t('copy')}
+                    >
+                      <span>{req.id.slice(0, 14)}</span>
+                      {copiedText === req.id ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
+                    </button>
+                    <span>
+                      {new Date(req.createdAt).toLocaleString(language === 'bn' ? 'bn-BD' : 'en-US')}
+                    </span>
+                  </div>
                 </div>
+
+                {match.hasEmailConflict && matchedUser && (
+                  <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-200 text-xs flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span className="leading-relaxed">
+                      {language === 'bn'
+                        ? `সতর্কতা: আবেদনের ইমেইল (${req.email}) ও অ্যাকাউন্টের মূল ইমেইল (${matchedUser.email}) ভিন্ন! অ্যাপ-লক রিসেট বা রিসেট লিংক পাঠানোর আগে ডসিয়ার ও ফোন নম্বর যাচাই করুন।`
+                        : `Identity Check Warning: Submitted email (${req.email}) differs from matched account email (${matchedUser.email}). Verify ownership via Dossier/Phone before clearing App-Lock or sending resets.`}
+                    </span>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                   <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 space-y-1">
@@ -279,7 +426,7 @@ export function AdminRecoveryTab({
                         </button>
                       </div>
                     )}
-                    {matchedUser?.email && matchedUser.email !== req.email && (
+                    {matchedUser?.email && matchedUser.email.toLowerCase() !== (req.email || '').toLowerCase() && (
                       <div className="flex items-center gap-1.5 text-[11px] text-emerald-300 pt-0.5">
                         <Mail className="w-3 h-3 shrink-0" />
                         <span className="truncate">
@@ -312,6 +459,22 @@ export function AdminRecoveryTab({
                   </div>
                 </div>
 
+                {req.resetEmailSentTo && req.resetEmailSentAt && (
+                  <div className="px-2.5 py-1.5 rounded-xl bg-sky-950/30 border border-sky-500/25 text-[11px] text-sky-200 flex items-center justify-between gap-2 flex-wrap">
+                    <span className="inline-flex items-center gap-1.5">
+                      <MailCheck className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                      <span>
+                        {language === 'bn'
+                          ? `পাসওয়ার্ড রিসেট ইমেইল পাঠানো হয়েছে: ${req.resetEmailSentTo}`
+                          : `Password reset email sent to: ${req.resetEmailSentTo}`}
+                      </span>
+                    </span>
+                    <span className="text-[10px] text-sky-300/80">
+                      {new Date(req.resetEmailSentAt).toLocaleString(language === 'bn' ? 'bn-BD' : 'en-US')}
+                    </span>
+                  </div>
+                )}
+
                 {req.adminNotes && (
                   <div
                     className={`p-2.5 rounded-xl border text-xs space-y-1 ${
@@ -339,6 +502,81 @@ export function AdminRecoveryTab({
                   </div>
                 )}
 
+                {confirmResetId === req.id && targetEmail && (
+                  <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/40 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="text-amber-200">
+                      {language === 'bn'
+                        ? `${targetEmail} ঠিকানায় রিসেট লিংক পাঠাতে নিশ্চিত করুন (আবেদনকারী ইমেইল হারানোর কথা জানিয়েছেন)।`
+                        : `Confirm sending password reset link to ${targetEmail} (ticket reported lost email or different email).`}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() =>
+                          runBusy(req.id, async () => {
+                            await onSendResetEmail(targetEmail, req.id);
+                            setConfirmResetId(null);
+                          })
+                        }
+                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold cursor-pointer"
+                      >
+                        {t('confirm')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmResetId(null)}
+                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[11px] cursor-pointer"
+                      >
+                        {t('cancel')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {confirmDismissId === req.id && (
+                  <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-700 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 text-xs">
+                    <input
+                      type="text"
+                      maxLength={300}
+                      value={dismissNote}
+                      onChange={(e) => setDismissNote(e.target.value)}
+                      placeholder={
+                        language === 'bn'
+                          ? 'বাতিলের কারণ লিখুন (ঐচ্ছিক)...'
+                          : 'Optional reason for dismissing ticket...'
+                      }
+                      className="flex-1 px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500"
+                    />
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() =>
+                          runBusy(req.id, async () => {
+                            await onDismiss(req.id, dismissNote);
+                            setConfirmDismissId(null);
+                            setDismissNote('');
+                          })
+                        }
+                        className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[11px] font-bold cursor-pointer"
+                      >
+                        {language === 'bn' ? 'নিশ্চিত বাতিল' : 'Confirm Dismiss'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmDismissId(null);
+                          setDismissNote('');
+                        }}
+                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[11px] cursor-pointer"
+                      >
+                        {t('cancel')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
                   <div className="flex flex-wrap items-center gap-1.5">
                     {matchedUser && (
@@ -357,7 +595,7 @@ export function AdminRecoveryTab({
                       <button
                         type="button"
                         disabled={isBusy}
-                        onClick={() => runBusy(req.id, () => onClearAppLock(matchedUser))}
+                        onClick={() => runBusy(req.id, () => onClearAppLock(matchedUser, req.id))}
                         className="px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 rounded-xl text-xs font-semibold cursor-pointer flex items-center gap-1.5 transition disabled:opacity-50"
                       >
                         <ShieldOff className="w-3.5 h-3.5" />
@@ -368,12 +606,26 @@ export function AdminRecoveryTab({
                     <button
                       type="button"
                       disabled={isBusy || !targetEmail || !targetEmail.includes('@')}
-                      onClick={() => runBusy(req.id, () => onSendResetEmail(targetEmail, req.id))}
-                      className="px-2.5 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs font-medium cursor-pointer flex items-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                      onClick={() => {
+                        if (!targetEmail) return;
+                        if (needsResetConfirm) {
+                          setConfirmResetId(req.id);
+                          return;
+                        }
+                        runBusy(req.id, () => onSendResetEmail(targetEmail, req.id));
+                      }}
+                      title={targetEmail ? `Send Firebase reset link to ${targetEmail}` : undefined}
+                      className="px-2.5 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs font-medium cursor-pointer flex items-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed max-w-[260px]"
                     >
-                      <Mail className="w-3.5 h-3.5" />
-                      <span>
-                        {language === 'bn' ? 'রিসেট ইমেইল পাঠান' : 'Send Reset Email'}
+                      <Mail className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">
+                        {targetEmail && targetEmail.includes('@')
+                          ? language === 'bn'
+                            ? `রিসেট → ${targetEmail}`
+                            : `Reset → ${targetEmail}`
+                          : language === 'bn'
+                          ? 'রিসেট ইমেইল নেই'
+                          : 'No Email Available'}
                       </span>
                     </button>
                   </div>
@@ -384,7 +636,10 @@ export function AdminRecoveryTab({
                         <button
                           type="button"
                           disabled={isBusy}
-                          onClick={() => runBusy(req.id, () => onDismiss(req.id))}
+                          onClick={() => {
+                            setConfirmDismissId(confirmDismissId === req.id ? null : req.id);
+                            setDismissNote('');
+                          }}
                           className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 rounded-xl text-xs cursor-pointer"
                         >
                           {t('dismissRecoveryBtn')}

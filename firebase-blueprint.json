@@ -22,8 +22,35 @@
         },
         "phoneNumber": {
           "type": "string",
-          "description": "Mandatory mobile phone number for account identity and admin support recovery (PII, owner and Super Admin only)",
+          "description": "Current active mobile phone number for account identity and admin support recovery (PII, owner and Super Admin only)",
           "maxLength": 50
+        },
+        "initialPhoneNumber": {
+          "type": "string",
+          "description": "Immutable very first mobile phone number registered on this account (PII, owner and Super Admin audit only)",
+          "maxLength": 50
+        },
+        "initialPhoneSetAt": {
+          "type": "string",
+          "description": "ISO timestamp when initialPhoneNumber was first saved",
+          "maxLength": 64
+        },
+        "phoneHistory": {
+          "type": "array",
+          "description": "Append-only bounded history of mobile number changes with timestamps and previous numbers"
+        },
+        "lastPhoneChangedAt": {
+          "type": "string",
+          "description": "ISO timestamp of most recent mobile number change for cooldown enforcement",
+          "maxLength": 64
+        },
+        "phoneChangeCooldownBypass": {
+          "type": "boolean",
+          "description": "Admin-granted flag allowing user to bypass the 30-day phone change cooldown once"
+        },
+        "deviceLimits": {
+          "type": "object",
+          "description": "Admin-controlled per-user override for max simultaneous mobile and web/PC sessions"
         },
         "discoverableByPhone": {
           "type": "boolean",
@@ -229,6 +256,59 @@
         }
       },
       "required": ["pinHash", "salt", "updatedAt"]
+    },
+    "PhoneRegistry": {
+      "title": "PhoneRegistry",
+      "description": "Privacy-preserving SHA-256 phone quota and ban-lock index enforcing max accounts per mobile number",
+      "type": "object",
+      "properties": {
+        "phoneHash": {
+          "type": "string",
+          "description": "Salted SHA-256 hex digest of canonical phone digits",
+          "maxLength": 64,
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "accountUids": {
+          "type": "array",
+          "description": "Bounded list of Firebase UIDs currently registered under this mobile number"
+        },
+        "maxLimit": {
+          "type": "number",
+          "description": "Maximum allowed accounts per mobile number (default 3)"
+        },
+        "isBlocked": {
+          "type": "boolean",
+          "description": "Whether new registrations or switches onto this number are blocked due to suspension or admin lock"
+        },
+        "manualBlock": {
+          "type": "boolean",
+          "description": "Whether an admin manually locked this number"
+        },
+        "blockedReason": {
+          "type": "string",
+          "description": "Reason why this phone number is blocked",
+          "maxLength": 300
+        },
+        "bannedUids": {
+          "type": "array",
+          "description": "List of suspended UIDs currently bound to this phone number"
+        },
+        "manuallyReleasedUids": {
+          "type": "array",
+          "description": "Bounded list of UIDs intentionally released by admin from this phone quota so background backfill does not auto-reattach them"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp",
+          "maxLength": 64
+        }
+      },
+      "required": ["phoneHash", "accountUids", "maxLimit", "isBlocked", "createdAt", "updatedAt"]
     },
     "Chat": {
       "title": "Chat",
@@ -489,6 +569,16 @@
           "description": "Email of reporter",
           "maxLength": 150
         },
+        "reporterPhoneNumber": {
+          "type": "string",
+          "description": "Active phone number of reporter at submission time (Admin only)",
+          "maxLength": 50
+        },
+        "reporterInitialPhoneNumber": {
+          "type": "string",
+          "description": "First registered phone number of reporter (Admin only)",
+          "maxLength": 50
+        },
         "targetUserId": {
           "type": "string",
           "description": "UID of user being reported",
@@ -504,6 +594,25 @@
           "description": "Optional email of reported user",
           "maxLength": 150
         },
+        "targetPhoneNumber": {
+          "type": "string",
+          "description": "Active phone number snapshot of reported user (Admin only)",
+          "maxLength": 50
+        },
+        "targetInitialPhoneNumber": {
+          "type": "string",
+          "description": "First registered phone number snapshot of reported user (Admin only)",
+          "maxLength": 50
+        },
+        "targetAccountCreatedAt": {
+          "type": "string",
+          "description": "Account creation timestamp snapshot of reported user",
+          "maxLength": 64
+        },
+        "targetPhoneChangeCount": {
+          "type": "number",
+          "description": "Number of historical phone changes recorded for target user"
+        },
         "chatId": {
           "type": "string",
           "description": "Optional chat ID context",
@@ -518,6 +627,15 @@
           "type": "string",
           "description": "Optional snippet of reported message",
           "maxLength": 1000
+        },
+        "reportedMessageType": {
+          "type": "string",
+          "description": "Optional content type of the reported message",
+          "enum": ["text", "image", "audio", "file"]
+        },
+        "targetMessageDeleted": {
+          "type": "boolean",
+          "description": "Admin-set flag indicating the offending message was deleted"
         },
         "reason": {
           "type": "string",
@@ -682,6 +800,16 @@
           "description": "Alternate contact phone or WhatsApp number",
           "maxLength": 50
         },
+        "topic": {
+          "type": "string",
+          "description": "Support category tag",
+          "enum": ["app_lock", "lost_email", "suspended", "other"]
+        },
+        "requesterUid": {
+          "type": "string",
+          "description": "Authenticated Firebase UID when submitted from App-Lock or Suspension appeal",
+          "maxLength": 128
+        },
         "details": {
           "type": "string",
           "description": "Explanation or verification details",
@@ -696,6 +824,16 @@
           "type": "string",
           "description": "Internal notes or instructions from admin",
           "maxLength": 1000
+        },
+        "resetEmailSentAt": {
+          "type": "string",
+          "description": "ISO timestamp when admin triggered password reset email",
+          "maxLength": 64
+        },
+        "resetEmailSentTo": {
+          "type": "string",
+          "description": "Email address that received admin-triggered password reset link",
+          "maxLength": 150
         },
         "resolvedAt": {
           "type": "string",
@@ -869,20 +1007,64 @@
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["userId", "chatId", "displayName", "status", "createdAt", "updatedAt"]
+    },
+    "DeviceSession": {
+      "title": "DeviceSession",
+      "description": "Per-device login session tracking platform category, approval quarantine state, and approximate IP context",
+      "type": "object",
+      "properties": {
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "platformCategory": { "type": "string", "enum": ["mobile", "web"] },
+        "runtimeType": { "type": "string", "enum": ["apk", "pwa", "web"] },
+        "deviceLabel": { "type": "string", "maxLength": 150 },
+        "approxLocation": { "type": "string", "maxLength": 120 },
+        "status": { "type": "string", "enum": ["active", "pending_approval", "rejected", "logged_out"] },
+        "isPrimaryTrusted": { "type": "boolean" },
+        "limitBlocked": { "type": "boolean" },
+        "approvedByDeviceId": { "type": "string", "maxLength": 128 },
+        "rejectedByDeviceId": { "type": "string", "maxLength": 128 },
+        "rejectionNote": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "lastActiveAt": { "type": "string", "maxLength": 64 },
+        "loginAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["deviceId", "userId", "platformCategory", "runtimeType", "deviceLabel", "status", "createdAt", "lastActiveAt"]
+    },
+    "AppSecuritySettings": {
+      "title": "AppSecuritySettings",
+      "description": "Global platform security configuration controlled by Super Admin for default device limits and new login approval",
+      "type": "object",
+      "properties": {
+        "defaultMobileLimit": { "type": "number" },
+        "defaultWebLimit": { "type": "number" },
+        "requireApprovalForNewDevice": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedBy": { "type": "string", "maxLength": 150 }
+      },
+      "required": ["defaultMobileLimit", "defaultWebLimit", "requireApprovalForNewDevice", "updatedAt", "updatedBy"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
-      "description": "Private owner/admin user records with PII, moderation status, and activity stats"
+      "description": "Private owner/admin user records with PII, phone change history, moderation status, and device limit overrides"
     },
     "/users/{userId}/private/{docId}": {
       "schema": "UserSecurityLock",
       "description": "Owner-only salted SHA-256 Quick App-Lock configuration"
     },
+    "/users/{userId}/sessions/{deviceId}": {
+      "schema": "DeviceSession",
+      "description": "Active, pending-approval, and rejected per-device sessions for multi-device limits and login quarantine"
+    },
     "/directory/{userId}": {
       "schema": "DirectoryUser",
       "description": "Non-PII public discovery and presence projection for signed-in users"
+    },
+    "/phone_registry/{phoneHash}": {
+      "schema": "PhoneRegistry",
+      "description": "Privacy-preserving SHA-256 phone quota and ban-lock index enforcing max 3 accounts per mobile number"
     },
     "/friendships/{friendshipId}": {
       "schema": "Friendship",
@@ -935,6 +1117,10 @@
     "/app_updates/{updateId}": {
       "schema": "AppUpdate",
       "description": "APK release metadata publicly readable for update checks and writable strictly by verified Super Admin with GitHub URL allowlist"
+    },
+    "/app_settings/{settingId}": {
+      "schema": "AppSecuritySettings",
+      "description": "Global Admin-managed security policies including per-category device limits"
     }
   }
 }

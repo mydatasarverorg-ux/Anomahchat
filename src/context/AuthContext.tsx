@@ -8,9 +8,11 @@ import {
   sendPasswordResetEmail,
   sendEmailVerification,
   updatePassword,
+  deleteUser,
   updateProfile as updateFirebaseProfile,
   EmailAuthProvider,
   reauthenticateWithCredential,
+  reauthenticateWithPopup,
   type User as FirebaseUser,
 } from 'firebase/auth';
 import { doc, updateDoc, onSnapshot, deleteField } from 'firebase/firestore';
@@ -33,12 +35,41 @@ import {
   isDeviceAccountSaved,
   saveDeviceAccount,
 } from '../utils/accountShortcut';
+import { SUPER_ADMIN_EMAIL } from '../services/adminService';
+import { getCanonicalPhoneKey, validateMobileNumber } from '../utils/phoneUtils';
 import {
-  SUPER_ADMIN_EMAIL,
-  normalizePhoneNumber,
-  extractPhoneDigits,
-} from '../services/adminService';
-import type { UserProfile, ThemeMode } from '../types/chat';
+  claimPhoneSlot,
+  switchPhoneSlot,
+  releasePhoneSlot,
+  formatPhoneLimitError,
+} from '../services/phoneRegistryService';
+import {
+  DEFAULT_SECURITY_SETTINGS,
+  approveDeviceSession,
+  getOrCreateDeviceId,
+  markDeviceSessionLoggedOut,
+  registerOrSyncDeviceSession,
+  rejectDeviceSession,
+  resolveEffectiveDeviceLimits,
+  retryRejectedDeviceSession,
+  subscribeToGlobalSecuritySettings,
+  subscribeToUserDeviceSessions,
+} from '../services/deviceSessionService';
+import type {
+  AppSecuritySettings,
+  DeviceSession,
+  PhoneChangeHistoryEntry,
+  ThemeMode,
+  UserProfile,
+} from '../types/chat';
+
+function getActiveLanguage(): 'en' | 'bn' {
+  try {
+    return localStorage.getItem('anomah_chat_language') === 'bn' ? 'bn' : 'en';
+  } catch {
+    return 'en';
+  }
+}
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -78,6 +109,20 @@ interface AuthContextType {
     discoverableByPhone?: boolean
   ) => Promise<void>;
   clearAuthError: () => void;
+  currentDeviceId: string;
+  currentDeviceSession: DeviceSession | null;
+  userSessions: DeviceSession[];
+  pendingApprovalSessions: DeviceSession[];
+  deviceLimitsSummary: { mobile: number; web: number };
+  hasPasswordProvider: boolean;
+  approvePendingDevice: (targetDeviceId: string) => Promise<void>;
+  rejectPendingDevice: (
+    targetDeviceId: string,
+    verification?: { password?: string; verifyGoogle?: boolean }
+  ) => Promise<void>;
+  retryCurrentDeviceApproval: () => Promise<void>;
+  selfApproveCurrentDeviceWithPin: (pin: string) => Promise<{ success: boolean; error?: string }>;
+  forceLogoutOtherDevice: (targetDeviceId: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -115,9 +160,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authError, setAuthError] = useState<string | null>(null);
   const [deletionNotice, setDeletionNotice] = useState<{ daysRemaining: number } | null>(null);
   const [isAppLocked, setIsAppLocked] = useState(false);
+  const [currentDeviceId] = useState<string>(() => getOrCreateDeviceId());
+  const [userSessions, setUserSessions] = useState<DeviceSession[]>([]);
+  const [currentDeviceSession, setCurrentDeviceSession] = useState<DeviceSession | null>(null);
+  const [globalSecuritySettings, setGlobalSecuritySettings] =
+    useState<AppSecuritySettings>(DEFAULT_SECURITY_SETTINGS);
 
   // Prevents locking the user out immediately during an explicit login/signup action
   const explicitAuthInProgressRef = useRef(false);
+  const knownPendingAlertIdsRef = useRef<Set<string>>(new Set());
+  const wasSessionActiveRef = useRef(false);
 
   const [theme, setThemeState] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem('anomah_chat_theme') as ThemeMode;
@@ -203,6 +255,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (snap) => {
         if (snap.exists()) {
           const fresh = snap.data() as UserProfile;
+          if (fresh.hasAppLockPin === false) {
+            markPinSessionUnlocked(fresh.userId || user.userId);
+            setIsAppLocked(false);
+          }
           setUser((prev) => {
             if (!prev) return fresh;
             if (
@@ -219,6 +275,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               prev.photoURL !== fresh.photoURL ||
               prev.username !== fresh.username ||
               prev.phoneNumber !== fresh.phoneNumber ||
+              prev.initialPhoneNumber !== fresh.initialPhoneNumber ||
+              prev.lastPhoneChangedAt !== fresh.lastPhoneChangedAt ||
+              prev.phoneChangeCooldownBypass !== fresh.phoneChangeCooldownBypass ||
+              JSON.stringify(prev.phoneHistory || []) !== JSON.stringify(fresh.phoneHistory || []) ||
+              JSON.stringify(prev.deviceLimits || null) !== JSON.stringify(fresh.deviceLimits || null) ||
               prev.discoverableByPhone !== fresh.discoverableByPhone ||
               prev.hasAppLockPin !== fresh.hasAppLockPin
             ) {
@@ -235,6 +296,83 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => unsubscribe();
   }, [user?.userId]);
+
+  // Global security settings & real-time per-device session listener
+  useEffect(() => {
+    if (!user?.userId) {
+      setUserSessions([]);
+      setCurrentDeviceSession(null);
+      knownPendingAlertIdsRef.current.clear();
+      wasSessionActiveRef.current = false;
+      return;
+    }
+
+    const unsubSettings = subscribeToGlobalSecuritySettings((settings) => {
+      setGlobalSecuritySettings(settings);
+    });
+
+    const unsubSessions = subscribeToUserDeviceSessions(user.userId, (sessions) => {
+      setUserSessions(sessions);
+      const mine = sessions.find((s) => s.deviceId === currentDeviceId) || null;
+      if (mine) {
+        if (mine.status === 'active') {
+          wasSessionActiveRef.current = true;
+        } else if (mine.status === 'logged_out' && wasSessionActiveRef.current) {
+          wasSessionActiveRef.current = false;
+          const lang = getActiveLanguage();
+          setAuthError(
+            lang === 'bn'
+              ? 'অন্য ডিভাইস বা অ্যাডমিন থেকে আপনার এই সেশনটি লগ-আউট করা হয়েছে।'
+              : 'This device session was signed out from another trusted device or by an administrator.'
+          );
+          clearPinSessionUnlocked(user.userId);
+          signOut(auth).catch(() => {});
+          return;
+        }
+        setCurrentDeviceSession(mine);
+      }
+
+      // Desktop/PWA notification when a new unapproved login awaits owner action
+      if (mine?.status === 'active') {
+        const pendingOthers = sessions.filter(
+          (s) => s.status === 'pending_approval' && s.deviceId !== currentDeviceId
+        );
+        for (const p of pendingOthers) {
+          if (!knownPendingAlertIdsRef.current.has(p.deviceId)) {
+            knownPendingAlertIdsRef.current.add(p.deviceId);
+            if (
+              typeof window !== 'undefined' &&
+              'Notification' in window &&
+              Notification.permission === 'granted'
+            ) {
+              try {
+                const lang = getActiveLanguage();
+                new Notification(
+                  lang === 'bn'
+                    ? 'নতুন ডিভাইস থেকে লগইন সতর্কতা!'
+                    : 'New Device Login Alert!',
+                  {
+                    body:
+                      lang === 'bn'
+                        ? `${p.deviceLabel} থেকে লগইনের চেষ্টা হয়েছে। অনুমোদন বা ব্লক করতে অ্যাপ খুলুন।`
+                        : `${p.deviceLabel} is requesting access. Open the app to approve or reject.`,
+                    tag: `login_alert_${p.deviceId}`,
+                  }
+                );
+              } catch {
+                // Ignore Notification errors on unsupported platforms
+              }
+            }
+          }
+        }
+      }
+    });
+
+    return () => {
+      unsubSettings();
+      unsubSessions();
+    };
+  }, [user?.userId, currentDeviceId]);
 
   // Check deletion status on login
   const verifyDeletionStatus = (profile: UserProfile): boolean => {
@@ -256,6 +394,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (current) => {
       setFirebaseUser(current);
       if (current) {
+        if (explicitAuthInProgressRef.current) {
+          return;
+        }
         try {
           const profile = await syncUserProfile({
             uid: current.uid,
@@ -264,10 +405,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             photoURL: current.photoURL,
           });
           if (verifyDeletionStatus(profile)) {
-            if (explicitAuthInProgressRef.current) {
-              markPinSessionUnlocked(profile.userId);
-              setIsAppLocked(false);
-            } else if (profile.hasAppLockPin && !isPinSessionUnlocked(profile.userId)) {
+            const devSess = await registerOrSyncDeviceSession(profile);
+            if (devSess) {
+              if (devSess.status === 'active') wasSessionActiveRef.current = true;
+              setCurrentDeviceSession(devSess);
+            }
+            if (profile.hasAppLockPin && !isPinSessionUnlocked(profile.userId)) {
               setIsAppLocked(true);
             } else {
               setIsAppLocked(false);
@@ -284,6 +427,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               });
             }
           } else {
+            if (!profile.isBanned && profile.phoneNumber) {
+              await releasePhoneSlot(profile.userId, profile.phoneNumber);
+            }
+            await updateDoc(doc(db, 'users', profile.userId), { status: 'deleted' }).catch(() => {});
+            await syncDirectoryEntry(profile.userId, { status: 'deleted' }).catch(() => {});
+            await markDeviceSessionLoggedOut(profile.userId, currentDeviceId).catch(() => {});
             await signOut(auth);
             setIsAppLocked(false);
           }
@@ -318,8 +467,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: res.user.email,
           photoURL: res.user.photoURL,
         });
+        if (!verifyDeletionStatus(profile)) {
+          if (!profile.isBanned && profile.phoneNumber) {
+            await releasePhoneSlot(profile.userId, profile.phoneNumber);
+          }
+          await updateDoc(doc(db, 'users', profile.userId), { status: 'deleted' }).catch(() => {});
+          await syncDirectoryEntry(profile.userId, { status: 'deleted' }).catch(() => {});
+          await signOut(auth);
+          setIsAppLocked(false);
+          return;
+        }
+        const devSess = await registerOrSyncDeviceSession(profile);
+        if (devSess) {
+          if (devSess.status === 'active') wasSessionActiveRef.current = true;
+          setCurrentDeviceSession(devSess);
+        }
         setUser(profile);
-        setPresence(res.user.uid, true);
+        if (!devSess || devSess.status === 'active') {
+          setPresence(res.user.uid, true);
+        }
         if (consumeRememberDevicePending() || isDeviceAccountSaved(profile.userId)) {
           if (profile.email) {
             saveDeviceAccount({
@@ -365,67 +531,101 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setAuthError(null);
     explicitAuthInProgressRef.current = true;
+    const lang = getActiveLanguage();
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim().slice(0, 100);
     const cleanUsername = username ? username.trim().toLowerCase().replace(/^@/, '') : undefined;
-    const cleanPhone = normalizePhoneNumber(phoneNumber);
+    const phoneCheck = validateMobileNumber(phoneNumber, lang);
 
     try {
+      if (!phoneCheck.valid) {
+        throw new Error(
+          phoneCheck.error ||
+            (lang === 'bn' ? 'দয়া করে সঠিক মোবাইল নম্বর দিন।' : 'Please enter a valid mobile number.')
+        );
+      }
+      const cleanPhone = phoneCheck.normalized;
+
       const res = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
       if (res.user) {
-        markPinSessionUnlocked(res.user.uid);
-        setIsAppLocked(false);
-        await updateFirebaseProfile(res.user, { displayName: cleanName });
-        const profile = await syncUserProfile({
-          uid: res.user.uid,
-          displayName: cleanName,
-          email: cleanEmail,
-          photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanName)}`,
-          phoneNumber: cleanPhone.length >= 6 ? cleanPhone : undefined,
-        });
+        let claimedSlot = false;
+        try {
+          await claimPhoneSlot(res.user.uid, cleanPhone, lang);
+          claimedSlot = true;
 
-        // Send verification link non-blockingly so Super Admin / standard accounts can verify email
-        sendEmailVerification(res.user).catch(() => {});
-
-        // Persist phoneNumber explicitly (covers race with onAuthStateChanged) and username if valid
-        const extraUpdates: Record<string, unknown> = {};
-        if (cleanPhone.length >= 6 && profile.phoneNumber !== cleanPhone) {
-          extraUpdates.phoneNumber = cleanPhone;
-          extraUpdates.discoverableByPhone = true;
-          profile.phoneNumber = cleanPhone;
-          profile.discoverableByPhone = true;
-          const hash = await hashPhoneForDirectory(cleanPhone);
-          if (hash) await syncDirectoryEntry(res.user.uid, { phoneLookupHash: hash });
-        }
-        if (cleanUsername && cleanUsername.length >= 3) {
-          const available = await isUsernameAvailable(cleanUsername, res.user.uid);
-          if (available) {
-            extraUpdates.username = cleanUsername;
-            await syncDirectoryEntry(res.user.uid, { username: cleanUsername });
-            profile.username = cleanUsername;
-          }
-        }
-        if (Object.keys(extraUpdates).length > 0) {
-          await updateDoc(doc(db, 'users', res.user.uid), extraUpdates);
-        }
-
-        setUser(profile);
-        setPresence(res.user.uid, true);
-        if (consumeRememberDevicePending()) {
-          saveDeviceAccount({
-            userId: profile.userId,
-            displayName: profile.displayName,
-            photoURL: profile.photoURL || '',
+          markPinSessionUnlocked(res.user.uid);
+          setIsAppLocked(false);
+          await updateFirebaseProfile(res.user, { displayName: cleanName });
+          const profile = await syncUserProfile({
+            uid: res.user.uid,
+            displayName: cleanName,
             email: cleanEmail,
-            provider: 'password',
+            photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanName)}`,
+            phoneNumber: cleanPhone,
           });
+
+          // Send verification link non-blockingly so Super Admin / standard accounts can verify email
+          sendEmailVerification(res.user).catch(() => {});
+
+          const extraUpdates: Record<string, unknown> = {};
+          if (profile.phoneNumber !== cleanPhone) {
+            extraUpdates.phoneNumber = cleanPhone;
+            extraUpdates.discoverableByPhone = true;
+            profile.phoneNumber = cleanPhone;
+            profile.discoverableByPhone = true;
+            const hash = await hashPhoneForDirectory(cleanPhone);
+            if (hash) await syncDirectoryEntry(res.user.uid, { phoneLookupHash: hash });
+          }
+          if (cleanUsername && cleanUsername.length >= 3) {
+            const available = await isUsernameAvailable(cleanUsername, res.user.uid);
+            if (available) {
+              extraUpdates.username = cleanUsername;
+              await syncDirectoryEntry(res.user.uid, { username: cleanUsername });
+              profile.username = cleanUsername;
+            }
+          }
+          if (Object.keys(extraUpdates).length > 0) {
+            await updateDoc(doc(db, 'users', res.user.uid), extraUpdates);
+          }
+
+          const devSess = await registerOrSyncDeviceSession(profile);
+          if (devSess) {
+            if (devSess.status === 'active') wasSessionActiveRef.current = true;
+            setCurrentDeviceSession(devSess);
+          }
+          setUser(profile);
+          setPresence(res.user.uid, true);
+          if (consumeRememberDevicePending()) {
+            saveDeviceAccount({
+              userId: profile.userId,
+              displayName: profile.displayName,
+              photoURL: profile.photoURL || '',
+              email: cleanEmail,
+              provider: 'password',
+            });
+          }
+        } catch (innerErr) {
+          if (claimedSlot) {
+            await releasePhoneSlot(res.user.uid, cleanPhone).catch(() => {});
+          }
+          await deleteUser(res.user).catch(() => {});
+          await signOut(auth).catch(() => {});
+          setUser(null);
+          throw innerErr;
         }
       }
     } catch (err: unknown) {
       console.warn('Email sign up error:', err);
+      const phoneLimitMsg = formatPhoneLimitError(err, lang);
       const code = (err as { code?: string })?.code || '';
-      if (code === 'auth/email-already-in-use') {
-        setAuthError('This email is already registered. Please sign in instead.');
+      if (phoneLimitMsg) {
+        setAuthError(phoneLimitMsg);
+      } else if (code === 'auth/email-already-in-use') {
+        setAuthError(
+          lang === 'bn'
+            ? 'এই ইমেইলটি দিয়ে ইতিমধ্যেই অ্যাকাউন্ট খোলা আছে। অনুগ্রহ করে সাইন ইন করুন।'
+            : 'This email is already registered. Please sign in instead.'
+        );
       } else if (code === 'auth/weak-password') {
         setAuthError('Password should be at least 6 characters long.');
       } else if (code === 'auth/invalid-email') {
@@ -457,8 +657,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: cleanEmail,
           photoURL: res.user.photoURL,
         });
+        if (!verifyDeletionStatus(profile)) {
+          if (!profile.isBanned && profile.phoneNumber) {
+            await releasePhoneSlot(profile.userId, profile.phoneNumber);
+          }
+          await updateDoc(doc(db, 'users', profile.userId), { status: 'deleted' }).catch(() => {});
+          await syncDirectoryEntry(profile.userId, { status: 'deleted' }).catch(() => {});
+          await signOut(auth);
+          setIsAppLocked(false);
+          return;
+        }
+        const devSess = await registerOrSyncDeviceSession(profile);
+        if (devSess) {
+          if (devSess.status === 'active') wasSessionActiveRef.current = true;
+          setCurrentDeviceSession(devSess);
+        }
         setUser(profile);
-        setPresence(res.user.uid, true);
+        if (!devSess || devSess.status === 'active') {
+          setPresence(res.user.uid, true);
+        }
         if (consumeRememberDevicePending() || isDeviceAccountSaved(profile.userId)) {
           saveDeviceAccount({
             userId: profile.userId,
@@ -602,13 +819,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOutUser = async () => {
+    wasSessionActiveRef.current = false;
     if (user) {
       clearPinSessionUnlocked(user.userId);
       await setPresence(user.userId, false);
+      await markDeviceSessionLoggedOut(user.userId, currentDeviceId);
     }
     await signOut(auth);
     setUser(null);
     setFirebaseUser(null);
+    setUserSessions([]);
+    setCurrentDeviceSession(null);
     setDeletionNotice(null);
     setIsAppLocked(false);
   };
@@ -638,15 +859,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const savePhoneNumber = async (phoneNumber: string, username?: string, discoverableByPhone = true) => {
     if (!user) return;
-    const cleanPhone = normalizePhoneNumber(phoneNumber);
-    if (cleanPhone.length < 6 || extractPhoneDigits(cleanPhone).length < 7) {
-      throw new Error('Please enter a valid mobile number (at least 7 digits).');
+    const lang = getActiveLanguage();
+    const validation = validateMobileNumber(phoneNumber, lang);
+    if (!validation.valid) {
+      throw new Error(
+        validation.error ||
+          (lang === 'bn' ? 'দয়া করে সঠিক মোবাইল নম্বর দিন।' : 'Please enter a valid mobile number.')
+      );
     }
-
-    const docUpdates: Record<string, unknown> = {
-      phoneNumber: cleanPhone,
-      discoverableByPhone,
-    };
+    const cleanPhone = validation.normalized;
 
     const cleanUsername = username?.trim().toLowerCase().replace(/^@/, '');
     if (cleanUsername) {
@@ -658,8 +879,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!isAvail) {
           throw new Error('This username is already taken. Please choose another username.');
         }
-        docUpdates.username = cleanUsername;
       }
+    }
+
+    try {
+      await switchPhoneSlot(user.userId, user.phoneNumber, cleanPhone, lang);
+    } catch (err) {
+      const formatted = formatPhoneLimitError(err, lang);
+      throw new Error(formatted || (err instanceof Error ? err.message : 'Unable to save mobile number.'));
+    }
+
+    const nowIso = new Date().toISOString();
+    const docUpdates: Record<string, unknown> = {
+      phoneNumber: cleanPhone,
+      discoverableByPhone,
+    };
+    if (!user.initialPhoneNumber) {
+      docUpdates.initialPhoneNumber = cleanPhone;
+      docUpdates.initialPhoneSetAt = nowIso;
+    }
+    if (cleanUsername && cleanUsername !== user.username) {
+      docUpdates.username = cleanUsername;
     }
 
     await updateDoc(doc(db, 'users', user.userId), docUpdates);
@@ -674,6 +914,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ? {
             ...prev,
             phoneNumber: cleanPhone,
+            ...(!prev.initialPhoneNumber ? { initialPhoneNumber: cleanPhone, initialPhoneSetAt: nowIso } : {}),
             discoverableByPhone,
             ...(cleanUsername ? { username: cleanUsername } : {}),
           }
@@ -690,7 +931,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     discoverableByPhone?: boolean
   ) => {
     if (!user) return;
+    const lang = getActiveLanguage();
     const userRef = doc(db, 'users', user.userId);
+    const nowIso = new Date().toISOString();
 
     const resolvedUsername =
       username !== undefined
@@ -710,13 +953,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     let resolvedPhone: string | undefined = user.phoneNumber;
-    if (phoneNumber !== undefined) {
-      const cleanPhone = normalizePhoneNumber(phoneNumber);
-      if (cleanPhone) {
-        if (cleanPhone.length < 6 || extractPhoneDigits(cleanPhone).length < 7) {
-          throw new Error('Please enter a valid mobile number (at least 7 digits).');
+    let isCanonicalPhoneChange = false;
+    if (phoneNumber !== undefined && phoneNumber.trim()) {
+      const validation = validateMobileNumber(phoneNumber, lang);
+      if (!validation.valid) {
+        throw new Error(
+          validation.error ||
+            (lang === 'bn' ? 'দয়া করে সঠিক মোবাইল নম্বর দিন।' : 'Please enter a valid mobile number.')
+        );
+      }
+      resolvedPhone = validation.normalized;
+      const oldKey = getCanonicalPhoneKey(user.phoneNumber);
+      isCanonicalPhoneChange = Boolean(oldKey && oldKey !== validation.canonicalKey);
+
+      if (isCanonicalPhoneChange) {
+        if (user.isBanned || (user.warningNotice && !user.warningDismissed)) {
+          throw new Error(
+            lang === 'bn'
+              ? 'অ্যাকাউন্টে সতর্কবার্তা বা নিষেধাজ্ঞা থাকা অবস্থায় মোবাইল নম্বর পরিবর্তন করা যাবে না।'
+              : 'Mobile number cannot be changed while an active warning or suspension is unresolved.'
+          );
         }
-        resolvedPhone = cleanPhone;
+
+        const COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
+        if (user.lastPhoneChangedAt && !user.phoneChangeCooldownBypass) {
+          const lastChangeMs = new Date(user.lastPhoneChangedAt).getTime();
+          if (Number.isFinite(lastChangeMs) && Date.now() - lastChangeMs < COOLDOWN_MS) {
+            const daysLeft = Math.max(
+              1,
+              Math.ceil((COOLDOWN_MS - (Date.now() - lastChangeMs)) / (24 * 60 * 60 * 1000))
+            );
+            throw new Error(
+              lang === 'bn'
+                ? `নিরাপত্তার স্বার্থে প্রতি ৩০ দিনে একবারের বেশি মোবাইল নম্বর বদলানো যাবে না (আরও ${daysLeft} দিন বাকি)। জরুরি হলে সাপোর্ট অ্যাডমিনের সাথে যোগাযোগ করুন।`
+                : `For security, mobile number can only be changed once every 30 days (${daysLeft} days remaining). Contact support admin if urgent.`
+            );
+          }
+        }
+      }
+
+      try {
+        await switchPhoneSlot(user.userId, user.phoneNumber, resolvedPhone, lang);
+      } catch (err) {
+        const formatted = formatPhoneLimitError(err, lang);
+        throw new Error(formatted || (err instanceof Error ? err.message : 'Unable to update mobile number.'));
       }
     }
 
@@ -736,8 +1016,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (resolvedUsername !== undefined) {
       docUpdates.username = resolvedUsername;
     }
+
+    let nextHistory: PhoneChangeHistoryEntry[] | undefined = user.phoneHistory;
+    let nextInitialPhone = user.initialPhoneNumber;
+    let nextInitialPhoneSetAt = user.initialPhoneSetAt;
+    let nextLastChangedAt = user.lastPhoneChangedAt;
+
     if (resolvedPhone && resolvedPhone !== user.phoneNumber) {
       docUpdates.phoneNumber = resolvedPhone;
+      if (!nextInitialPhone) {
+        nextInitialPhone = user.phoneNumber || resolvedPhone;
+        nextInitialPhoneSetAt = user.createdAt || nowIso;
+        docUpdates.initialPhoneNumber = nextInitialPhone;
+        docUpdates.initialPhoneSetAt = nextInitialPhoneSetAt;
+      }
+      if (isCanonicalPhoneChange) {
+        const existingHistory = Array.isArray(user.phoneHistory) ? user.phoneHistory : [];
+        const entry: PhoneChangeHistoryEntry = {
+          phone: resolvedPhone,
+          ...(user.phoneNumber ? { previousPhone: user.phoneNumber } : {}),
+          changedAt: nowIso,
+        };
+        nextHistory = [...existingHistory, entry].slice(-20);
+        nextLastChangedAt = nowIso;
+        docUpdates.phoneHistory = nextHistory;
+        docUpdates.lastPhoneChangedAt = nowIso;
+        if (user.phoneChangeCooldownBypass) {
+          docUpdates.phoneChangeCooldownBypass = false;
+        }
+      }
     }
 
     await updateDoc(userRef, docUpdates);
@@ -771,6 +1078,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       about: cleanAbout,
       photoURL: cleanPhoto,
       phoneNumber: resolvedPhone,
+      initialPhoneNumber: nextInitialPhone,
+      initialPhoneSetAt: nextInitialPhoneSetAt,
+      phoneHistory: nextHistory,
+      lastPhoneChangedAt: nextLastChangedAt,
+      ...(isCanonicalPhoneChange ? { phoneChangeCooldownBypass: false } : {}),
       discoverableByPhone: resolvedDiscoverable,
       username: typeof resolvedUsername === 'string' ? resolvedUsername : undefined,
     };
@@ -785,6 +1097,100 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         provider: isGoogleUser ? 'google' : 'password',
       });
     }
+  };
+
+  const hasPasswordProvider = Boolean(
+    firebaseUser?.providerData?.some((p) => p.providerId === 'password')
+  );
+
+  const pendingApprovalSessions =
+    currentDeviceSession?.status === 'active'
+      ? userSessions.filter(
+          (s) => s.status === 'pending_approval' && s.deviceId !== currentDeviceId
+        )
+      : [];
+
+  const deviceLimitsSummary = resolveEffectiveDeviceLimits(user, globalSecuritySettings);
+
+  const approvePendingDevice = async (targetDeviceId: string) => {
+    if (!user) return;
+    await approveDeviceSession(user.userId, targetDeviceId, currentDeviceId, user);
+  };
+
+  const rejectPendingDevice = async (
+    targetDeviceId: string,
+    verification?: { password?: string; verifyGoogle?: boolean }
+  ) => {
+    if (!user || !auth.currentUser) return;
+    const lang = getActiveLanguage();
+
+    if (verification?.password !== undefined) {
+      if (!user.email) {
+        throw new Error(lang === 'bn' ? 'অ্যাকাউন্টের ইমেইল পাওয়া যায়নি।' : 'Account email missing.');
+      }
+      if (!verification.password.trim()) {
+        throw new Error(
+          lang === 'bn' ? 'অনুগ্রহ করে আপনার অ্যাকাউন্টের পাসওয়ার্ড দিন।' : 'Please enter your account password.'
+        );
+      }
+      try {
+        const cred = EmailAuthProvider.credential(user.email, verification.password);
+        await reauthenticateWithCredential(auth.currentUser, cred);
+      } catch (err: unknown) {
+        const code = (err as { code?: string })?.code || '';
+        if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+          throw new Error(
+            lang === 'bn'
+              ? 'পাসওয়ার্ড ভুল হয়েছে। ভুলে গেলে নিচের ইমেইল রিসেট বাটন ব্যবহার করুন।'
+              : 'Incorrect password. Use the Email Reset option if you forgot it.'
+          );
+        }
+        throw new Error(
+          lang === 'bn'
+            ? 'পাসওয়ার্ড যাচাই করা যায়নি। পুনরায় চেষ্টা করুন।'
+            : 'Could not verify password. Please try again.'
+        );
+      }
+    } else if (verification?.verifyGoogle) {
+      try {
+        await reauthenticateWithPopup(auth.currentUser, googleProvider);
+      } catch {
+        throw new Error(
+          lang === 'bn'
+            ? 'Google যাচাই সম্পন্ন হয়নি। দয়া করে আবার চেষ্টা করুন।'
+            : 'Google verification was cancelled or failed. Please try again.'
+        );
+      }
+    }
+
+    await rejectDeviceSession(
+      user.userId,
+      targetDeviceId,
+      currentDeviceId,
+      'Rejected by trusted owner device'
+    );
+  };
+
+  const retryCurrentDeviceApproval = async () => {
+    if (!user) return;
+    await retryRejectedDeviceSession(user.userId, currentDeviceId);
+  };
+
+  const selfApproveCurrentDeviceWithPin = async (
+    pin: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Not signed in.' };
+    const result = await verifyAppLockPin(user.userId, pin);
+    if (!result.success) return result;
+    await approveDeviceSession(user.userId, currentDeviceId, `${currentDeviceId}_pin_verified`, user);
+    markPinSessionUnlocked(user.userId);
+    wasSessionActiveRef.current = true;
+    return { success: true };
+  };
+
+  const forceLogoutOtherDevice = async (targetDeviceId: string) => {
+    if (!user || targetDeviceId === currentDeviceId) return;
+    await markDeviceSessionLoggedOut(user.userId, targetDeviceId);
   };
 
   return (
@@ -814,6 +1220,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         savePhoneNumber,
         updateProfile,
         clearAuthError: () => setAuthError(null),
+        currentDeviceId,
+        currentDeviceSession,
+        userSessions,
+        pendingApprovalSessions,
+        deviceLimitsSummary,
+        hasPasswordProvider,
+        approvePendingDevice,
+        rejectPendingDevice,
+        retryCurrentDeviceApproval,
+        selfApproveCurrentDeviceWithPin,
+        forceLogoutOtherDevice,
       }}
     >
       {children}

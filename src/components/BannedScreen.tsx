@@ -5,6 +5,7 @@ import {
   claimExpiredSuspension,
   submitRecoveryRequest,
   SUPPORT_DESK_ADDRESS,
+  extractReadableFirestoreError,
 } from '../services/adminService';
 import {
   ShieldAlert,
@@ -209,13 +210,15 @@ export function BannedScreen() {
                     name: user?.displayName || undefined,
                     username: user?.username || undefined,
                     contactPhone: appealPhone.trim() || user?.phoneNumber || undefined,
+                    topic: 'suspended',
+                    requesterUid: user?.userId,
                     details: `[Suspension / Ban Appeal | UID: ${user?.userId || 'unknown'}] ${appealDetails.trim()}`.slice(0, 1000),
                   });
                   setAppealSubmittedId(id);
                   setShowAppealForm(false);
                 } catch (err: unknown) {
                   setAppealError(
-                    err instanceof Error ? err.message : 'Failed to submit appeal.'
+                    extractReadableFirestoreError(err, language, 'Failed to submit appeal.')
                   );
                 } finally {
                   setSubmittingAppeal(false);

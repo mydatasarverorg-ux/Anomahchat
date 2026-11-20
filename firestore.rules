@@ -66,7 +66,8 @@ service cloud.firestore {
     function isValidUserCreate(data, userId) {
       return data.keys().hasAll(['userId', 'displayName', 'email', 'createdAt'])
         && data.keys().hasOnly([
-          'userId', 'displayName', 'email', 'phoneNumber', 'discoverableByPhone', 'photoURL', 'about', 'username',
+          'userId', 'displayName', 'email', 'phoneNumber', 'initialPhoneNumber', 'initialPhoneSetAt',
+          'phoneHistory', 'lastPhoneChangedAt', 'discoverableByPhone', 'photoURL', 'about', 'username',
           'hasAppLockPin', 'status', 'themePreference', 'isOnline', 'lastSeen', 'createdAt'
         ])
         && data.userId is string && data.userId == userId && data.userId.size() <= 128
@@ -74,6 +75,10 @@ service cloud.firestore {
         && data.email is string && data.email.size() <= 150
         && data.createdAt is string && data.createdAt.size() <= 64
         && (!('phoneNumber' in data) || (data.phoneNumber is string && data.phoneNumber.size() >= 6 && data.phoneNumber.size() <= 50))
+        && (!('initialPhoneNumber' in data) || (data.initialPhoneNumber is string && data.initialPhoneNumber.size() >= 6 && data.initialPhoneNumber.size() <= 50))
+        && (!('initialPhoneSetAt' in data) || (data.initialPhoneSetAt is string && data.initialPhoneSetAt.size() <= 64))
+        && (!('phoneHistory' in data) || (data.phoneHistory is list && data.phoneHistory.size() <= 20 && (data.phoneHistory.size() == 0 || data.phoneHistory[0] is map)))
+        && (!('lastPhoneChangedAt' in data) || data.lastPhoneChangedAt == null || (data.lastPhoneChangedAt is string && data.lastPhoneChangedAt.size() <= 64))
         && (!('discoverableByPhone' in data) || data.discoverableByPhone is bool)
         && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000))
         && (!('about' in data) || (data.about is string && data.about.size() <= 200))
@@ -88,7 +93,9 @@ service cloud.firestore {
     function isValidUserUpdate(data, prev) {
       return data.keys().hasAll(['userId', 'displayName', 'email', 'createdAt'])
         && data.keys().hasOnly([
-          'userId', 'displayName', 'email', 'phoneNumber', 'discoverableByPhone', 'photoURL', 'about', 'username',
+          'userId', 'displayName', 'email', 'phoneNumber', 'initialPhoneNumber', 'initialPhoneSetAt',
+          'phoneHistory', 'lastPhoneChangedAt', 'phoneChangeCooldownBypass', 'deviceLimits',
+          'discoverableByPhone', 'photoURL', 'about', 'username',
           'hasAppLockPin', 'status', 'deleteRequestedAt', 'deleteScheduledAt',
           'themePreference', 'role', 'isBanned', 'banReason', 'bannedAt',
           'bannedBy', 'bannedUntil', 'bannedUntilMs', 'warningNotice',
@@ -101,6 +108,16 @@ service cloud.firestore {
         && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
         && data.email is string && data.email.size() <= 150
         && (!('phoneNumber' in data) || data.phoneNumber == null || (data.phoneNumber is string && data.phoneNumber.size() >= 6 && data.phoneNumber.size() <= 50))
+        && (!('initialPhoneNumber' in data) || data.initialPhoneNumber == null || (data.initialPhoneNumber is string && data.initialPhoneNumber.size() >= 6 && data.initialPhoneNumber.size() <= 50))
+        && (!('initialPhoneSetAt' in data) || data.initialPhoneSetAt == null || (data.initialPhoneSetAt is string && data.initialPhoneSetAt.size() <= 64))
+        && (!('phoneHistory' in data) || (data.phoneHistory is list && data.phoneHistory.size() <= 20 && (data.phoneHistory.size() == 0 || data.phoneHistory[0] is map)))
+        && (!('lastPhoneChangedAt' in data) || data.lastPhoneChangedAt == null || (data.lastPhoneChangedAt is string && data.lastPhoneChangedAt.size() <= 64))
+        && (!('phoneChangeCooldownBypass' in data) || data.phoneChangeCooldownBypass is bool)
+        && (!('deviceLimits' in data) || data.deviceLimits == null || (
+          data.deviceLimits is map &&
+          (!('mobile' in data.deviceLimits) || (data.deviceLimits.mobile is number && data.deviceLimits.mobile >= 0 && data.deviceLimits.mobile <= 20)) &&
+          (!('web' in data.deviceLimits) || (data.deviceLimits.web is number && data.deviceLimits.web >= 0 && data.deviceLimits.web <= 20))
+        ))
         && (!('discoverableByPhone' in data) || data.discoverableByPhone is bool)
         && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000))
         && (!('about' in data) || (data.about is string && data.about.size() <= 200))
@@ -152,6 +169,31 @@ service cloud.firestore {
         && (!('isOnline' in data) || data.isOnline is bool)
         && (!('lastSeen' in data) || (data.lastSeen is string && data.lastSeen.size() <= 64))
         && (!('isBanned' in data) || data.isBanned is bool);
+    }
+
+    function isValidPhoneHash(phoneHash) {
+      return phoneHash is string
+        && phoneHash.size() == 64
+        && phoneHash.matches('^[a-fA-F0-9]{64}$');
+    }
+
+    function isValidPhoneRegistry(data, phoneHash) {
+      return data.keys().hasAll(['phoneHash', 'accountUids', 'maxLimit', 'isBlocked', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'phoneHash', 'accountUids', 'maxLimit', 'isBlocked', 'manualBlock',
+          'blockedReason', 'bannedUids', 'manuallyReleasedUids', 'createdAt', 'updatedAt'
+        ])
+        && data.phoneHash is string && data.phoneHash == phoneHash && isValidPhoneHash(data.phoneHash)
+        && data.accountUids is list && data.accountUids.size() <= 10
+        && (data.accountUids.size() == 0 || data.accountUids[0] is string)
+        && data.maxLimit is number && data.maxLimit >= 1 && data.maxLimit <= 10
+        && data.isBlocked is bool
+        && (!('manualBlock' in data) || data.manualBlock is bool)
+        && (!('blockedReason' in data) || data.blockedReason == null || (data.blockedReason is string && data.blockedReason.size() <= 300))
+        && (!('bannedUids' in data) || (data.bannedUids is list && data.bannedUids.size() <= 10 && (data.bannedUids.size() == 0 || data.bannedUids[0] is string)))
+        && (!('manuallyReleasedUids' in data) || (data.manuallyReleasedUids is list && data.manuallyReleasedUids.size() <= 10 && (data.manuallyReleasedUids.size() == 0 || data.manuallyReleasedUids[0] is string)))
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && data.updatedAt is string && data.updatedAt.size() <= 64;
     }
 
     function isValidChat(data) {
@@ -321,9 +363,14 @@ service cloud.firestore {
     function isValidReport(data, reportId) {
       return data.keys().hasAll(['id', 'reporterId', 'targetUserId', 'reason', 'details', 'status', 'createdAt'])
         && data.keys().hasOnly([
-          'id', 'reporterId', 'reporterName', 'reporterEmail', 'targetUserId',
-          'targetUserName', 'targetUserEmail', 'chatId', 'messageId',
-          'messageText', 'reason', 'details', 'status', 'resolvedAt',
+          'id', 'reporterId', 'reporterName', 'reporterEmail',
+          'reporterPhoneNumber', 'reporterInitialPhoneNumber',
+          'targetUserId', 'targetUserName', 'targetUserEmail',
+          'targetPhoneNumber', 'targetInitialPhoneNumber',
+          'targetAccountCreatedAt', 'targetPhoneChangeCount',
+          'chatId', 'messageId',
+          'messageText', 'reportedMessageType', 'targetMessageDeleted',
+          'reason', 'details', 'status', 'resolvedAt',
           'resolvedBy', 'resolutionNotes', 'createdAt'
         ])
         && data.id is string && data.id == reportId && data.id.size() <= 128
@@ -335,11 +382,19 @@ service cloud.firestore {
         && data.createdAt is string && data.createdAt.size() <= 64
         && (!('reporterName' in data) || (data.reporterName is string && data.reporterName.size() <= 100))
         && (!('reporterEmail' in data) || (data.reporterEmail is string && data.reporterEmail.size() <= 150))
+        && (!('reporterPhoneNumber' in data) || (data.reporterPhoneNumber is string && data.reporterPhoneNumber.size() <= 50))
+        && (!('reporterInitialPhoneNumber' in data) || (data.reporterInitialPhoneNumber is string && data.reporterInitialPhoneNumber.size() <= 50))
         && (!('targetUserName' in data) || (data.targetUserName is string && data.targetUserName.size() <= 100))
         && (!('targetUserEmail' in data) || (data.targetUserEmail is string && data.targetUserEmail.size() <= 150))
+        && (!('targetPhoneNumber' in data) || (data.targetPhoneNumber is string && data.targetPhoneNumber.size() <= 50))
+        && (!('targetInitialPhoneNumber' in data) || (data.targetInitialPhoneNumber is string && data.targetInitialPhoneNumber.size() <= 50))
+        && (!('targetAccountCreatedAt' in data) || (data.targetAccountCreatedAt is string && data.targetAccountCreatedAt.size() <= 64))
+        && (!('targetPhoneChangeCount' in data) || (data.targetPhoneChangeCount is number && data.targetPhoneChangeCount >= 0 && data.targetPhoneChangeCount <= 100))
         && (!('chatId' in data) || (data.chatId is string && data.chatId.size() <= 128))
         && (!('messageId' in data) || (data.messageId is string && data.messageId.size() <= 128))
         && (!('messageText' in data) || (data.messageText is string && data.messageText.size() <= 1000))
+        && (!('reportedMessageType' in data) || data.reportedMessageType in ['text', 'image', 'audio', 'file'])
+        && (!('targetMessageDeleted' in data) || data.targetMessageDeleted is bool)
         && (!('resolvedAt' in data) || (data.resolvedAt is string && data.resolvedAt.size() <= 64))
         && (!('resolvedBy' in data) || (data.resolvedBy is string && data.resolvedBy.size() <= 150))
         && (!('resolutionNotes' in data) || (data.resolutionNotes is string && data.resolutionNotes.size() <= 1000));
@@ -377,8 +432,8 @@ service cloud.firestore {
     function isValidRecoveryRequest(data, reqId) {
       return data.keys().hasAll(['id', 'email', 'status', 'createdAt'])
         && data.keys().hasOnly([
-          'id', 'email', 'name', 'username', 'contactPhone', 'details',
-          'status', 'adminNotes', 'resolvedAt', 'resolvedBy', 'createdAt'
+          'id', 'email', 'name', 'username', 'contactPhone', 'topic', 'requesterUid', 'details',
+          'status', 'adminNotes', 'resetEmailSentAt', 'resetEmailSentTo', 'resolvedAt', 'resolvedBy', 'createdAt'
         ])
         && data.id is string && data.id == reqId && data.id.size() <= 128
         && data.email is string && data.email.size() <= 150
@@ -387,8 +442,12 @@ service cloud.firestore {
         && (!('name' in data) || (data.name is string && data.name.size() <= 100))
         && (!('username' in data) || (data.username is string && data.username.size() <= 50))
         && (!('contactPhone' in data) || (data.contactPhone is string && data.contactPhone.size() <= 50))
+        && (!('topic' in data) || data.topic in ['app_lock', 'lost_email', 'suspended', 'other'])
+        && (!('requesterUid' in data) || (data.requesterUid is string && data.requesterUid.size() >= 1 && data.requesterUid.size() <= 128))
         && (!('details' in data) || (data.details is string && data.details.size() <= 1000))
         && (!('adminNotes' in data) || (data.adminNotes is string && data.adminNotes.size() <= 1000))
+        && (!('resetEmailSentAt' in data) || (data.resetEmailSentAt is string && data.resetEmailSentAt.size() <= 64))
+        && (!('resetEmailSentTo' in data) || (data.resetEmailSentTo is string && data.resetEmailSentTo.size() <= 150))
         && (!('resolvedAt' in data) || (data.resolvedAt is string && data.resolvedAt.size() <= 64))
         && (!('resolvedBy' in data) || (data.resolvedBy is string && data.resolvedBy.size() <= 150));
     }
@@ -415,6 +474,48 @@ service cloud.firestore {
         && data.publishedBy is string && data.publishedBy.size() <= 150;
     }
 
+    function isValidDeviceSession(data, userId, deviceId) {
+      return data.keys().hasAll([
+          'deviceId', 'userId', 'platformCategory', 'runtimeType',
+          'deviceLabel', 'status', 'createdAt', 'lastActiveAt'
+        ])
+        && data.keys().hasOnly([
+          'deviceId', 'userId', 'platformCategory', 'runtimeType', 'deviceLabel',
+          'approxLocation', 'status', 'isPrimaryTrusted', 'limitBlocked',
+          'approvedByDeviceId', 'rejectedByDeviceId', 'rejectionNote',
+          'createdAt', 'lastActiveAt', 'loginAt'
+        ])
+        && data.deviceId is string && data.deviceId == deviceId && data.deviceId.size() <= 128
+        && data.userId is string && data.userId == userId && data.userId.size() <= 128
+        && data.platformCategory in ['mobile', 'web']
+        && data.runtimeType in ['apk', 'pwa', 'web']
+        && data.deviceLabel is string && data.deviceLabel.size() >= 1 && data.deviceLabel.size() <= 150
+        && data.status in ['active', 'pending_approval', 'rejected', 'logged_out']
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && data.lastActiveAt is string && data.lastActiveAt.size() <= 64
+        && (!('approxLocation' in data) || data.approxLocation == null || (data.approxLocation is string && data.approxLocation.size() <= 120))
+        && (!('isPrimaryTrusted' in data) || data.isPrimaryTrusted is bool)
+        && (!('limitBlocked' in data) || data.limitBlocked is bool)
+        && (!('approvedByDeviceId' in data) || data.approvedByDeviceId == null || (data.approvedByDeviceId is string && data.approvedByDeviceId.size() <= 128))
+        && (!('rejectedByDeviceId' in data) || data.rejectedByDeviceId == null || (data.rejectedByDeviceId is string && data.rejectedByDeviceId.size() <= 128))
+        && (!('rejectionNote' in data) || data.rejectionNote == null || (data.rejectionNote is string && data.rejectionNote.size() <= 300))
+        && (!('loginAt' in data) || (data.loginAt is string && data.loginAt.size() <= 64));
+    }
+
+    function isValidSecuritySettings(data) {
+      return data.keys().hasAll([
+          'defaultMobileLimit', 'defaultWebLimit', 'requireApprovalForNewDevice', 'updatedAt', 'updatedBy'
+        ])
+        && data.keys().hasOnly([
+          'defaultMobileLimit', 'defaultWebLimit', 'requireApprovalForNewDevice', 'updatedAt', 'updatedBy'
+        ])
+        && data.defaultMobileLimit is number && data.defaultMobileLimit >= 0 && data.defaultMobileLimit <= 20
+        && data.defaultWebLimit is number && data.defaultWebLimit >= 0 && data.defaultWebLimit <= 20
+        && data.requireApprovalForNewDevice is bool
+        && data.updatedAt is string && data.updatedAt.size() <= 64
+        && data.updatedBy is string && data.updatedBy.size() <= 150;
+    }
+
     // 1. Private User Accounts (PII, moderation state, activity stats)
     match /users/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
@@ -426,14 +527,28 @@ service cloud.firestore {
         (isOwner(userId) && (
           // Action 1: Presence and active minutes tracking
           incoming().diff(existing()).affectedKeys().hasOnly(['isOnline', 'lastSeen', 'lastLoginAt', 'lastExitAt', 'dailyActivity', 'totalActiveMinutes']) ||
-          // Action 2: Profile, phone & sign-in sync
-          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'about', 'photoURL', 'username', 'email', 'phoneNumber', 'discoverableByPhone', 'themePreference', 'isOnline', 'lastSeen']) ||
+          // Action 2: Profile, phone (immutable initial + append-only history) & sign-in sync
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'about', 'photoURL', 'username', 'email',
+              'phoneNumber', 'initialPhoneNumber', 'initialPhoneSetAt',
+              'phoneHistory', 'lastPhoneChangedAt', 'phoneChangeCooldownBypass',
+              'discoverableByPhone', 'themePreference', 'isOnline', 'lastSeen'
+            ]) &&
+            (!('initialPhoneNumber' in existing()) || existing().initialPhoneNumber == null ||
+              (('initialPhoneNumber' in incoming()) && incoming().initialPhoneNumber == existing().initialPhoneNumber)) &&
+            (!('initialPhoneSetAt' in existing()) || existing().initialPhoneSetAt == null ||
+              (('initialPhoneSetAt' in incoming()) && incoming().initialPhoneSetAt == existing().initialPhoneSetAt)) &&
+            (!('phoneHistory' in existing()) ||
+              (('phoneHistory' in incoming()) && incoming().phoneHistory.size() >= existing().phoneHistory.size())) &&
+            (!('phoneChangeCooldownBypass' in incoming()) || incoming().phoneChangeCooldownBypass == false)
+          ) ||
           // Action 3: Toggle Quick App-Lock PIN flag
           incoming().diff(existing()).affectedKeys().hasOnly(['hasAppLockPin']) ||
           // Action 4: Acknowledge official warning
           (incoming().diff(existing()).affectedKeys().hasOnly(['warningDismissed']) && incoming().warningDismissed == true) ||
           // Action 5: Schedule 15-day deletion or restore account
-          (incoming().diff(existing()).affectedKeys().hasOnly(['status', 'deleteRequestedAt', 'deleteScheduledAt', 'isOnline', 'lastSeen']) && incoming().status in ['active', 'scheduled_for_deletion']) ||
+          (incoming().diff(existing()).affectedKeys().hasOnly(['status', 'deleteRequestedAt', 'deleteScheduledAt', 'isOnline', 'lastSeen']) && incoming().status in ['active', 'scheduled_for_deletion', 'deleted']) ||
           // Action 6: Claim expired temporary suspension verified against Firestore server time
           (
             ('isBanned' in existing()) && existing().isBanned == true &&
@@ -454,6 +569,22 @@ service cloud.firestore {
         allow create, update: if isSignedIn() && isValidId(userId) && isValidId(docId) && docId == 'security'
           && isOwner(userId) && isValidSecurityLock(incoming());
         allow delete: if isValidId(userId) && isValidId(docId) && (isOwner(userId) || isAdmin());
+      }
+
+      // Per-Device Sessions (Device Limits + Login Quarantine Approval)
+      match /sessions/{deviceId} {
+        allow get: if isValidId(userId) && isValidId(deviceId) && (isOwner(userId) || isAdmin());
+        allow list: if isValidId(userId) && (isOwner(userId) || isAdmin());
+        allow create: if isSignedIn() && isValidId(userId) && isValidId(deviceId)
+          && isValidDeviceSession(incoming(), userId, deviceId)
+          && (isOwner(userId) || isAdmin());
+        allow update: if isSignedIn() && isValidId(userId) && isValidId(deviceId)
+          && isValidDeviceSession(incoming(), userId, deviceId)
+          && incoming().deviceId == existing().deviceId
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt
+          && (isOwner(userId) || isAdmin());
+        allow delete: if isValidId(userId) && isValidId(deviceId) && (isOwner(userId) || isAdmin());
       }
     }
 
@@ -479,6 +610,77 @@ service cloud.firestore {
       );
 
       allow delete: if isValidId(userId) && (isOwner(userId) || isAdmin());
+    }
+
+    // 2A. Privacy-Preserving Phone Quota & Ban-Lock Registry (Max 3 accounts per number)
+    match /phone_registry/{phoneHash} {
+      allow get: if isValidId(phoneHash) && (isAdmin() || (isSignedIn() && isValidPhoneHash(phoneHash)));
+      allow list: if isAdmin();
+
+      allow create: if isValidId(phoneHash) && isValidPhoneRegistry(incoming(), phoneHash) && (
+        isAdmin() ||
+        (isSignedIn()
+          && isCallerNotBanned()
+          && incoming().maxLimit == 3
+          && incoming().isBlocked == false
+          && (!('manualBlock' in incoming()) || incoming().manualBlock == false)
+          && (!('bannedUids' in incoming()) || incoming().bannedUids.size() == 0)
+          && (!('manuallyReleasedUids' in incoming()) || incoming().manuallyReleasedUids.size() == 0)
+          && (!('blockedReason' in incoming()) || incoming().blockedReason == null)
+          && incoming().accountUids.size() == 1
+          && incoming().accountUids[0] == request.auth.uid)
+      );
+
+      allow update: if isSignedIn() && isValidId(phoneHash) && isValidPhoneRegistry(incoming(), phoneHash) && (
+        isAdmin() ||
+        (incoming().phoneHash == existing().phoneHash
+          && incoming().createdAt == existing().createdAt
+          && incoming().maxLimit == existing().maxLimit && (
+          // Action 1: Claim 1 slot for self (only if not blocked and within maxLimit)
+          (isCallerNotBanned()
+            && existing().isBlocked != true
+            && (!('manualBlock' in existing()) || existing().manualBlock != true)
+            && incoming().isBlocked == existing().isBlocked
+            && !(request.auth.uid in existing().accountUids)
+            && request.auth.uid in incoming().accountUids
+            && incoming().accountUids.size() == existing().accountUids.size() + 1
+            && incoming().accountUids.size() <= existing().maxLimit
+            && incoming().accountUids.hasAll(existing().accountUids)
+            && (
+              ((!('manuallyReleasedUids' in existing()) || !(request.auth.uid in existing().manuallyReleasedUids))
+                && incoming().diff(existing()).affectedKeys().hasOnly(['accountUids', 'updatedAt'])) ||
+              (('manuallyReleasedUids' in existing())
+                && (request.auth.uid in existing().manuallyReleasedUids)
+                && ('manuallyReleasedUids' in incoming())
+                && !(request.auth.uid in incoming().manuallyReleasedUids)
+                && incoming().manuallyReleasedUids.size() + 1 == existing().manuallyReleasedUids.size()
+                && existing().manuallyReleasedUids.hasAll(incoming().manuallyReleasedUids)
+                && incoming().diff(existing()).affectedKeys().hasOnly(['accountUids', 'manuallyReleasedUids', 'updatedAt']))
+            )) ||
+          // Action 2: Release ONLY self slot when switching phone or after expired deletion (blocked/banned users cannot self-release)
+          (isCallerNotBanned()
+            && (!('bannedUids' in existing()) || !(request.auth.uid in existing().bannedUids))
+            && incoming().isBlocked == existing().isBlocked
+            && (request.auth.uid in existing().accountUids)
+            && !(request.auth.uid in incoming().accountUids)
+            && incoming().accountUids.size() + 1 == existing().accountUids.size()
+            && existing().accountUids.hasAll(incoming().accountUids)
+            && incoming().diff(existing()).affectedKeys().hasOnly(['accountUids', 'updatedAt'])) ||
+          // Action 3: Self-clear expired temporary suspension from bannedUids once master profile is unbanned
+          (isCallerNotBanned()
+            && ('bannedUids' in existing())
+            && (request.auth.uid in existing().bannedUids)
+            && !(request.auth.uid in incoming().bannedUids)
+            && incoming().bannedUids.size() + 1 == existing().bannedUids.size()
+            && existing().bannedUids.hasAll(incoming().bannedUids)
+            && incoming().isBlocked == (incoming().bannedUids.size() > 0 || (('manualBlock' in existing()) && existing().manualBlock == true))
+            && ((incoming().isBlocked == true && incoming().blockedReason == existing().blockedReason)
+                || (incoming().isBlocked == false && (!('blockedReason' in incoming()) || incoming().blockedReason == null)))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['bannedUids', 'isBlocked', 'blockedReason', 'updatedAt']))
+        ))
+      );
+
+      allow delete: if isValidId(phoneHash) && isAdmin();
     }
 
     // 2B. Friendships & Requests (Gated 1-on-1 connections)
@@ -862,11 +1064,14 @@ service cloud.firestore {
         && incoming().reporterId == request.auth.uid
         && incoming().targetUserId != request.auth.uid
         && incoming().status == 'pending'
+        && !('targetMessageDeleted' in incoming())
         && !('resolvedAt' in incoming())
         && !('resolvedBy' in incoming())
         && !('resolutionNotes' in incoming());
       allow update: if isAdmin() && isValidId(reportId) && isValidReport(incoming(), reportId)
+        && incoming().id == existing().id
         && incoming().reporterId == existing().reporterId
+        && incoming().targetUserId == existing().targetUserId
         && incoming().createdAt == existing().createdAt;
       allow delete: if isValidId(reportId) && isAdmin();
     }
@@ -895,13 +1100,17 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if isValidId(requestId) && isValidRecoveryRequest(incoming(), requestId)
         && incoming().status == 'pending'
+        && (!('requesterUid' in incoming()) || (isSignedIn() && incoming().requesterUid == request.auth.uid))
         && (incoming().email.size() >= 3
             || ('contactPhone' in incoming() && incoming().contactPhone.size() >= 5)
             || ('username' in incoming() && incoming().username.size() >= 3))
         && !('adminNotes' in incoming())
+        && !('resetEmailSentAt' in incoming())
+        && !('resetEmailSentTo' in incoming())
         && !('resolvedAt' in incoming())
         && !('resolvedBy' in incoming());
       allow update: if isAdmin() && isValidId(requestId) && isValidRecoveryRequest(incoming(), requestId)
+        && incoming().id == existing().id
         && incoming().createdAt == existing().createdAt;
       allow delete: if isValidId(requestId) && isAdmin();
     }
@@ -912,6 +1121,14 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create, update: if isAdmin() && isValidId(updateId) && updateId == 'latest' && isValidAppUpdate(incoming());
       allow delete: if isAdmin() && isValidId(updateId);
+    }
+
+    // 8A. Global Security & Device Quota Settings (Signed-in read, Super Admin write only)
+    match /app_settings/{settingId} {
+      allow get: if isValidId(settingId) && isSignedIn() && (settingId == 'security' || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(settingId) && settingId == 'security' && isValidSecuritySettings(incoming());
+      allow delete: if isAdmin() && isValidId(settingId);
     }
 
     // 9. Connection verification probe

@@ -93,6 +93,7 @@ export function ChatArea({
     chatId?: string;
     messageId?: string;
     messageText?: string;
+    reportedMessageType?: 'text' | 'image' | 'audio' | 'file';
   } | null>(null);
 
   const [partnerUser, setPartnerUser] = useState<DirectoryUser | null>(null);
@@ -855,6 +856,7 @@ export function ChatArea({
               chatId: chat.id,
               messageId: m.id,
               messageText: resolvedText,
+              reportedMessageType: m.type !== 'call' ? m.type : undefined,
             });
           }}
           onDelete={(m) => setMessageToDelete(m)}
@@ -1186,6 +1188,7 @@ export function ChatArea({
           chatId={reportTarget.chatId}
           messageId={reportTarget.messageId}
           messageText={reportTarget.messageText}
+          reportedMessageType={reportTarget.reportedMessageType}
           onClose={() => setReportTarget(null)}
         />
       )}
