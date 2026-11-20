@@ -59,6 +59,7 @@ import {
   subscribeToLatestRelease,
   type AppReleaseInfo,
 } from '../services/updateService';
+import { APP_VERSION } from '../utils/appVersion';
 import type {
   UserProfile,
   UserReport,
@@ -114,16 +115,16 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   >('overview');
 
   const [currentLiveRelease, setCurrentLiveRelease] = useState<AppReleaseInfo | null>(null);
-  const [releaseVersionName, setReleaseVersionName] = useState('1.0.11');
-  const [releaseVersionCode, setReleaseVersionCode] = useState('111');
+  const [releaseVersionName, setReleaseVersionName] = useState(APP_VERSION.versionName);
+  const [releaseVersionCode, setReleaseVersionCode] = useState(String(APP_VERSION.versionCode));
   const [releaseApkUrl, setReleaseApkUrl] = useState('https://github.com/mydatasarverorg-ux/Anomahchat/releases/latest/download/AnomahChat.apk');
   const [releaseApkSha256, setReleaseApkSha256] = useState('');
   const [releaseFileSizeText, setReleaseFileSizeText] = useState('');
   const [releaseChangelogEn, setReleaseChangelogEn] = useState(
-    '• Friend Request & Accepted Connection Gate with QR Auto-Request\n• Private & Public Groups (Friends-only invite, Direct Join & Admin Approval)\n• Cross-Platform Offline QR Scanner & Deep-Linking across Web, PWA & Android APK (Mahi A11)'
+    '• Immutable First Phone Identity, Change History & 30-Day Cooldown\n• Automatic Phone Quota Slot Sync (3/number) & Deleted/Stale Cleanup\n• Separate Mobile vs. Web/PC Device Limits & Live Owner Login Approval (Mahi A12)'
   );
   const [releaseChangelogBn, setReleaseChangelogBn] = useState(
-    '• ফ্রেন্ড রিকোয়েস্ট ও একসেপ্ট সিস্টেম এবং QR স্ক্যানে অটো রিকোয়েস্ট\n• প্রাইভেট ও পাবলিক গ্রুপ (শুধু বন্ধু দিয়ে গ্রুপ, ডাইরেক্ট ও অ্যাডমিন অ্যাপ্রুভাল জয়েন)\n• Web, PWA ও Android APK-তে অফলাইন QR স্ক্যানার ও ডিপ-লিংকিং সাপোর্ট (Mahi A11)'
+    '• স্থায়ী প্রথম মোবাইল নম্বর ট্র্যাকিং, নম্বর পরিবর্তনের ইতিহাস ও ৩০ দিনের কুলডাউন\n• অটোমেটিক ফোন কোটা সিঙ্ক (সর্বোচ্চ ৩টি অ্যাকাউন্ট) ও অপ্রয়োজনীয় স্লট পরিষ্কার\n• মোবাইল বনাম ওয়েব/পিসি আলাদা ডিভাইস সীমা ও নতুন লগইন অনুমোদন পপআপ (Mahi A12)'
   );
   const [releaseForceUpdate, setReleaseForceUpdate] = useState(false);
   const [publishingRelease, setPublishingRelease] = useState(false);
@@ -393,14 +394,16 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     return subscribeToLatestRelease((rel) => {
       setCurrentLiveRelease(rel);
       if (rel) {
-        setReleaseVersionName(rel.versionName);
-        setReleaseVersionCode(String(rel.versionCode));
         setReleaseApkUrl(rel.apkDownloadUrl || '');
-        setReleaseApkSha256(rel.apkSha256 || '');
         setReleaseFileSizeText(rel.fileSizeText || '');
-        setReleaseChangelogEn(rel.changelogEn || '');
-        setReleaseChangelogBn(rel.changelogBn || '');
         setReleaseForceUpdate(Boolean(rel.forceUpdate));
+        if (rel.versionCode >= APP_VERSION.versionCode) {
+          setReleaseVersionName(rel.versionName);
+          setReleaseVersionCode(String(rel.versionCode));
+          setReleaseApkSha256(rel.apkSha256 || '');
+          setReleaseChangelogEn(rel.changelogEn || '');
+          setReleaseChangelogBn(rel.changelogBn || '');
+        }
       }
     });
   }, []);

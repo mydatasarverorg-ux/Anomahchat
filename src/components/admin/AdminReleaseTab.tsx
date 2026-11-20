@@ -231,7 +231,7 @@ export function AdminReleaseTab({
               </label>
               <input
                 type="text"
-                placeholder="e.g. 1.0.11"
+                placeholder="e.g. 1.0.12"
                 value={releaseVersionName}
                 onChange={(e) => setReleaseVersionName(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono focus:outline-none focus:border-emerald-500"
@@ -245,7 +245,7 @@ export function AdminReleaseTab({
               </label>
               <input
                 type="number"
-                placeholder="e.g. 111"
+                placeholder="e.g. 112"
                 value={releaseVersionCode}
                 onChange={(e) => setReleaseVersionCode(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono focus:outline-none focus:border-emerald-500"
