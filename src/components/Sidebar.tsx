@@ -24,6 +24,7 @@ import {
   ArrowLeft,
   UserCheck,
   ScanLine,
+  Smartphone,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -32,6 +33,7 @@ interface SidebarProps {
   onSelectChat: (chatId: string) => void;
   onOpenNewChat: () => void;
   onOpenProfile: () => void;
+  onOpenDevices?: () => void;
   onOpenShare: () => void;
   onOpenRequests?: () => void;
   onOpenQrScanner?: () => void;
@@ -47,6 +49,7 @@ export function Sidebar({
   onSelectChat,
   onOpenNewChat,
   onOpenProfile,
+  onOpenDevices,
   onOpenShare,
   onOpenRequests,
   onOpenQrScanner,
@@ -55,7 +58,11 @@ export function Sidebar({
   ghostUser,
   onExitGhostMode,
 }: SidebarProps) {
-  const { user, firebaseUser, signOutUser } = useAuth();
+  const { user, firebaseUser, signOutUser, userSessions } = useAuth();
+  const activeDevicesCount = userSessions.filter((s) => s.status === 'active').length;
+  const deviceAttentionCount = userSessions.filter(
+    (s) => s.status === 'pending_approval' || (s.status === 'active' && s.adminAlertPending)
+  ).length;
   const { language, toggleLanguage, t } = useLanguage();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'direct' | 'group'>('all');
@@ -275,7 +282,7 @@ export function Sidebar({
 
           <button
             onClick={() => setShowMenu(!showMenu)}
-            className={`p-2 rounded-xl transition cursor-pointer ${
+            className={`relative p-2 rounded-xl transition cursor-pointer ${
               showMenu
                 ? 'bg-slate-800 text-white'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -283,6 +290,9 @@ export function Sidebar({
             title="Menu"
           >
             <MoreVertical className="w-4 h-4" />
+            {!ghostUser && deviceAttentionCount > 0 && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            )}
           </button>
 
           {/* Standard 3-Dot Dropdown Menu (Telegram macOS / WhatsApp Web style) */}
@@ -313,6 +323,30 @@ export function Sidebar({
                 <Settings className="w-4 h-4 text-slate-400" />
                 <span>{t('settingsTitle')}</span>
               </button>
+
+              {/* Connected Devices Quick Shortcut */}
+              {!ghostUser && onOpenDevices && (
+                <button
+                  onClick={() => {
+                    setShowMenu(false);
+                    onOpenDevices();
+                  }}
+                  className="w-full px-3.5 py-2 text-left text-xs text-slate-200 hover:bg-slate-800 hover:text-white flex items-center justify-between cursor-pointer font-medium transition"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Smartphone className="w-4 h-4 text-sky-400" />
+                    <span>{language === 'bn' ? 'সংযুক্ত ডিভাইসসমূহ' : 'Connected Devices'}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {deviceAttentionCount > 0 && (
+                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                    )}
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 font-mono font-bold">
+                      {activeDevicesCount}
+                    </span>
+                  </div>
+                </button>
+              )}
 
               {/* Language Switch */}
               <button

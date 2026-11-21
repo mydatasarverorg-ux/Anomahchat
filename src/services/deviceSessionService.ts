@@ -9,11 +9,12 @@ import {
   updateDoc,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { auth, db } from '../firebase/config';
 import { handleFirestoreError, OperationType } from '../firebase/errorHandler';
 import { isNativeApkApp } from '../utils/appVersion';
 import type {
   AdminAuditLog,
+  AdminSecuritySettings,
   AppSecuritySettings,
   DeviceSession,
   UserDeviceLimits,
@@ -31,6 +32,21 @@ export const DEFAULT_SECURITY_SETTINGS: AppSecuritySettings = {
   updatedAt: '',
   updatedBy: SECURITY_SUPER_ADMIN_EMAIL,
 };
+
+export const DEFAULT_ADMIN_SECURITY_SETTINGS: AdminSecuritySettings = {
+  adminMobileLimit: 5,
+  adminWebLimit: 5,
+  adminLoginMode: 'fast_alert',
+  updatedAt: '',
+  updatedBy: SECURITY_SUPER_ADMIN_EMAIL,
+};
+
+function isCurrentAuthVerifiedAdmin(targetUid?: string): boolean {
+  const current = auth.currentUser;
+  if (!current || !current.emailVerified) return false;
+  if (targetUid && current.uid !== targetUid) return false;
+  return current.email?.trim().toLowerCase() === SECURITY_SUPER_ADMIN_EMAIL;
+}
 
 async function writeSecurityAuditLog(
   action: AdminAuditLog['action'],
@@ -227,21 +243,98 @@ export function subscribeToGlobalSecuritySettings(
   );
 }
 
+export async function getAdminSecuritySettings(): Promise<AdminSecuritySettings> {
+  if (!isCurrentAuthVerifiedAdmin()) return DEFAULT_ADMIN_SECURITY_SETTINGS;
+  try {
+    const snap = await getDoc(doc(db, 'app_settings', 'admin_security'));
+    if (!snap.exists()) return DEFAULT_ADMIN_SECURITY_SETTINGS;
+    const data = snap.data() as Partial<AdminSecuritySettings>;
+    return {
+      adminMobileLimit:
+        typeof data.adminMobileLimit === 'number' && data.adminMobileLimit >= 0
+          ? Math.min(20, Math.round(data.adminMobileLimit))
+          : DEFAULT_ADMIN_SECURITY_SETTINGS.adminMobileLimit,
+      adminWebLimit:
+        typeof data.adminWebLimit === 'number' && data.adminWebLimit >= 0
+          ? Math.min(20, Math.round(data.adminWebLimit))
+          : DEFAULT_ADMIN_SECURITY_SETTINGS.adminWebLimit,
+      adminLoginMode:
+        data.adminLoginMode === 'strict_approval' ? 'strict_approval' : 'fast_alert',
+      updatedAt: data.updatedAt || '',
+      updatedBy: data.updatedBy || SECURITY_SUPER_ADMIN_EMAIL,
+    };
+  } catch {
+    return DEFAULT_ADMIN_SECURITY_SETTINGS;
+  }
+}
+
+export function subscribeToAdminSecuritySettings(
+  callback: (settings: AdminSecuritySettings) => void
+): Unsubscribe {
+  if (!isCurrentAuthVerifiedAdmin()) {
+    callback(DEFAULT_ADMIN_SECURITY_SETTINGS);
+    return () => {};
+  }
+  return onSnapshot(
+    doc(db, 'app_settings', 'admin_security'),
+    (snap) => {
+      if (!snap.exists()) {
+        callback(DEFAULT_ADMIN_SECURITY_SETTINGS);
+        return;
+      }
+      const data = snap.data() as Partial<AdminSecuritySettings>;
+      callback({
+        adminMobileLimit:
+          typeof data.adminMobileLimit === 'number' && data.adminMobileLimit >= 0
+            ? Math.min(20, Math.round(data.adminMobileLimit))
+            : DEFAULT_ADMIN_SECURITY_SETTINGS.adminMobileLimit,
+        adminWebLimit:
+          typeof data.adminWebLimit === 'number' && data.adminWebLimit >= 0
+            ? Math.min(20, Math.round(data.adminWebLimit))
+            : DEFAULT_ADMIN_SECURITY_SETTINGS.adminWebLimit,
+        adminLoginMode:
+          data.adminLoginMode === 'strict_approval' ? 'strict_approval' : 'fast_alert',
+        updatedAt: data.updatedAt || '',
+        updatedBy: data.updatedBy || SECURITY_SUPER_ADMIN_EMAIL,
+      });
+    },
+    () => {
+      callback(DEFAULT_ADMIN_SECURITY_SETTINGS);
+    }
+  );
+}
+
 export function resolveEffectiveDeviceLimits(
   profile: UserProfile | null | undefined,
-  globalSettings: AppSecuritySettings
+  globalSettings: AppSecuritySettings,
+  options?: {
+    isVerifiedAdmin?: boolean;
+    adminSettings?: AdminSecuritySettings;
+  }
 ): { mobile: number; web: number } {
   const userMob = profile?.deviceLimits?.mobile;
   const userWeb = profile?.deviceLimits?.web;
+
+  const isTargetSuperAdmin =
+    Boolean(options?.isVerifiedAdmin) ||
+    profile?.email?.trim().toLowerCase() === SECURITY_SUPER_ADMIN_EMAIL;
+
+  const fallbackMobile = isTargetSuperAdmin
+    ? options?.adminSettings?.adminMobileLimit ?? DEFAULT_ADMIN_SECURITY_SETTINGS.adminMobileLimit
+    : globalSettings.defaultMobileLimit;
+  const fallbackWeb = isTargetSuperAdmin
+    ? options?.adminSettings?.adminWebLimit ?? DEFAULT_ADMIN_SECURITY_SETTINGS.adminWebLimit
+    : globalSettings.defaultWebLimit;
+
   return {
     mobile:
       typeof userMob === 'number' && Number.isFinite(userMob) && userMob >= 0
         ? Math.min(20, Math.round(userMob))
-        : globalSettings.defaultMobileLimit,
+        : fallbackMobile,
     web:
       typeof userWeb === 'number' && Number.isFinite(userWeb) && userWeb >= 0
         ? Math.min(20, Math.round(userWeb))
-        : globalSettings.defaultWebLimit,
+        : fallbackWeb,
   };
 }
 
@@ -277,6 +370,39 @@ export async function adminUpdateGlobalSecuritySettings(
   }
 }
 
+export async function adminUpdateAdminSecuritySettings(
+  settings: {
+    adminMobileLimit: number;
+    adminWebLimit: number;
+    adminLoginMode: 'fast_alert' | 'strict_approval';
+  },
+  adminEmail: string
+): Promise<void> {
+  const path = 'app_settings/admin_security';
+  const cleanAdmin =
+    (adminEmail || SECURITY_SUPER_ADMIN_EMAIL).trim().slice(0, 150) || SECURITY_SUPER_ADMIN_EMAIL;
+  const payload: AdminSecuritySettings = {
+    adminMobileLimit: Math.min(20, Math.max(0, Math.round(settings.adminMobileLimit))),
+    adminWebLimit: Math.min(20, Math.max(0, Math.round(settings.adminWebLimit))),
+    adminLoginMode:
+      settings.adminLoginMode === 'strict_approval' ? 'strict_approval' : 'fast_alert',
+    updatedAt: new Date().toISOString(),
+    updatedBy: cleanAdmin,
+  };
+  try {
+    await setDoc(doc(db, 'app_settings', 'admin_security'), payload);
+    await writeSecurityAuditLog(
+      'update_device_policy',
+      `Updated Super Admin device policy: Mobile=${payload.adminMobileLimit}, Web/PC=${payload.adminWebLimit}, Mode=${payload.adminLoginMode}`,
+      cleanAdmin,
+      'admin_security',
+      'Super Admin Security Policy'
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
 export async function adminUpdateUserDeviceLimits(
   targetUserId: string,
   limits: UserDeviceLimits | null,
@@ -305,7 +431,7 @@ export async function adminUpdateUserDeviceLimits(
       'update_device_policy',
       cleanLimits
         ? `Set custom device limits for ${targetName || targetUserId}: Mobile=${cleanLimits.mobile ?? 'default'}, Web/PC=${cleanLimits.web ?? 'default'}.`
-        : `Reset device limits for ${targetName || targetUserId} to global defaults.`,
+        : `Reset device limits for ${targetName || targetUserId} to default policy.`,
       cleanAdmin,
       targetUserId,
       targetName || targetUserId
@@ -344,14 +470,20 @@ export async function registerOrSyncDeviceSession(
 ): Promise<DeviceSession | null> {
   const meta = getCurrentDeviceMetadata();
   const path = `users/${profile.userId}/sessions/${meta.deviceId}`;
+  const isVerifiedAdmin = isCurrentAuthVerifiedAdmin(profile.userId);
+
   try {
-    const [globalSettings, sessionsSnap, approxLoc] = await Promise.all([
+    const [globalSettings, adminSettings, sessionsSnap, approxLoc] = await Promise.all([
       getGlobalSecuritySettings(),
+      isVerifiedAdmin ? getAdminSecuritySettings() : Promise.resolve(DEFAULT_ADMIN_SECURITY_SETTINGS),
       getDocs(collection(db, 'users', profile.userId, 'sessions')),
       fetchApproxLocation(),
     ]);
 
-    const limits = resolveEffectiveDeviceLimits(profile, globalSettings);
+    const limits = resolveEffectiveDeviceLimits(profile, globalSettings, {
+      isVerifiedAdmin,
+      adminSettings,
+    });
     const categoryLimit = meta.platformCategory === 'mobile' ? limits.mobile : limits.web;
 
     const allSessions: DeviceSession[] = [];
@@ -370,20 +502,44 @@ export async function registerOrSyncDeviceSession(
 
     let nextStatus: DeviceSession['status'] = 'active';
     let isPrimaryTrusted = existing?.isPrimaryTrusted ?? false;
+    let adminAlertPending = existing?.adminAlertPending ?? false;
+    let shouldWriteAdminLoginLog = false;
+
+    const canReuseTrusted = Boolean(
+      existing &&
+        existing.isPrimaryTrusted === true &&
+        !existing.rejectedByDeviceId &&
+        !isLimitBlocked
+    );
+
+    const canUseAdminFastAlert = Boolean(
+      isVerifiedAdmin &&
+        !isLimitBlocked &&
+        adminSettings.adminLoginMode === 'fast_alert' &&
+        !existing?.rejectedByDeviceId
+    );
 
     if (existing) {
-      if (existing.status === 'active') {
+      if (existing.status === 'rejected') {
+        nextStatus = 'rejected';
+        isPrimaryTrusted = false;
+        adminAlertPending = false;
+      } else if (existing.status === 'active') {
         if (categoryLimit === 0) {
           nextStatus = 'logged_out';
+          adminAlertPending = false;
         } else {
           nextStatus = 'active';
         }
-      } else if (existing.status === 'rejected') {
-        nextStatus = 'rejected';
       } else if (existing.status === 'pending_approval') {
         if (otherActive.length === 0 && !isLimitBlocked) {
           nextStatus = 'active';
           isPrimaryTrusted = true;
+          adminAlertPending = false;
+        } else if (canUseAdminFastAlert) {
+          nextStatus = 'active';
+          adminAlertPending = true;
+          shouldWriteAdminLoginLog = true;
         } else {
           nextStatus = 'pending_approval';
         }
@@ -391,25 +547,45 @@ export async function registerOrSyncDeviceSession(
         // Re-login from 'logged_out'
         if (categoryLimit === 0) {
           nextStatus = 'pending_approval';
+          adminAlertPending = false;
         } else if (otherActive.length === 0) {
           nextStatus = 'active';
           isPrimaryTrusted = true;
+          adminAlertPending = false;
+        } else if (canReuseTrusted) {
+          nextStatus = 'active';
+          adminAlertPending = false;
+        } else if (canUseAdminFastAlert) {
+          nextStatus = 'active';
+          adminAlertPending = true;
+          shouldWriteAdminLoginLog = true;
         } else if (!globalSettings.requireApprovalForNewDevice && !isLimitBlocked) {
           nextStatus = 'active';
+          adminAlertPending = false;
         } else {
           nextStatus = 'pending_approval';
+          adminAlertPending = false;
         }
       }
     } else {
       if (categoryLimit === 0) {
         nextStatus = 'pending_approval';
+        adminAlertPending = false;
       } else if (otherActive.length === 0) {
         nextStatus = 'active';
         isPrimaryTrusted = true;
+        adminAlertPending = false;
+      } else if (canUseAdminFastAlert) {
+        nextStatus = 'active';
+        isPrimaryTrusted = false;
+        adminAlertPending = true;
+        shouldWriteAdminLoginLog = true;
       } else if (!globalSettings.requireApprovalForNewDevice && !isLimitBlocked) {
         nextStatus = 'active';
+        adminAlertPending = false;
       } else {
         nextStatus = 'pending_approval';
+        adminAlertPending = false;
       }
     }
 
@@ -419,9 +595,14 @@ export async function registerOrSyncDeviceSession(
       platformCategory: meta.platformCategory,
       runtimeType: meta.runtimeType,
       deviceLabel: meta.deviceLabel,
-      ...(approxLoc ? { approxLocation: approxLoc } : existing?.approxLocation ? { approxLocation: existing.approxLocation } : {}),
+      ...(approxLoc
+        ? { approxLocation: approxLoc }
+        : existing?.approxLocation
+        ? { approxLocation: existing.approxLocation }
+        : {}),
       status: nextStatus,
       isPrimaryTrusted,
+      adminAlertPending,
       limitBlocked: isLimitBlocked,
       ...(existing?.approvedByDeviceId ? { approvedByDeviceId: existing.approvedByDeviceId } : {}),
       ...(existing?.rejectedByDeviceId ? { rejectedByDeviceId: existing.rejectedByDeviceId } : {}),
@@ -432,6 +613,19 @@ export async function registerOrSyncDeviceSession(
     };
 
     await setDoc(doc(db, 'users', profile.userId, 'sessions', meta.deviceId), sessionDoc);
+
+    if (shouldWriteAdminLoginLog) {
+      await writeSecurityAuditLog(
+        'admin_device_login',
+        `Super Admin signed in from ${meta.deviceLabel} (${meta.runtimeType.toUpperCase()})${
+          approxLoc ? ` near ${approxLoc}` : ''
+        } via Fast Alert mode.`,
+        profile.email || SECURITY_SUPER_ADMIN_EMAIL,
+        meta.deviceId,
+        meta.deviceLabel
+      );
+    }
+
     return sessionDoc;
   } catch (err) {
     console.warn('Device session sync warning:', err, path);
@@ -466,8 +660,10 @@ export async function approveDeviceSession(
   approverDeviceId: string,
   profile?: UserProfile | null
 ): Promise<void> {
-  const [globalSettings, sessionsSnap] = await Promise.all([
+  const isVerifiedAdmin = isCurrentAuthVerifiedAdmin(userId);
+  const [globalSettings, adminSettings, sessionsSnap] = await Promise.all([
     getGlobalSecuritySettings(),
+    isVerifiedAdmin ? getAdminSecuritySettings() : Promise.resolve(DEFAULT_ADMIN_SECURITY_SETTINGS),
     getDocs(collection(db, 'users', userId, 'sessions')),
   ]);
 
@@ -475,7 +671,10 @@ export async function approveDeviceSession(
   const target = sessions.find((s) => s.deviceId === targetDeviceId);
   if (!target) return;
 
-  const limits = resolveEffectiveDeviceLimits(profile, globalSettings);
+  const limits = resolveEffectiveDeviceLimits(profile, globalSettings, {
+    isVerifiedAdmin,
+    adminSettings,
+  });
   const categoryLimit = target.platformCategory === 'mobile' ? limits.mobile : limits.web;
 
   if (categoryLimit === 0) {
@@ -508,6 +707,8 @@ export async function approveDeviceSession(
       if (excess <= 0) break;
       await updateDoc(doc(db, 'users', userId, 'sessions', oldSess.deviceId), {
         status: 'logged_out',
+        isPrimaryTrusted: false,
+        adminAlertPending: false,
         lastActiveAt: new Date().toISOString(),
       });
       excess -= 1;
@@ -516,6 +717,8 @@ export async function approveDeviceSession(
 
   await updateDoc(doc(db, 'users', userId, 'sessions', targetDeviceId), {
     status: 'active',
+    isPrimaryTrusted: true,
+    adminAlertPending: false,
     limitBlocked: false,
     approvedByDeviceId: approverDeviceId,
     rejectedByDeviceId: null,
@@ -532,8 +735,46 @@ export async function rejectDeviceSession(
 ): Promise<void> {
   await updateDoc(doc(db, 'users', userId, 'sessions', targetDeviceId), {
     status: 'rejected',
+    isPrimaryTrusted: false,
+    adminAlertPending: false,
     rejectedByDeviceId: rejectorDeviceId,
     rejectionNote: (note || 'Blocked by account owner').slice(0, 300),
+    lastActiveAt: new Date().toISOString(),
+  });
+}
+
+export async function acknowledgeAdminLoginSession(
+  userId: string,
+  targetDeviceId: string,
+  trustDevice: boolean
+): Promise<void> {
+  const ref = doc(db, 'users', userId, 'sessions', targetDeviceId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const data = snap.data() as DeviceSession;
+  if (data.status !== 'active') return;
+  await updateDoc(ref, {
+    adminAlertPending: false,
+    ...(trustDevice ? { isPrimaryTrusted: true } : {}),
+    lastActiveAt: new Date().toISOString(),
+  });
+}
+
+export async function toggleDeviceTrust(
+  userId: string,
+  targetDeviceId: string,
+  trusted: boolean
+): Promise<void> {
+  const ref = doc(db, 'users', userId, 'sessions', targetDeviceId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const data = snap.data() as DeviceSession;
+  if (data.status !== 'active') {
+    throw new Error('Only active device sessions can be marked as trusted.');
+  }
+  await updateDoc(ref, {
+    isPrimaryTrusted: trusted,
+    adminAlertPending: false,
     lastActiveAt: new Date().toISOString(),
   });
 }
@@ -544,6 +785,8 @@ export async function retryRejectedDeviceSession(
 ): Promise<void> {
   await updateDoc(doc(db, 'users', userId, 'sessions', deviceId), {
     status: 'pending_approval',
+    isPrimaryTrusted: false,
+    adminAlertPending: false,
     rejectedByDeviceId: null,
     rejectionNote: null,
     loginAt: new Date().toISOString(),
@@ -561,11 +804,68 @@ export async function markDeviceSessionLoggedOut(
     if (!snap.exists()) return;
     await updateDoc(ref, {
       status: 'logged_out',
+      adminAlertPending: false,
       lastActiveAt: new Date().toISOString(),
     });
   } catch {
     // non-blocking cleanup on sign-out
   }
+}
+
+export async function remoteLogoutDeviceSession(
+  userId: string,
+  targetDeviceId: string
+): Promise<void> {
+  const ref = doc(db, 'users', userId, 'sessions', targetDeviceId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  await updateDoc(ref, {
+    status: 'logged_out',
+    isPrimaryTrusted: false,
+    adminAlertPending: false,
+    lastActiveAt: new Date().toISOString(),
+  });
+}
+
+export async function logoutAllOtherDeviceSessions(
+  userId: string,
+  currentDeviceId: string
+): Promise<number> {
+  const snap = await getDocs(collection(db, 'users', userId, 'sessions'));
+  const nowIso = new Date().toISOString();
+  let count = 0;
+  for (const d of snap.docs) {
+    const sess = d.data() as DeviceSession;
+    if (
+      sess.deviceId !== currentDeviceId &&
+      (sess.status === 'active' || sess.status === 'pending_approval')
+    ) {
+      await updateDoc(doc(db, 'users', userId, 'sessions', sess.deviceId), {
+        status: 'logged_out',
+        isPrimaryTrusted: false,
+        adminAlertPending: false,
+        lastActiveAt: nowIso,
+      });
+      count += 1;
+    }
+  }
+  return count;
+}
+
+export async function removeSessionHistoryRecord(
+  userId: string,
+  targetDeviceId: string,
+  currentDeviceId: string
+): Promise<void> {
+  if (targetDeviceId === currentDeviceId) return;
+  const ref = doc(db, 'users', userId, 'sessions', targetDeviceId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const data = snap.data() as DeviceSession;
+  if (data.status === 'active') {
+    throw new Error('Sign out or block an active session before deleting its history.');
+  }
+  await deleteDoc(ref);
 }
 
 export async function adminForceLogoutDeviceSession(
@@ -578,6 +878,8 @@ export async function adminForceLogoutDeviceSession(
   try {
     await updateDoc(doc(db, 'users', targetUserId, 'sessions', deviceId), {
       status: 'logged_out',
+      isPrimaryTrusted: false,
+      adminAlertPending: false,
       rejectedByDeviceId: 'admin',
       rejectionNote: 'Force logged out by Super Admin',
       lastActiveAt: new Date().toISOString(),

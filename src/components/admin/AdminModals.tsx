@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { isSuperAdmin } from '../../services/adminService';
 import type {
+  AdminSecuritySettings,
   AppSecuritySettings,
   DeviceSession,
   PasswordRecoveryRequest,
@@ -56,6 +57,7 @@ interface AdminModalsProps {
   onUpdatePhoneLimit?: (phoneHash: string, newLimit: number, displayPhone?: string) => void;
   onSelectDossierUser?: (u: UserProfile) => void;
   globalSecuritySettings?: AppSecuritySettings;
+  adminSecuritySettings?: AdminSecuritySettings;
   dossierDeviceSessions?: DeviceSession[];
   securityActionBusy?: boolean;
   onUnlockPhoneCooldown?: (u: UserProfile) => void;
@@ -112,6 +114,7 @@ export function AdminModals({
   onUpdatePhoneLimit,
   onSelectDossierUser,
   globalSecuritySettings,
+  adminSecuritySettings,
   dossierDeviceSessions = [],
   securityActionBusy = false,
   onUnlockPhoneCooldown,
@@ -142,25 +145,39 @@ export function AdminModals({
 }: AdminModalsProps) {
   const [userMobileLimitDraft, setUserMobileLimitDraft] = useState<string>('');
   const [userWebLimitDraft, setUserWebLimitDraft] = useState<string>('');
+  const isDossierSuperAdmin = Boolean(
+    selectedDossierUser && isSuperAdmin(selectedDossierUser.email)
+  );
 
   useEffect(() => {
     if (!selectedDossierUser) return;
+    const isAdminTarget = isSuperAdmin(selectedDossierUser.email);
+    const defaultM = isAdminTarget
+      ? (adminSecuritySettings?.adminMobileLimit ?? 5)
+      : (globalSecuritySettings?.defaultMobileLimit ?? 1);
+    const defaultW = isAdminTarget
+      ? (adminSecuritySettings?.adminWebLimit ?? 5)
+      : (globalSecuritySettings?.defaultWebLimit ?? 1);
+
     setUserMobileLimitDraft(
       typeof selectedDossierUser.deviceLimits?.mobile === 'number'
         ? String(selectedDossierUser.deviceLimits.mobile)
-        : String(globalSecuritySettings?.defaultMobileLimit ?? 1)
+        : String(defaultM)
     );
     setUserWebLimitDraft(
       typeof selectedDossierUser.deviceLimits?.web === 'number'
         ? String(selectedDossierUser.deviceLimits.web)
-        : String(globalSecuritySettings?.defaultWebLimit ?? 1)
+        : String(defaultW)
     );
   }, [
     selectedDossierUser?.userId,
+    selectedDossierUser?.email,
     selectedDossierUser?.deviceLimits?.mobile,
     selectedDossierUser?.deviceLimits?.web,
     globalSecuritySettings?.defaultMobileLimit,
     globalSecuritySettings?.defaultWebLimit,
+    adminSecuritySettings?.adminMobileLimit,
+    adminSecuritySettings?.adminWebLimit,
   ]);
 
   return (
@@ -643,13 +660,18 @@ export function AdminModals({
             {/* Per-User Device Limits & Live Sessions Control */}
             <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl space-y-3 text-xs">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <Smartphone className="w-4 h-4 text-sky-400" />
                   <span className="text-xs font-bold text-white">
                     {language === 'bn'
                       ? 'ডিভাইস সীমা ও সক্রিয় সেশন নিয়ন্ত্রণ'
                       : 'Per-User Device Limit & Active Sessions'}
                   </span>
+                  {isDossierSuperAdmin && (
+                    <span className="px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[9px] font-bold">
+                      {language === 'bn' ? 'সুপার অ্যাডমিন নীতি' : 'Super Admin Policy'}
+                    </span>
+                  )}
                 </div>
                 {selectedDossierUser.deviceLimits && onUpdateUserDeviceLimits && (
                   <button
@@ -659,7 +681,15 @@ export function AdminModals({
                     className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-semibold cursor-pointer inline-flex items-center gap-1"
                   >
                     <RotateCcw className="w-2.5 h-2.5" />
-                    <span>{language === 'bn' ? 'গ্লোবাল ডিফল্ট' : 'Reset Default'}</span>
+                    <span>
+                      {isDossierSuperAdmin
+                        ? language === 'bn'
+                          ? 'অ্যাডমিন ডিফল্ট'
+                          : 'Admin Default'
+                        : language === 'bn'
+                        ? 'গ্লোবাল ডিফল্ট'
+                        : 'Reset Default'}
+                    </span>
                   </button>
                 )}
               </div>
@@ -755,6 +785,16 @@ export function AdminModals({
                             >
                               {sess.status.toUpperCase()}
                             </span>
+                            {sess.isPrimaryTrusted && sess.status === 'active' && (
+                              <span className="px-1.5 py-0.2 rounded bg-sky-500/15 text-sky-300 border border-sky-500/25 text-[9px] font-bold">
+                                TRUSTED
+                              </span>
+                            )}
+                            {sess.adminAlertPending && sess.status === 'active' && (
+                              <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold">
+                                NEW ALERT
+                              </span>
+                            )}
                           </div>
                           <div className="text-[10px] text-slate-400 truncate mt-0.5">
                             {sess.approxLocation ? `${sess.approxLocation} · ` : ''}

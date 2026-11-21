@@ -400,22 +400,57 @@ export function ChatArea({
 
   const handleSaveEdit = async () => {
     if (!editingMessage || !editText.trim()) return;
-    await editChatMessage(chat.id, editingMessage.id, editText);
-    setEditingMessage(null);
-    setEditText('');
+    setSendError(null);
+    try {
+      await editChatMessage(chat.id, editingMessage.id, editText);
+      setEditingMessage(null);
+      setEditText('');
+    } catch (err) {
+      setSendError(
+        err instanceof Error
+          ? err.message
+          : language === 'bn'
+          ? 'মেসেজ এডিট করা যায়নি।'
+          : 'Failed to edit message.'
+      );
+    }
   };
 
   const confirmDeleteMessage = async () => {
     if (!messageToDelete || ghostUser) return;
-    await deleteChatMessage(chat.id, messageToDelete.id);
-    setMessageToDelete(null);
+    setSendError(null);
+    try {
+      await deleteChatMessage(chat.id, messageToDelete.id);
+      setMessageToDelete(null);
+    } catch (err) {
+      setMessageToDelete(null);
+      setSendError(
+        err instanceof Error
+          ? err.message
+          : language === 'bn'
+          ? 'মেসেজ ডিলিট করা যায়নি।'
+          : 'Failed to delete message.'
+      );
+    }
   };
 
   const handleDeleteConversation = async () => {
     if (!user || ghostUser) return;
-    await deleteChatRoom(chat.id, user.userId);
-    setShowDeleteChatConfirm(false);
-    onBack();
+    setSendError(null);
+    try {
+      await deleteChatRoom(chat.id, user.userId);
+      setShowDeleteChatConfirm(false);
+      onBack();
+    } catch (err) {
+      setShowDeleteChatConfirm(false);
+      setSendError(
+        err instanceof Error
+          ? err.message
+          : language === 'bn'
+          ? 'চ্যাট ডিলিট করা যায়নি।'
+          : 'Failed to delete conversation.'
+      );
+    }
   };
 
   const filteredMessages = useMemo(() => {

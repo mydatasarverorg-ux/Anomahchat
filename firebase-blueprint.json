@@ -1021,6 +1021,7 @@
         "approxLocation": { "type": "string", "maxLength": 120 },
         "status": { "type": "string", "enum": ["active", "pending_approval", "rejected", "logged_out"] },
         "isPrimaryTrusted": { "type": "boolean" },
+        "adminAlertPending": { "type": "boolean" },
         "limitBlocked": { "type": "boolean" },
         "approvedByDeviceId": { "type": "string", "maxLength": 128 },
         "rejectedByDeviceId": { "type": "string", "maxLength": 128 },
@@ -1043,6 +1044,19 @@
         "updatedBy": { "type": "string", "maxLength": 150 }
       },
       "required": ["defaultMobileLimit", "defaultWebLimit", "requireApprovalForNewDevice", "updatedAt", "updatedBy"]
+    },
+    "AdminSecuritySettings": {
+      "title": "AdminSecuritySettings",
+      "description": "Dedicated Super Admin device limit and login security mode settings readable and writable strictly by verified Super Admin",
+      "type": "object",
+      "properties": {
+        "adminMobileLimit": { "type": "number" },
+        "adminWebLimit": { "type": "number" },
+        "adminLoginMode": { "type": "string", "enum": ["fast_alert", "strict_approval"] },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedBy": { "type": "string", "maxLength": 150 }
+      },
+      "required": ["adminMobileLimit", "adminWebLimit", "adminLoginMode", "updatedAt", "updatedBy"]
     }
   },
   "firestore": {
@@ -1120,7 +1134,7 @@
     },
     "/app_settings/{settingId}": {
       "schema": "AppSecuritySettings",
-      "description": "Global Admin-managed security policies including per-category device limits"
+      "description": "Global Admin-managed security policies (/app_settings/security) and Super Admin-only device login configuration (/app_settings/admin_security)"
     }
   }
 }

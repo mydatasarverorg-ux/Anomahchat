@@ -80,6 +80,8 @@ import {
   Send,
   CheckCircle2,
   Mail,
+  ShieldAlert,
+  EyeOff,
 } from 'lucide-react';
 
 function AppLockGate() {
@@ -420,6 +422,11 @@ function ChatDashboard({ user }: { user: UserProfile }) {
     firebaseUser,
     resendVerificationEmail,
     pendingApprovalSessions,
+    adminAlertSessions,
+    acknowledgeAdminAlert,
+    blockDeviceWithVerification,
+    hasPasswordProvider,
+    sendPasswordReset,
   } = useAuth();
   const { t, language } = useLanguage();
   const [chats, setChats] = useState<ChatRoom[]>([]);
@@ -430,6 +437,7 @@ function ChatDashboard({ user }: { user: UserProfile }) {
   const [showRequests, setShowRequests] = useState(false);
   const [showQrScanner, setShowQrScanner] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [profileInitialTab, setProfileInitialTab] = useState<'profile' | 'security'>('profile');
   const [showShare, setShowShare] = useState(false);
   const [shareGroupTarget, setShareGroupTarget] = useState<ChatRoom | null>(null);
   const [connectPreviewTarget, setConnectPreviewTarget] = useState<DeepLinkTarget | null>(null);
@@ -437,6 +445,17 @@ function ChatDashboard({ user }: { user: UserProfile }) {
   const [callSession, setCallSession] = useState<CallSession | null>(null);
   const [dismissVerifyBanner, setDismissVerifyBanner] = useState(false);
   const [verificationSentNote, setVerificationSentNote] = useState<string | null>(null);
+  const [alertBlockTargetId, setAlertBlockTargetId] = useState<string | null>(null);
+  const [alertPassword, setAlertPassword] = useState('');
+  const [alertShowPassword, setAlertShowPassword] = useState(false);
+  const [alertFallbackSecret, setAlertFallbackSecret] = useState('');
+  const [showAlertFallbackBox, setShowAlertFallbackBox] = useState(false);
+  const [alertBusy, setAlertBusy] = useState(false);
+  const [alertError, setAlertError] = useState<string | null>(null);
+  const [blockedAlertNotice, setBlockedAlertNotice] = useState<{
+    deviceLabel: string;
+    resetSent: boolean;
+  } | null>(null);
   const [notifPermission, setNotifPermission] = useState<AppNotificationPermission>(() =>
     getAppNotificationPermission()
   );
@@ -933,6 +952,314 @@ function ChatDashboard({ user }: { user: UserProfile }) {
         </div>
       )}
 
+      {/* Super Admin Fast-Alert Login Notification Banner */}
+      {!ghostUser && blockedAlertNotice && (
+        <div className="bg-amber-950/90 border-b border-amber-500/40 text-amber-100 px-4 py-2.5 text-xs flex flex-wrap items-center justify-between gap-2 z-40">
+          <div className="flex items-center gap-2 min-w-0">
+            <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              {language === 'bn'
+                ? `"${blockedAlertNotice.deviceLabel}" ব্লক ও লগ-আউট করা হয়েছে। নিরাপত্তার স্বার্থে এখনই পাসওয়ার্ড পরিবর্তন বা রিসেট করে নিন।`
+                : `"${blockedAlertNotice.deviceLabel}" has been blocked and logged out. Please change or reset your password immediately.`}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {hasPasswordProvider && user.email && (
+              <button
+                type="button"
+                disabled={alertBusy || blockedAlertNotice.resetSent}
+                onClick={async () => {
+                  setAlertBusy(true);
+                  setAlertError(null);
+                  try {
+                    await sendPasswordReset(user.email);
+                    setBlockedAlertNotice((prev) => (prev ? { ...prev, resetSent: true } : null));
+                  } catch (err) {
+                    setAlertError(
+                      err instanceof Error
+                        ? err.message
+                        : language === 'bn'
+                        ? 'রিসেট ইমেইল পাঠানো যায়নি।'
+                        : 'Failed to send password reset email.'
+                    );
+                  } finally {
+                    setAlertBusy(false);
+                  }
+                }}
+                className="px-3 py-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-60 text-white rounded-lg font-bold text-[11px] cursor-pointer transition inline-flex items-center gap-1"
+              >
+                <Mail className="w-3 h-3" />
+                <span>
+                  {blockedAlertNotice.resetSent
+                    ? language === 'bn'
+                      ? 'রিসেট ইমেইল পাঠানো হয়েছে'
+                      : 'Reset Email Sent'
+                    : language === 'bn'
+                    ? 'পাসওয়ার্ড রিসেট লিংক পাঠান'
+                    : 'Send Password Reset'}
+                </span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setBlockedAlertNotice(null)}
+              className="p-1 text-amber-300 hover:text-white cursor-pointer"
+              aria-label={t('close')}
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!ghostUser && !blockedAlertNotice && adminAlertSessions.length > 0 && (() => {
+        const sess = adminAlertSessions[0];
+        const isVerifying = alertBlockTargetId === sess.deviceId;
+        return (
+          <div className="bg-sky-950/90 border-b border-sky-500/40 text-sky-100 px-4 py-2.5 text-xs space-y-2 z-40">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <ShieldAlert className="w-4 h-4 text-sky-400 shrink-0" />
+                <span className="leading-snug">
+                  {language === 'bn'
+                    ? `নতুন ডিভাইস থেকে অ্যাডমিন লগইন হয়েছে: ${sess.deviceLabel}${
+                        sess.approxLocation ? ` · ${sess.approxLocation}` : ''
+                      } · ${new Date(sess.loginAt || sess.createdAt).toLocaleTimeString('bn-BD', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}`
+                    : `New Super Admin login detected: ${sess.deviceLabel}${
+                        sess.approxLocation ? ` · ${sess.approxLocation}` : ''
+                      } · ${new Date(sess.loginAt || sess.createdAt).toLocaleTimeString('en-US', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}`}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                <button
+                  type="button"
+                  disabled={alertBusy}
+                  onClick={async () => {
+                    setAlertBusy(true);
+                    setAlertError(null);
+                    try {
+                      await acknowledgeAdminAlert(sess.deviceId, true);
+                      setAlertBlockTargetId(null);
+                      setAlertPassword('');
+                      setAlertFallbackSecret('');
+                      setShowAlertFallbackBox(false);
+                    } catch (err) {
+                      setAlertError(
+                        err instanceof Error
+                          ? err.message
+                          : language === 'bn'
+                          ? 'অ্যালার্ট আপডেট করা যায়নি।'
+                          : 'Could not acknowledge login alert.'
+                      );
+                    } finally {
+                      setAlertBusy(false);
+                    }
+                  }}
+                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg font-bold text-[11px] cursor-pointer transition"
+                >
+                  {language === 'bn' ? 'হ্যাঁ, আমিই (বিশ্বস্ত)' : "Yes, It's Me (Trust)"}
+                </button>
+                <button
+                  type="button"
+                  disabled={alertBusy}
+                  onClick={() => {
+                    setAlertError(null);
+                    setAlertPassword('');
+                    setAlertFallbackSecret('');
+                    setShowAlertFallbackBox(false);
+                    setAlertBlockTargetId(isVerifying ? null : sess.deviceId);
+                  }}
+                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-lg font-bold text-[11px] cursor-pointer transition"
+                >
+                  {language === 'bn' ? 'এটা আমি না · ব্লক করুন' : 'Not Me · Block'}
+                </button>
+              </div>
+            </div>
+
+            {isVerifying && (
+              <div className="p-2.5 bg-slate-950/80 border border-rose-500/35 rounded-xl space-y-2">
+                {alertError && (
+                  <div className="text-[11px] text-rose-300 bg-rose-500/15 border border-rose-500/30 rounded-lg px-2.5 py-1.5">
+                    {alertError}
+                  </div>
+                )}
+                {hasPasswordProvider ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative flex-1 min-w-[180px]">
+                      <input
+                        type={alertShowPassword ? 'text' : 'password'}
+                        value={alertPassword}
+                        onChange={(e) => setAlertPassword(e.target.value)}
+                        placeholder={
+                          language === 'bn'
+                            ? 'ব্লক নিশ্চিত করতে আপনার অ্যাকাউন্ট পাসওয়ার্ড দিন'
+                            : 'Enter account password to confirm block'
+                        }
+                        className="w-full px-3 py-1.5 pr-8 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-rose-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setAlertShowPassword((p) => !p)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                      >
+                        {alertShowPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={alertBusy || !alertPassword.trim()}
+                      onClick={async () => {
+                        setAlertBusy(true);
+                        setAlertError(null);
+                        try {
+                          await blockDeviceWithVerification(sess.deviceId, {
+                            password: alertPassword,
+                          });
+                          setAlertBlockTargetId(null);
+                          setAlertPassword('');
+                          setBlockedAlertNotice({
+                            deviceLabel: sess.deviceLabel,
+                            resetSent: false,
+                          });
+                        } catch (err) {
+                          setAlertError(err instanceof Error ? err.message : 'Verification failed.');
+                        } finally {
+                          setAlertBusy(false);
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-lg text-[11px] font-bold cursor-pointer"
+                    >
+                      {language === 'bn' ? 'যাচাই করে ব্লক করুন' : 'Verify & Block'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAlertBlockTargetId(null);
+                        setAlertPassword('');
+                        setAlertError(null);
+                      }}
+                      className="px-2.5 py-1.5 bg-slate-800 text-slate-300 rounded-lg text-[11px] cursor-pointer"
+                    >
+                      {t('cancel')}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={alertBusy}
+                        onClick={async () => {
+                          setAlertBusy(true);
+                          setAlertError(null);
+                          try {
+                            await blockDeviceWithVerification(sess.deviceId, { verifyGoogle: true });
+                            setAlertBlockTargetId(null);
+                            setShowAlertFallbackBox(false);
+                            setAlertFallbackSecret('');
+                            setBlockedAlertNotice({
+                              deviceLabel: sess.deviceLabel,
+                              resetSent: false,
+                            });
+                          } catch (err) {
+                            setAlertError(err instanceof Error ? err.message : 'Verification failed.');
+                          } finally {
+                            setAlertBusy(false);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-lg text-[11px] font-bold cursor-pointer"
+                      >
+                        {language === 'bn' ? 'Google যাচাই করে ব্লক' : 'Verify with Google & Block'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={alertBusy}
+                        onClick={() => {
+                          setAlertError(null);
+                          setShowAlertFallbackBox((prev) => !prev);
+                        }}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-semibold cursor-pointer"
+                      >
+                        {user.hasAppLockPin
+                          ? language === 'bn'
+                            ? 'পিন দিয়ে নিশ্চিত করুন'
+                            : 'Verify with App-Lock PIN'
+                          : language === 'bn'
+                          ? 'পপআপ না খুললে ইমেইল নিশ্চিত করুন'
+                          : 'Confirm with Account Email'}
+                      </button>
+                    </div>
+                    {showAlertFallbackBox && (
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <input
+                          type={user.hasAppLockPin ? 'password' : 'email'}
+                          inputMode={user.hasAppLockPin ? 'numeric' : 'email'}
+                          maxLength={user.hasAppLockPin ? 6 : 150}
+                          value={alertFallbackSecret}
+                          onChange={(e) =>
+                            setAlertFallbackSecret(
+                              user.hasAppLockPin
+                                ? e.target.value.replace(/\D/g, '').slice(0, 6)
+                                : e.target.value
+                            )
+                          }
+                          placeholder={
+                            user.hasAppLockPin
+                              ? language === 'bn'
+                                ? '৪-৬ ডিজিটের অ্যাপ-লক পিন'
+                                : '4-6 digit App-Lock PIN'
+                              : language === 'bn'
+                              ? 'আপনার অ্যাকাউন্ট ইমেইল লিখুন'
+                              : 'Type your account email'
+                          }
+                          className="flex-1 min-w-[180px] px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-rose-500"
+                        />
+                        <button
+                          type="button"
+                          disabled={alertBusy || !alertFallbackSecret.trim()}
+                          onClick={async () => {
+                            setAlertBusy(true);
+                            setAlertError(null);
+                            try {
+                              await blockDeviceWithVerification(sess.deviceId, {
+                                allowPopupFallback: true,
+                                ...(user.hasAppLockPin
+                                  ? { appLockPin: alertFallbackSecret }
+                                  : { confirmedEmail: alertFallbackSecret }),
+                              });
+                              setAlertBlockTargetId(null);
+                              setShowAlertFallbackBox(false);
+                              setAlertFallbackSecret('');
+                              setBlockedAlertNotice({
+                                deviceLabel: sess.deviceLabel,
+                                resetSent: false,
+                              });
+                            } catch (err) {
+                              setAlertError(err instanceof Error ? err.message : 'Verification failed.');
+                            } finally {
+                              setAlertBusy(false);
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-lg text-[11px] font-bold cursor-pointer"
+                        >
+                          {language === 'bn' ? 'নিশ্চিত ও ব্লক' : 'Confirm & Block'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       <div className="flex-1 flex overflow-hidden relative">
       {/* Sidebar: Visible on desktop, or on mobile when no active chat is opened */}
       <div
@@ -949,7 +1276,14 @@ function ChatDashboard({ user }: { user: UserProfile }) {
             if (found) setSelectedChat(found);
           }}
           onOpenNewChat={() => setShowNewChat(true)}
-          onOpenProfile={() => setShowProfile(true)}
+          onOpenProfile={() => {
+            setProfileInitialTab('profile');
+            setShowProfile(true);
+          }}
+          onOpenDevices={() => {
+            setProfileInitialTab('security');
+            setShowProfile(true);
+          }}
           onOpenShare={() => {
             setShareGroupTarget(null);
             setShowShare(true);
@@ -1103,24 +1437,28 @@ function ChatDashboard({ user }: { user: UserProfile }) {
           friendships={friendships}
           onClose={() => setShowRequests(false)}
           onOpenChatWithFriend={async (friend, callType) => {
-            const room = await getOrCreateDirectChat(user, friend);
-            setActiveChatId(room.id);
-            setSelectedChat(room);
-            if (callType) {
-              setCallSession({
-                active: true,
-                chatId: room.id,
-                role: 'caller',
-                type: callType,
-                partnerId: friend.userId,
-                recipientName: friend.displayName,
-                recipientPhoto:
-                  friend.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${friend.userId}`,
-                status: 'calling',
-                isMuted: false,
-                isVideoOff: callType === 'audio',
-                durationSeconds: 0,
-              });
+            try {
+              const room = await getOrCreateDirectChat(user, friend);
+              setActiveChatId(room.id);
+              setSelectedChat(room);
+              if (callType) {
+                setCallSession({
+                  active: true,
+                  chatId: room.id,
+                  role: 'caller',
+                  type: callType,
+                  partnerId: friend.userId,
+                  recipientName: friend.displayName,
+                  recipientPhoto:
+                    friend.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${friend.userId}`,
+                  status: 'calling',
+                  isMuted: false,
+                  isVideoOff: callType === 'audio',
+                  durationSeconds: 0,
+                });
+              }
+            } catch (err) {
+              console.warn('Could not open friend chat:', err);
             }
           }}
           onOpenQrScanner={() => setShowQrScanner(true)}
@@ -1159,6 +1497,7 @@ function ChatDashboard({ user }: { user: UserProfile }) {
       {showProfile && (
         <ProfileModal
           key={user.userId}
+          initialTab={profileInitialTab}
           onClose={() => setShowProfile(false)}
           onOpenAdmin={() => {
             if (canAccessAdminPanel) setShowAdmin(true);
@@ -1177,7 +1516,10 @@ function ChatDashboard({ user }: { user: UserProfile }) {
             setShowShare(false);
             setShareGroupTarget(null);
           }}
-          onOpenProfileSettings={() => setShowProfile(true)}
+          onOpenProfileSettings={() => {
+            setProfileInitialTab('profile');
+            setShowProfile(true);
+          }}
           onOpenQrScanner={() => setShowQrScanner(true)}
         />
       )}
@@ -1196,19 +1538,20 @@ function ChatDashboard({ user }: { user: UserProfile }) {
 }
 
 function MainContent() {
-  const { user, loading, isAppLocked, currentDeviceSession } = useAuth();
+  const { user, loading, isAppLocked, currentDeviceSession, signOutUser } = useAuth();
   const { t, language } = useLanguage();
   const [pendingRelease, setPendingRelease] = useState<AppReleaseInfo | null>(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [androidAppChooserTarget, setAndroidAppChooserTarget] = useState<DeepLinkTarget | null>(null);
 
-  const isDeviceQuarantined = Boolean(
+  const isDevicePendingOrRejected = Boolean(
     currentDeviceSession &&
       (currentDeviceSession.status === 'pending_approval' ||
         currentDeviceSession.status === 'rejected')
   );
+  const isDeviceApproved = currentDeviceSession?.status === 'active';
   const isDashboardActive = Boolean(
-    user && !user.isBanned && !isAppLocked && !isDeviceQuarantined && user.phoneNumber?.trim()
+    user && !user.isBanned && !isAppLocked && isDeviceApproved && user.phoneNumber?.trim()
   );
 
   // Capture ?chat= / ?group= deep-link even if user passes through Login / AppLock / PhoneGate first
@@ -1302,8 +1645,32 @@ function MainContent() {
         <BannedScreen />
       ) : isAppLocked ? (
         <AppLockGate />
-      ) : isDeviceQuarantined ? (
+      ) : isDevicePendingOrRejected ? (
         <PendingDeviceGate />
+      ) : !isDeviceApproved ? (
+        <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-center space-y-4">
+          <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
+          <div className="space-y-1 max-w-xs">
+            <p className="text-xs font-semibold text-white">
+              {language === 'bn'
+                ? 'ডিভাইস সেশন নিরাপত্তা যাচাই করা হচ্ছে...'
+                : 'Verifying device session security...'}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              {language === 'bn'
+                ? 'নেটওয়ার্ক ধীর হলে অনুগ্রহ করে অপেক্ষা করুন অথবা লগআউট করে পুনরায় ঢুকুন।'
+                : 'Please wait a moment, or sign out and sign in again if your connection was interrupted.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={signOutUser}
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>{language === 'bn' ? 'লগআউট করুন' : 'Sign Out'}</span>
+          </button>
+        </div>
       ) : !user.phoneNumber?.trim() ? (
         <PhoneNumberGate />
       ) : (

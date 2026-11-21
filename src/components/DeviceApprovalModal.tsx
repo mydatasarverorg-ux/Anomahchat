@@ -34,6 +34,8 @@ export function DeviceApprovalModal() {
   const [step, setStep] = useState<'choice' | 'verify_reject' | 'rejected_done'>('choice');
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showFallbackForm, setShowFallbackForm] = useState(false);
+  const [fallbackSecret, setFallbackSecret] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resetEmailSent, setResetEmailSent] = useState(false);
@@ -46,6 +48,8 @@ export function DeviceApprovalModal() {
     if (step !== 'rejected_done') {
       setStep('choice');
       setPasswordInput('');
+      setShowFallbackForm(false);
+      setFallbackSecret('');
       setError(null);
       setResetEmailSent(false);
     }
@@ -120,9 +124,18 @@ export function DeviceApprovalModal() {
     try {
       await rejectPendingDevice(
         targetSession.deviceId,
-        verifyWithPopup ? { verifyGoogle: true } : undefined
+        verifyWithPopup
+          ? { verifyGoogle: true }
+          : {
+              allowPopupFallback: true,
+              ...(user?.hasAppLockPin
+                ? { appLockPin: fallbackSecret }
+                : { confirmedEmail: fallbackSecret }),
+            }
       );
       setBlockedDeviceLabel(targetSession.deviceLabel);
+      setFallbackSecret('');
+      setShowFallbackForm(false);
       setStep('rejected_done');
     } catch (err) {
       setError(
@@ -415,13 +428,56 @@ export function DeviceApprovalModal() {
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => handleConfirmRejectGoogle(false)}
+                  onClick={() => {
+                    setError(null);
+                    setShowFallbackForm((prev) => !prev);
+                  }}
                   className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-[11px] font-semibold cursor-pointer transition"
                 >
-                  {language === 'bn'
-                    ? 'পপআপ না খুললে সরাসরি নিশ্চিত করে ব্লক করুন'
-                    : 'Confirm & Block Directly (If Popup Blocked)'}
+                  {user?.hasAppLockPin
+                    ? language === 'bn'
+                      ? 'পপআপ না খুললে অ্যাপ-লক পিন দিয়ে ব্লক করুন'
+                      : 'Verify with App-Lock PIN (If Popup Blocked)'
+                    : language === 'bn'
+                    ? 'পপআপ না খুললে ইমেইল নিশ্চিত করে ব্লক করুন'
+                    : 'Confirm with Account Email (If Popup Blocked)'}
                 </button>
+
+                {showFallbackForm && (
+                  <div className="p-2.5 bg-slate-950/90 border border-slate-800 rounded-xl space-y-2">
+                    <input
+                      type={user?.hasAppLockPin ? 'password' : 'email'}
+                      inputMode={user?.hasAppLockPin ? 'numeric' : 'email'}
+                      maxLength={user?.hasAppLockPin ? 6 : 150}
+                      value={fallbackSecret}
+                      onChange={(e) =>
+                        setFallbackSecret(
+                          user?.hasAppLockPin
+                            ? e.target.value.replace(/\D/g, '').slice(0, 6)
+                            : e.target.value
+                        )
+                      }
+                      placeholder={
+                        user?.hasAppLockPin
+                          ? language === 'bn'
+                            ? 'আপনার ৪-৬ ডিজিটের অ্যাপ-লক পিন'
+                            : 'Enter 4-6 digit App-Lock PIN'
+                          : language === 'bn'
+                          ? 'আপনার অ্যাকাউন্ট ইমেইল লিখুন'
+                          : 'Type your account email'
+                      }
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500"
+                    />
+                    <button
+                      type="button"
+                      disabled={busy || !fallbackSecret.trim()}
+                      onClick={() => handleConfirmRejectGoogle(false)}
+                      className="w-full py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold cursor-pointer transition"
+                    >
+                      {language === 'bn' ? 'যাচাই ও ব্লক করুন' : 'Verify & Block Device'}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </>

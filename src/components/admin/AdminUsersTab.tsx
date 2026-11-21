@@ -15,7 +15,12 @@ import {
   Smartphone,
 } from 'lucide-react';
 import { SUPER_ADMIN_EMAIL } from '../../services/adminService';
-import type { AppSecuritySettings, PhoneRegistryEntry, UserProfile } from '../../types/chat';
+import type {
+  AdminSecuritySettings,
+  AppSecuritySettings,
+  PhoneRegistryEntry,
+  UserProfile,
+} from '../../types/chat';
 
 interface AdminUsersTabProps {
   t: (key: any) => string;
@@ -36,11 +41,17 @@ interface AdminUsersTabProps {
   userPhoneRegistryMap?: Record<string, PhoneRegistryEntry>;
   allUsersList?: UserProfile[];
   globalSecuritySettings?: AppSecuritySettings;
+  adminSecuritySettings?: AdminSecuritySettings;
   securityPolicyBusy?: boolean;
   onSaveGlobalSecuritySettings?: (settings: {
     defaultMobileLimit: number;
     defaultWebLimit: number;
     requireApprovalForNewDevice: boolean;
+  }) => Promise<void>;
+  onSaveAdminSecuritySettings?: (settings: {
+    adminMobileLimit: number;
+    adminWebLimit: number;
+    adminLoginMode: 'fast_alert' | 'strict_approval';
   }) => Promise<void>;
 }
 
@@ -63,8 +74,10 @@ export function AdminUsersTab({
   userPhoneRegistryMap,
   allUsersList = [],
   globalSecuritySettings,
+  adminSecuritySettings,
   securityPolicyBusy = false,
   onSaveGlobalSecuritySettings,
+  onSaveAdminSecuritySettings,
 }: AdminUsersTabProps) {
   const [mobileLimitDraft, setMobileLimitDraft] = useState<string>(
     String(globalSecuritySettings?.defaultMobileLimit ?? 1)
@@ -74,6 +87,16 @@ export function AdminUsersTab({
   );
   const [requireApprovalDraft, setRequireApprovalDraft] = useState<boolean>(
     globalSecuritySettings?.requireApprovalForNewDevice !== false
+  );
+
+  const [adminMobileDraft, setAdminMobileDraft] = useState<string>(
+    String(adminSecuritySettings?.adminMobileLimit ?? 5)
+  );
+  const [adminWebDraft, setAdminWebDraft] = useState<string>(
+    String(adminSecuritySettings?.adminWebLimit ?? 5)
+  );
+  const [adminLoginModeDraft, setAdminLoginModeDraft] = useState<'fast_alert' | 'strict_approval'>(
+    adminSecuritySettings?.adminLoginMode || 'fast_alert'
   );
 
   useEffect(() => {
@@ -87,6 +110,17 @@ export function AdminUsersTab({
     globalSecuritySettings?.requireApprovalForNewDevice,
   ]);
 
+  useEffect(() => {
+    if (!adminSecuritySettings) return;
+    setAdminMobileDraft(String(adminSecuritySettings.adminMobileLimit));
+    setAdminWebDraft(String(adminSecuritySettings.adminWebLimit));
+    setAdminLoginModeDraft(adminSecuritySettings.adminLoginMode);
+  }, [
+    adminSecuritySettings?.adminMobileLimit,
+    adminSecuritySettings?.adminWebLimit,
+    adminSecuritySettings?.adminLoginMode,
+  ]);
+
   return (
     <div className="space-y-4 max-w-5xl mx-auto">
       {/* Global Device Limit & Login Approval Control */}
@@ -98,13 +132,13 @@ export function AdminUsersTab({
               <div>
                 <h4 className="text-xs font-bold text-white">
                   {language === 'bn'
-                    ? 'গ্লোবাল ডিভাইস সীমা ও নতুন লগইন অনুমোদন নিয়ন্ত্রণ'
-                    : 'Global Device Limits & New Login Approval Policy'}
+                    ? 'গ্লোবাল ডিভাইস সীমা ও নতুন লগইন অনুমোদন নিয়ন্ত্রণ (সকল সাধারণ ইউজার)'
+                    : 'Global Device Limits & New Login Approval Policy (Regular Users)'}
                 </h4>
                 <p className="text-[10px] text-slate-400">
                   {language === 'bn'
-                    ? 'প্রতি ইউজার সর্বোচ্চ কয়টি মোবাইল (APK/মোবাইল ব্রাউজার) ও ওয়েব/পিসি চালাতে পারবে তা এখান থেকে নিয়ন্ত্রণ করুন।'
-                    : 'Control how many Mobile (APK/Mobile Browser) and PC/Web sessions each account can run concurrently.'}
+                    ? 'সকল সাধারণ ইউজার একসাথে সর্বোচ্চ কয়টি মোবাইল ও ওয়েব/পিসি চালাতে পারবে তা এখান থেকে নিয়ন্ত্রণ করুন (সুপার অ্যাডমিনের নিজস্ব নীতি নিচে আলাদা)।'
+                    : 'Applies to all regular user accounts. Super Admin uses its dedicated security policy below.'}
                 </p>
               </div>
             </div>
@@ -177,9 +211,117 @@ export function AdminUsersTab({
               className="py-1.5 px-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition shadow"
             >
               <Save className="w-3.5 h-3.5" />
-              <span>{language === 'bn' ? 'নীতি সেভ করুন' : 'Save Policy'}</span>
+              <span>{language === 'bn' ? 'গ্লোবাল নীতি সেভ' : 'Save Global Policy'}</span>
             </button>
           </div>
+
+          {/* Super Admin Dedicated Policy Sub-Panel */}
+          {adminSecuritySettings && onSaveAdminSecuritySettings && (
+            <div className="pt-3 mt-1 border-t border-slate-800/90 space-y-2.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-sky-400 shrink-0" />
+                  <div>
+                    <h5 className="text-xs font-bold text-sky-200 flex items-center gap-1.5 flex-wrap">
+                      <span>
+                        {language === 'bn'
+                          ? 'সুপার অ্যাডমিনের নিজস্ব নিরাপত্তা নীতি'
+                          : 'Super Admin Dedicated Security Policy'}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 font-mono text-[9px]">
+                        {SUPER_ADMIN_EMAIL}
+                      </span>
+                    </h5>
+                    <p className="text-[10px] text-slate-400">
+                      {language === 'bn'
+                        ? 'এমুলেটর/পিসি ও ফোনে কাজ করার জন্য আলাদা কোটা এবং "Fast Alert" মোড—নতুন ডিভাইসে সাথে সাথে ঢুকতে পারবেন ও মেইন ডিভাইসে সতর্কতা যাবে।'
+                        : 'Separate quota for admin workflows plus Fast Alert mode so emulators/browsers sign in immediately with live security alerts.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-end text-xs">
+                <div className="space-y-1">
+                  <label className="text-[10px] text-slate-400 font-semibold flex items-center gap-1">
+                    <Smartphone className="w-3 h-3 text-emerald-400" />
+                    <span>{language === 'bn' ? 'অ্যাডমিন মোবাইল সীমা' : 'Admin Mobile Limit'}</span>
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    value={adminMobileDraft}
+                    onChange={(e) => setAdminMobileDraft(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] text-slate-400 font-semibold flex items-center gap-1">
+                    <Laptop className="w-3 h-3 text-sky-400" />
+                    <span>{language === 'bn' ? 'অ্যাডমিন ওয়েব/পিসি সীমা' : 'Admin Web/PC Limit'}</span>
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    value={adminWebDraft}
+                    onChange={(e) => setAdminWebDraft(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] text-slate-400 font-semibold block">
+                    {language === 'bn' ? 'অ্যাডমিন লগইন মোড' : 'Admin Login Mode'}
+                  </label>
+                  <div className="grid grid-cols-2 gap-1 p-0.5 bg-slate-900 border border-slate-700 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setAdminLoginModeDraft('fast_alert')}
+                      className={`py-1 px-1.5 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                        adminLoginModeDraft === 'fast_alert'
+                          ? 'bg-sky-600 text-white shadow'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {language === 'bn' ? 'ফাস্ট অ্যালার্ট' : 'Fast Alert'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdminLoginModeDraft('strict_approval')}
+                      className={`py-1 px-1.5 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                        adminLoginModeDraft === 'strict_approval'
+                          ? 'bg-amber-600 text-white shadow'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {language === 'bn' ? 'কঠোর লক' : 'Strict Lock'}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={securityPolicyBusy}
+                  onClick={() => {
+                    const am = Math.min(20, Math.max(0, Number(adminMobileDraft) || 0));
+                    const aw = Math.min(20, Math.max(0, Number(adminWebDraft) || 0));
+                    onSaveAdminSecuritySettings({
+                      adminMobileLimit: am,
+                      adminWebLimit: aw,
+                      adminLoginMode: adminLoginModeDraft,
+                    });
+                  }}
+                  className="py-1.5 px-3 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition shadow"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{language === 'bn' ? 'অ্যাডমিন নীতি সেভ' : 'Save Admin Policy'}</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -341,20 +483,30 @@ export function AdminUsersTab({
                                 {language === 'bn' ? 'প্রথম:' : '1st:'} {u.initialPhoneNumber}
                               </span>
                             )}
-                            {u.deviceLimits &&
-                              (typeof u.deviceLimits.mobile === 'number' ||
-                                typeof u.deviceLimits.web === 'number') && (
+                            {(() => {
+                              const isCardSuperAdmin = u.email === SUPER_ADMIN_EMAIL;
+                              const hasCustomLimits = Boolean(
+                                u.deviceLimits &&
+                                  (typeof u.deviceLimits.mobile === 'number' ||
+                                    typeof u.deviceLimits.web === 'number')
+                              );
+                              if (!hasCustomLimits && !isCardSuperAdmin) return null;
+                              const mLimit =
+                                u.deviceLimits?.mobile ??
+                                (isCardSuperAdmin
+                                  ? (adminSecuritySettings?.adminMobileLimit ?? 5)
+                                  : (globalSecuritySettings?.defaultMobileLimit ?? 1));
+                              const wLimit =
+                                u.deviceLimits?.web ??
+                                (isCardSuperAdmin
+                                  ? (adminSecuritySettings?.adminWebLimit ?? 5)
+                                  : (globalSecuritySettings?.defaultWebLimit ?? 1));
+                              return (
                                 <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-sky-500/10 text-sky-300 border border-sky-500/25">
-                                  {language === 'bn' ? 'ডিভাইস:' : 'Dev:'} M:
-                                  {u.deviceLimits.mobile ??
-                                    globalSecuritySettings?.defaultMobileLimit ??
-                                    1}{' '}
-                                  W:
-                                  {u.deviceLimits.web ??
-                                    globalSecuritySettings?.defaultWebLimit ??
-                                    1}
+                                  {language === 'bn' ? 'ডিভাইস:' : 'Dev:'} M:{mLimit} W:{wLimit}
                                 </span>
-                              )}
+                              );
+                            })()}
                           </span>
                           {reg && linkedLabels.length > 1 && (
                             <span className="text-[9px] text-slate-400 leading-tight">

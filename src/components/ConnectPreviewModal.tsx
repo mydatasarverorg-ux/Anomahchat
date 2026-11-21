@@ -390,9 +390,18 @@ export function ConnectPreviewModal({
                     disabled={busy}
                     onClick={async () => {
                       setBusy(true);
+                      setErrorMsg(null);
                       try {
                         await unblockUser(friendshipState.id);
                         setFriendshipState(null);
+                      } catch (err) {
+                        setErrorMsg(
+                          err instanceof Error
+                            ? err.message
+                            : language === 'bn'
+                            ? 'আনব্লক করা যায়নি।'
+                            : 'Failed to unblock user.'
+                        );
                       } finally {
                         setBusy(false);
                       }
@@ -427,9 +436,18 @@ export function ConnectPreviewModal({
                       disabled={busy}
                       onClick={async () => {
                         setBusy(true);
+                        setErrorMsg(null);
                         try {
                           await declineFriendRequest(friendshipState.id);
                           onClose();
+                        } catch (err) {
+                          setErrorMsg(
+                            err instanceof Error
+                              ? err.message
+                              : language === 'bn'
+                              ? 'রিকোয়েস্ট প্রত্যাখ্যান করা যায়নি।'
+                              : 'Failed to decline request.'
+                          );
                         } finally {
                           setBusy(false);
                         }
@@ -464,10 +482,19 @@ export function ConnectPreviewModal({
                     disabled={busy}
                     onClick={async () => {
                       setBusy(true);
+                      setErrorMsg(null);
                       try {
                         await cancelFriendRequest(friendshipState.id);
                         setFriendshipState(null);
                         setAutoSentBanner(false);
+                      } catch (err) {
+                        setErrorMsg(
+                          err instanceof Error
+                            ? err.message
+                            : language === 'bn'
+                            ? 'রিকোয়েস্ট বাতিল করা যায়নি।'
+                            : 'Failed to cancel request.'
+                        );
                       } finally {
                         setBusy(false);
                       }

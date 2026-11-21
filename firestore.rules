@@ -481,7 +481,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'deviceId', 'userId', 'platformCategory', 'runtimeType', 'deviceLabel',
-          'approxLocation', 'status', 'isPrimaryTrusted', 'limitBlocked',
+          'approxLocation', 'status', 'isPrimaryTrusted', 'adminAlertPending', 'limitBlocked',
           'approvedByDeviceId', 'rejectedByDeviceId', 'rejectionNote',
           'createdAt', 'lastActiveAt', 'loginAt'
         ])
@@ -495,6 +495,7 @@ service cloud.firestore {
         && data.lastActiveAt is string && data.lastActiveAt.size() <= 64
         && (!('approxLocation' in data) || data.approxLocation == null || (data.approxLocation is string && data.approxLocation.size() <= 120))
         && (!('isPrimaryTrusted' in data) || data.isPrimaryTrusted is bool)
+        && (!('adminAlertPending' in data) || data.adminAlertPending is bool)
         && (!('limitBlocked' in data) || data.limitBlocked is bool)
         && (!('approvedByDeviceId' in data) || data.approvedByDeviceId == null || (data.approvedByDeviceId is string && data.approvedByDeviceId.size() <= 128))
         && (!('rejectedByDeviceId' in data) || data.rejectedByDeviceId == null || (data.rejectedByDeviceId is string && data.rejectedByDeviceId.size() <= 128))
@@ -512,6 +513,20 @@ service cloud.firestore {
         && data.defaultMobileLimit is number && data.defaultMobileLimit >= 0 && data.defaultMobileLimit <= 20
         && data.defaultWebLimit is number && data.defaultWebLimit >= 0 && data.defaultWebLimit <= 20
         && data.requireApprovalForNewDevice is bool
+        && data.updatedAt is string && data.updatedAt.size() <= 64
+        && data.updatedBy is string && data.updatedBy.size() <= 150;
+    }
+
+    function isValidAdminSecuritySettings(data) {
+      return data.keys().hasAll([
+          'adminMobileLimit', 'adminWebLimit', 'adminLoginMode', 'updatedAt', 'updatedBy'
+        ])
+        && data.keys().hasOnly([
+          'adminMobileLimit', 'adminWebLimit', 'adminLoginMode', 'updatedAt', 'updatedBy'
+        ])
+        && data.adminMobileLimit is number && data.adminMobileLimit >= 0 && data.adminMobileLimit <= 20
+        && data.adminWebLimit is number && data.adminWebLimit >= 0 && data.adminWebLimit <= 20
+        && data.adminLoginMode in ['fast_alert', 'strict_approval']
         && data.updatedAt is string && data.updatedAt.size() <= 64
         && data.updatedBy is string && data.updatedBy.size() <= 150;
     }
@@ -772,9 +787,14 @@ service cloud.firestore {
           incoming().createdAt == existing().createdAt && (
           // Action 1: Group admin updates public metadata or member count
           (request.auth.uid in existing().adminIds || request.auth.uid == existing().creatorId) ||
-          // Action 2: Direct-join user increments memberCount atomically during self-join
+          // Action 2: Direct-join user increments memberCount atomically by +1 during self-join
           (existing().status == 'active' &&
             existing().joinPolicy == 'direct' &&
+            incoming().memberCount == existing().memberCount + 1 &&
+            exists(/databases/$(database)/documents/chats/$(groupId)) &&
+            request.auth.uid in get(/databases/$(database)/documents/chats/$(groupId)).data.participantIds &&
+            (!('bannedUserIds' in get(/databases/$(database)/documents/chats/$(groupId)).data) ||
+              !(request.auth.uid in get(/databases/$(database)/documents/chats/$(groupId)).data.bannedUserIds)) &&
             incoming().diff(existing()).affectedKeys().hasOnly(['memberCount', 'updatedAt']))
         ))
       );
@@ -1123,11 +1143,14 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(updateId);
     }
 
-    // 8A. Global Security & Device Quota Settings (Signed-in read, Super Admin write only)
+    // 8A. Global Security & Device Quota Settings (Signed-in read for 'security'; Super Admin only for 'admin_security')
     match /app_settings/{settingId} {
-      allow get: if isValidId(settingId) && isSignedIn() && (settingId == 'security' || isAdmin());
+      allow get: if isValidId(settingId) && (isAdmin() || (isSignedIn() && settingId == 'security'));
       allow list: if isAdmin();
-      allow create, update: if isAdmin() && isValidId(settingId) && settingId == 'security' && isValidSecuritySettings(incoming());
+      allow create, update: if isAdmin() && isValidId(settingId) && (
+        (settingId == 'security' && isValidSecuritySettings(incoming())) ||
+        (settingId == 'admin_security' && isValidAdminSecuritySettings(incoming()))
+      );
       allow delete: if isAdmin() && isValidId(settingId);
     }
 

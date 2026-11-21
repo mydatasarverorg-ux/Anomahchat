@@ -37,6 +37,9 @@ import {
   Laptop,
   LogOut,
   Clock,
+  ShieldCheck,
+  ShieldAlert,
+  Mail,
 } from 'lucide-react';
 import {
   isDeviceAccountSaved,
@@ -56,10 +59,12 @@ export function ProfileModal({
   onClose,
   onOpenAdmin,
   onOpenShareQR,
+  initialTab = 'profile',
 }: {
   onClose: () => void;
   onOpenAdmin?: () => void;
   onOpenShareQR?: () => void;
+  initialTab?: 'profile' | 'security' | 'appearance' | 'language' | 'danger';
 }) {
   const {
     user,
@@ -77,13 +82,20 @@ export function ProfileModal({
     userSessions,
     currentDeviceId,
     deviceLimitsSummary,
+    isVerifiedSuperAdmin,
+    approvePendingDevice,
+    acknowledgeAdminAlert,
+    blockDeviceWithVerification,
+    trustOrUntrustDevice,
+    logoutAllOtherDevices,
+    removeDeviceHistoryItem,
     forceLogoutOtherDevice,
   } = useAuth();
 
   const { language, setLanguage, t } = useLanguage();
   const isUserSuperAdmin = isSuperAdmin(user?.email) && Boolean(firebaseUser?.emailVerified);
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'appearance' | 'language' | 'danger'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'appearance' | 'language' | 'danger'>(initialTab);
 
   // Profile Fields
   const [displayName, setDisplayName] = useState(user?.displayName || '');
@@ -115,6 +127,20 @@ export function ProfileModal({
   const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
   const [confirmDeleteModal, setConfirmDeleteModal] = useState(false);
 
+  // Connected Devices Control State
+  const [confirmLogoutAllOther, setConfirmLogoutAllOther] = useState(false);
+  const [deviceBusyId, setDeviceBusyId] = useState<string | null>(null);
+  const [blockTargetDeviceId, setBlockTargetDeviceId] = useState<string | null>(null);
+  const [blockVerifyPassword, setBlockVerifyPassword] = useState('');
+  const [blockShowPassword, setBlockShowPassword] = useState(false);
+  const [showBlockFallbackInput, setShowBlockFallbackInput] = useState(false);
+  const [blockFallbackSecret, setBlockFallbackSecret] = useState('');
+  const [blockVerifyError, setBlockVerifyError] = useState<string | null>(null);
+  const [blockedWarningBanner, setBlockedWarningBanner] = useState<{
+    label: string;
+    resetSent: boolean;
+  } | null>(null);
+
   // Status & Messages
   const [saving, setSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -124,6 +150,10 @@ export function ProfileModal({
   const [notifPermission, setNotifPermission] = useState<AppNotificationPermission>(() =>
     getAppNotificationPermission()
   );
+
+  useEffect(() => {
+    if (initialTab) setActiveTab(initialTab);
+  }, [initialTab]);
 
   useEffect(() => {
     const syncNotif = () => setNotifPermission(getAppNotificationPermission());
@@ -227,6 +257,11 @@ export function ProfileModal({
       setConfirmPassword('');
       setShowCurrentPassword(false);
       setShowNewPassword(false);
+      setBlockTargetDeviceId(null);
+      setBlockVerifyPassword('');
+      setBlockShowPassword(false);
+      setBlockVerifyError(null);
+      setConfirmLogoutAllOther(false);
     }
   }, [activeTab]);
 
@@ -537,7 +572,7 @@ export function ProfileModal({
                   <button
                     key={item.id}
                     onClick={() => setActiveTab(item.id as typeof activeTab)}
-                    className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer shrink-0 sm:w-full text-left ${
+                    className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer shrink-0 sm:w-full text-left ${
                       isActive
                         ? isItemDanger
                           ? 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
@@ -551,8 +586,22 @@ export function ProfileModal({
                         : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
                     }`}
                   >
-                    <Icon className="w-4 h-4 shrink-0" />
-                    <span className="truncate">{item.label}</span>
+                    <span className="flex items-center gap-2.5 min-w-0">
+                      <Icon className="w-4 h-4 shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                    </span>
+                    {item.id === 'security' && (
+                      <span className="flex items-center gap-1 shrink-0">
+                        {userSessions.some(
+                          (s) =>
+                            s.status === 'pending_approval' ||
+                            (s.status === 'active' && s.adminAlertPending)
+                        ) && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />}
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 font-mono">
+                          {userSessions.filter((s) => s.status === 'active').length}
+                        </span>
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -1044,26 +1093,159 @@ export function ProfileModal({
                   {/* Connected Devices & Active Sessions */}
                   <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-2xl space-y-3">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <Smartphone className="w-3.5 h-3.5 text-sky-400" />
-                        <span>
+                        <h4 className="text-xs font-bold text-white uppercase tracking-wider">
                           {language === 'bn' ? 'সংযুক্ত ডিভাইসসমূহ' : 'Connected Devices'}
+                        </h4>
+                        {isVerifiedSuperAdmin && (
+                          <span className="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[9px] font-bold">
+                            {language === 'bn' ? 'সুপার অ্যাডমিন নীতি' : 'Super Admin Policy'}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-300">
+                          {(() => {
+                            const activeM = userSessions.filter(
+                              (s) => s.status === 'active' && s.platformCategory === 'mobile'
+                            ).length;
+                            const activeW = userSessions.filter(
+                              (s) => s.status === 'active' && s.platformCategory === 'web'
+                            ).length;
+                            return language === 'bn'
+                              ? `মোবাইল: ${activeM}/${deviceLimitsSummary.mobile} · ওয়েব/পিসি: ${activeW}/${deviceLimitsSummary.web}`
+                              : `Mobile: ${activeM}/${deviceLimitsSummary.mobile} · Web/PC: ${activeW}/${deviceLimitsSummary.web}`;
+                          })()}
                         </span>
-                      </h4>
-                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-300">
-                        {(() => {
-                          const activeM = userSessions.filter(
-                            (s) => s.status === 'active' && s.platformCategory === 'mobile'
-                          ).length;
-                          const activeW = userSessions.filter(
-                            (s) => s.status === 'active' && s.platformCategory === 'web'
-                          ).length;
-                          return language === 'bn'
-                            ? `মোবাইল: ${activeM}/${deviceLimitsSummary.mobile} · ওয়েব/পিসি: ${activeW}/${deviceLimitsSummary.web}`
-                            : `Mobile: ${activeM}/${deviceLimitsSummary.mobile} · Web/PC: ${activeW}/${deviceLimitsSummary.web}`;
-                        })()}
-                      </span>
+
+                        {userSessions.some(
+                          (s) =>
+                            s.deviceId !== currentDeviceId &&
+                            (s.status === 'active' || s.status === 'pending_approval')
+                        ) &&
+                          !confirmLogoutAllOther && (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmLogoutAllOther(true)}
+                              className="px-2 py-0.5 rounded-md bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-[10px] font-bold cursor-pointer transition"
+                            >
+                              {language === 'bn' ? 'অন্য সব ডিভাইস লগ-আউট' : 'Log Out All Other'}
+                            </button>
+                          )}
+                      </div>
                     </div>
+
+                    {confirmLogoutAllOther && (
+                      <div className="p-2.5 bg-rose-950/35 border border-rose-500/35 rounded-xl flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                        <span className="text-rose-200">
+                          {language === 'bn'
+                            ? 'এই ডিভাইস বাদে বাকি সব সক্রিয় ডিভাইস থেকে লগ-আউট করতে চান?'
+                            : 'Sign out every other device except this one?'}
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setConfirmLogoutAllOther(false)}
+                            className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 hover:text-white text-[10px] font-semibold cursor-pointer"
+                          >
+                            {t('cancel')}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={deviceBusyId === '__all__'}
+                            onClick={async () => {
+                              setDeviceBusyId('__all__');
+                              setErrorMessage(null);
+                              try {
+                                const count = await logoutAllOtherDevices();
+                                setConfirmLogoutAllOther(false);
+                                setSuccessMessage(
+                                  language === 'bn'
+                                    ? `${count}টি অন্য ডিভাইস থেকে লগ-আউট সম্পন্ন হয়েছে।`
+                                    : `Signed out ${count} other device(s).`
+                                );
+                                setTimeout(() => setSuccessMessage(null), 3500);
+                              } catch (err) {
+                                setErrorMessage(
+                                  err instanceof Error
+                                    ? err.message
+                                    : language === 'bn'
+                                    ? 'অন্যান্য ডিভাইস লগ-আউট করা যায়নি।'
+                                    : 'Failed to log out other devices.'
+                                );
+                              } finally {
+                                setDeviceBusyId(null);
+                              }
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-[10px] font-bold cursor-pointer"
+                          >
+                            {language === 'bn' ? 'হ্যাঁ, সব লগ-আউট' : 'Confirm Log Out'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {blockedWarningBanner && (
+                      <div className="p-3 bg-amber-950/40 border border-amber-500/40 rounded-xl space-y-2 text-[11px]">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2 text-amber-200">
+                            <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                            <span>
+                              {language === 'bn'
+                                ? `"${blockedWarningBanner.label}" ব্লক ও লগ-আউট হয়েছে। আপনার অ্যাকাউন্ট সম্পূর্ণ সুরক্ষিত রাখতে এখনই পাসওয়ার্ড পরিবর্তন করুন।`
+                                : `"${blockedWarningBanner.label}" has been blocked and signed out. Change or reset your password immediately to keep your account safe.`}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setBlockedWarningBanner(null)}
+                            className="text-slate-400 hover:text-white cursor-pointer shrink-0"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        {hasPasswordProvider && user?.email && (
+                          <button
+                            type="button"
+                            disabled={saving || blockedWarningBanner.resetSent}
+                            onClick={async () => {
+                              setSaving(true);
+                              setErrorMessage(null);
+                              try {
+                                await sendPasswordReset(user.email);
+                                setBlockedWarningBanner((prev) =>
+                                  prev ? { ...prev, resetSent: true } : null
+                                );
+                              } catch (err) {
+                                setErrorMessage(
+                                  err instanceof Error
+                                    ? err.message
+                                    : language === 'bn'
+                                    ? 'পাসওয়ার্ড রিসেট ইমেইল পাঠানো যায়নি।'
+                                    : 'Failed to send password reset email.'
+                                );
+                              } finally {
+                                setSaving(false);
+                              }
+                            }}
+                            className="px-3 py-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-60 text-white rounded-lg text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Mail className="w-3 h-3" />
+                            <span>
+                              {blockedWarningBanner.resetSent
+                                ? language === 'bn'
+                                  ? 'পাসওয়ার্ড রিসেট ইমেইল পাঠানো হয়েছে!'
+                                  : 'Password Reset Email Sent!'
+                                : language === 'bn'
+                                ? 'ইমেইলে পাসওয়ার্ড রিসেট লিংক পাঠান'
+                                : 'Send Password Reset Email'}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    )}
 
                     <div className="space-y-2">
                       {userSessions
@@ -1076,64 +1258,425 @@ export function ProfileModal({
                               : sess.runtimeType === 'pwa'
                               ? 'PWA'
                               : 'Web';
+                          const isVerifyingThisBlock = blockTargetDeviceId === sess.deviceId;
+                          const isBusy = deviceBusyId === sess.deviceId;
+
                           return (
                             <div
                               key={sess.deviceId}
-                              className="p-2.5 bg-slate-900/90 border border-slate-800 rounded-xl flex items-center justify-between gap-2 text-xs"
+                              className="p-2.5 bg-slate-900/90 border border-slate-800 rounded-xl space-y-2 text-xs"
                             >
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-sky-400 shrink-0">
-                                  {sess.platformCategory === 'mobile' ? (
-                                    <Smartphone className="w-4 h-4" />
-                                  ) : (
-                                    <Laptop className="w-4 h-4" />
-                                  )}
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className="font-semibold text-white truncate max-w-[170px]">
-                                      {sess.deviceLabel}
-                                    </span>
-                                    <span className="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700 text-[9px] font-mono text-slate-300">
-                                      {rtLabel}
-                                    </span>
-                                    {isCurrent && (
-                                      <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-bold">
-                                        {language === 'bn' ? 'এই ডিভাইস' : 'THIS DEVICE'}
-                                      </span>
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-start gap-2.5 min-w-0">
+                                  <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-sky-400 shrink-0 mt-0.5">
+                                    {sess.platformCategory === 'mobile' ? (
+                                      <Smartphone className="w-4 h-4" />
+                                    ) : (
+                                      <Laptop className="w-4 h-4" />
                                     )}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-semibold text-white truncate max-w-[160px]">
+                                        {sess.deviceLabel}
+                                      </span>
+                                      <span className="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700 text-[9px] font-mono text-slate-300">
+                                        {rtLabel}
+                                      </span>
+                                      {isCurrent && (
+                                        <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-bold">
+                                          {language === 'bn' ? 'এই ডিভাইস' : 'THIS DEVICE'}
+                                        </span>
+                                      )}
+                                      {sess.isPrimaryTrusted && sess.status === 'active' && (
+                                        <span className="px-1.5 py-0.2 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[9px] font-bold">
+                                          {language === 'bn' ? 'বিশ্বস্ত' : 'TRUSTED'}
+                                        </span>
+                                      )}
+                                      {sess.status === 'pending_approval' && (
+                                        <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold">
+                                          {language === 'bn' ? 'অপেক্ষমাণ' : 'PENDING'}
+                                        </span>
+                                      )}
+                                      {sess.adminAlertPending && sess.status === 'active' && (
+                                        <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/35 text-[9px] font-bold">
+                                          {language === 'bn' ? 'নতুন সতর্কতা' : 'NEW ALERT'}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                                      {sess.approxLocation ? `${sess.approxLocation} · ` : ''}
+                                      {language === 'bn' ? 'সক্রিয়: ' : 'Active: '}
+                                      {new Date(sess.lastActiveAt || sess.createdAt).toLocaleString(
+                                        language === 'bn' ? 'bn-BD' : 'en-US'
+                                      )}
+                                    </div>
+                                    {sess.loginAt && (
+                                      <div className="text-[10px] text-slate-500 truncate">
+                                        {language === 'bn' ? 'লগইন: ' : 'Login: '}
+                                        {new Date(sess.loginAt).toLocaleString(
+                                          language === 'bn' ? 'bn-BD' : 'en-US'
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {!isCurrent && (
+                                  <div className="flex items-center gap-1 flex-wrap justify-end shrink-0">
                                     {sess.status === 'pending_approval' && (
-                                      <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold">
-                                        {language === 'bn' ? 'অপেক্ষমাণ' : 'PENDING'}
-                                      </span>
+                                      <button
+                                        type="button"
+                                        disabled={isBusy}
+                                        onClick={async () => {
+                                          setDeviceBusyId(sess.deviceId);
+                                          setErrorMessage(null);
+                                          try {
+                                            await approvePendingDevice(sess.deviceId);
+                                            setSuccessMessage(
+                                              language === 'bn'
+                                                ? `${sess.deviceLabel} অনুমোদন দেওয়া হয়েছে।`
+                                                : `Approved ${sess.deviceLabel}.`
+                                            );
+                                            setTimeout(() => setSuccessMessage(null), 3000);
+                                          } catch (err) {
+                                            setErrorMessage(
+                                              err instanceof Error
+                                                ? err.message
+                                                : language === 'bn'
+                                                ? 'ডিভাইস অনুমোদন দেওয়া যায়নি।'
+                                                : 'Failed to approve device.'
+                                            );
+                                          } finally {
+                                            setDeviceBusyId(null);
+                                          }
+                                        }}
+                                        className="px-2 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/35 rounded-lg text-[10px] font-bold cursor-pointer flex items-center gap-1"
+                                      >
+                                        <ShieldCheck className="w-3 h-3" />
+                                        <span>{language === 'bn' ? 'অনুমোদন' : 'Approve'}</span>
+                                      </button>
                                     )}
-                                  </div>
-                                  <div className="text-[10px] text-slate-400 truncate">
-                                    {sess.approxLocation ? `${sess.approxLocation} · ` : ''}
-                                    {new Date(sess.lastActiveAt || sess.createdAt).toLocaleString(
-                                      language === 'bn' ? 'bn-BD' : 'en-US'
+
+                                    {sess.status === 'active' && sess.adminAlertPending && (
+                                      <button
+                                        type="button"
+                                        disabled={isBusy}
+                                        onClick={async () => {
+                                          setDeviceBusyId(sess.deviceId);
+                                          setErrorMessage(null);
+                                          try {
+                                            await acknowledgeAdminAlert(sess.deviceId, true);
+                                          } catch (err) {
+                                            setErrorMessage(
+                                              err instanceof Error
+                                                ? err.message
+                                                : language === 'bn'
+                                                ? 'ডিভাইস বিশ্বস্ত হিসেবে সংরক্ষণ করা যায়নি।'
+                                                : 'Failed to trust device alert.'
+                                            );
+                                          } finally {
+                                            setDeviceBusyId(null);
+                                          }
+                                        }}
+                                        className="px-2 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/35 rounded-lg text-[10px] font-bold cursor-pointer flex items-center gap-1"
+                                      >
+                                        <ShieldCheck className="w-3 h-3" />
+                                        <span>{language === 'bn' ? 'আমিই (বিশ্বস্ত)' : 'Trust'}</span>
+                                      </button>
                                     )}
+
+                                    {sess.status === 'active' && !sess.adminAlertPending && (
+                                      <button
+                                        type="button"
+                                        disabled={isBusy}
+                                        onClick={async () => {
+                                          setDeviceBusyId(sess.deviceId);
+                                          setErrorMessage(null);
+                                          try {
+                                            await trustOrUntrustDevice(
+                                              sess.deviceId,
+                                              !sess.isPrimaryTrusted
+                                            );
+                                          } catch (err) {
+                                            setErrorMessage(
+                                              err instanceof Error
+                                                ? err.message
+                                                : language === 'bn'
+                                                ? 'ডিভাইস ট্রাস্ট পরিবর্তন করা যায়নি।'
+                                                : 'Failed to update device trust status.'
+                                            );
+                                          } finally {
+                                            setDeviceBusyId(null);
+                                          }
+                                        }}
+                                        className={`px-2 py-1 rounded-lg text-[10px] font-semibold border cursor-pointer transition ${
+                                          sess.isPrimaryTrusted
+                                            ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                                            : 'bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border-sky-500/30'
+                                        }`}
+                                      >
+                                        {sess.isPrimaryTrusted
+                                          ? language === 'bn'
+                                            ? 'আনট্রাস্ট'
+                                            : 'Untrust'
+                                          : language === 'bn'
+                                          ? 'বিশ্বস্ত করুন'
+                                          : 'Trust'}
+                                      </button>
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      disabled={isBusy}
+                                      onClick={async () => {
+                                        setDeviceBusyId(sess.deviceId);
+                                        setErrorMessage(null);
+                                        try {
+                                          await forceLogoutOtherDevice(sess.deviceId);
+                                          setSuccessMessage(
+                                            language === 'bn'
+                                              ? `${sess.deviceLabel} থেকে সেশন লগ-আউট করা হয়েছে।`
+                                              : `Logged out ${sess.deviceLabel}.`
+                                          );
+                                          setTimeout(() => setSuccessMessage(null), 3000);
+                                        } catch (err) {
+                                          setErrorMessage(
+                                            err instanceof Error
+                                              ? err.message
+                                              : language === 'bn'
+                                              ? 'ডিভাইসটি লগ-আউট করা যায়নি।'
+                                              : 'Failed to log out device.'
+                                          );
+                                        } finally {
+                                          setDeviceBusyId(null);
+                                        }
+                                      }}
+                                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[10px] font-semibold cursor-pointer flex items-center gap-1"
+                                    >
+                                      <LogOut className="w-3 h-3" />
+                                      <span>{language === 'bn' ? 'লগআউট' : 'Logout'}</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      disabled={isBusy}
+                                      onClick={() => {
+                                        setBlockVerifyError(null);
+                                        setBlockVerifyPassword('');
+                                        setShowBlockFallbackInput(false);
+                                        setBlockFallbackSecret('');
+                                        setBlockTargetDeviceId(
+                                          isVerifyingThisBlock ? null : sess.deviceId
+                                        );
+                                      }}
+                                      className="px-2 py-1 bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 rounded-lg text-[10px] font-bold cursor-pointer flex items-center gap-1"
+                                    >
+                                      <ShieldAlert className="w-3 h-3" />
+                                      <span>{language === 'bn' ? 'আমি না · ব্লক' : 'Not Me · Block'}</span>
+                                    </button>
                                   </div>
-                                </div>
+                                )}
                               </div>
 
-                              {!isCurrent && (
-                                <button
-                                  type="button"
-                                  onClick={async () => {
-                                    await forceLogoutOtherDevice(sess.deviceId);
-                                    setSuccessMessage(
-                                      language === 'bn'
-                                        ? `${sess.deviceLabel} থেকে সেশন লগ-আউট করা হয়েছে।`
-                                        : `Logged out ${sess.deviceLabel}.`
-                                    );
-                                    setTimeout(() => setSuccessMessage(null), 3000);
-                                  }}
-                                  className="px-2.5 py-1 bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 rounded-lg text-[10px] font-bold cursor-pointer flex items-center gap-1 shrink-0"
-                                >
-                                  <LogOut className="w-3 h-3" />
-                                  <span>{language === 'bn' ? 'লগআউট' : 'Logout'}</span>
-                                </button>
+                              {/* Inline Owner Verification before Blocking */}
+                              {!isCurrent && isVerifyingThisBlock && (
+                                <div className="p-2.5 bg-rose-950/30 border border-rose-500/30 rounded-xl space-y-2">
+                                  <div className="flex items-center justify-between gap-2 text-[11px] text-rose-200 font-semibold">
+                                    <span>
+                                      {language === 'bn'
+                                        ? 'মালিকানা যাচাই করে অচেনা ডিভাইসটি ব্লক করুন:'
+                                        : 'Verify ownership before blocking this device:'}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setBlockTargetDeviceId(null);
+                                        setBlockVerifyPassword('');
+                                        setShowBlockFallbackInput(false);
+                                        setBlockFallbackSecret('');
+                                        setBlockVerifyError(null);
+                                      }}
+                                      className="text-slate-400 hover:text-white cursor-pointer"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+
+                                  {blockVerifyError && (
+                                    <div className="p-2 rounded-lg bg-rose-500/15 border border-rose-500/30 text-[10px] text-rose-300">
+                                      {blockVerifyError}
+                                    </div>
+                                  )}
+
+                                  {hasPasswordProvider ? (
+                                    <div className="flex flex-col sm:flex-row gap-2">
+                                      <div className="relative flex-1">
+                                        <input
+                                          type={blockShowPassword ? 'text' : 'password'}
+                                          value={blockVerifyPassword}
+                                          onChange={(e) => setBlockVerifyPassword(e.target.value)}
+                                          placeholder={
+                                            language === 'bn'
+                                              ? 'বর্তমান অ্যাকাউন্ট পাসওয়ার্ড দিন'
+                                              : 'Enter account password'
+                                          }
+                                          className="w-full px-3 py-1.5 pr-8 bg-slate-950 border border-slate-700 rounded-lg text-[11px] text-white focus:outline-none focus:border-rose-500"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => setBlockShowPassword((p) => !p)}
+                                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                                        >
+                                          {blockShowPassword ? (
+                                            <EyeOff className="w-3 h-3" />
+                                          ) : (
+                                            <Eye className="w-3 h-3" />
+                                          )}
+                                        </button>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        disabled={isBusy || !blockVerifyPassword.trim()}
+                                        onClick={async () => {
+                                          setDeviceBusyId(sess.deviceId);
+                                          setBlockVerifyError(null);
+                                          try {
+                                            await blockDeviceWithVerification(sess.deviceId, {
+                                              password: blockVerifyPassword,
+                                            });
+                                            setBlockTargetDeviceId(null);
+                                            setBlockVerifyPassword('');
+                                            setBlockedWarningBanner({
+                                              label: sess.deviceLabel,
+                                              resetSent: false,
+                                            });
+                                          } catch (err) {
+                                            setBlockVerifyError(
+                                              err instanceof Error ? err.message : 'Verification failed.'
+                                            );
+                                          } finally {
+                                            setDeviceBusyId(null);
+                                          }
+                                        }}
+                                        className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-lg text-[10px] font-bold cursor-pointer shrink-0"
+                                      >
+                                        {language === 'bn' ? 'যাচাই ও ব্লক করুন' : 'Verify & Block'}
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="space-y-2">
+                                      <div className="flex flex-wrap gap-2">
+                                        <button
+                                          type="button"
+                                          disabled={isBusy}
+                                          onClick={async () => {
+                                            setDeviceBusyId(sess.deviceId);
+                                            setBlockVerifyError(null);
+                                            try {
+                                              await blockDeviceWithVerification(sess.deviceId, {
+                                                verifyGoogle: true,
+                                              });
+                                              setBlockTargetDeviceId(null);
+                                              setShowBlockFallbackInput(false);
+                                              setBlockFallbackSecret('');
+                                              setBlockedWarningBanner({
+                                                label: sess.deviceLabel,
+                                                resetSent: false,
+                                              });
+                                            } catch (err) {
+                                              setBlockVerifyError(
+                                                err instanceof Error ? err.message : 'Verification failed.'
+                                              );
+                                            } finally {
+                                              setDeviceBusyId(null);
+                                            }
+                                          }}
+                                          className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                                        >
+                                          {language === 'bn' ? 'Google দিয়ে যাচাই ও ব্লক' : 'Verify with Google & Block'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={isBusy}
+                                          onClick={() => {
+                                            setBlockVerifyError(null);
+                                            setShowBlockFallbackInput((prev) => !prev);
+                                          }}
+                                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-semibold cursor-pointer"
+                                        >
+                                          {user?.hasAppLockPin
+                                            ? language === 'bn'
+                                              ? 'পিন দিয়ে যাচাই'
+                                              : 'Use App-Lock PIN'
+                                            : language === 'bn'
+                                            ? 'পপআপ ছাড়া ইমেইল যাচাই'
+                                            : 'Verify via Email'}
+                                        </button>
+                                      </div>
+
+                                      {showBlockFallbackInput && (
+                                        <div className="flex flex-col sm:flex-row gap-2">
+                                          <input
+                                            type={user?.hasAppLockPin ? 'password' : 'email'}
+                                            inputMode={user?.hasAppLockPin ? 'numeric' : 'email'}
+                                            maxLength={user?.hasAppLockPin ? 6 : 150}
+                                            value={blockFallbackSecret}
+                                            onChange={(e) =>
+                                              setBlockFallbackSecret(
+                                                user?.hasAppLockPin
+                                                  ? e.target.value.replace(/\D/g, '').slice(0, 6)
+                                                  : e.target.value
+                                              )
+                                            }
+                                            placeholder={
+                                              user?.hasAppLockPin
+                                                ? language === 'bn'
+                                                  ? '৪-৬ ডিজিটের পিন'
+                                                  : '4-6 digit App-Lock PIN'
+                                                : language === 'bn'
+                                                ? 'অ্যাকাউন্টের ইমেইল লিখুন'
+                                                : 'Enter your account email'
+                                            }
+                                            className="flex-1 px-3 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-[11px] text-white focus:outline-none focus:border-rose-500"
+                                          />
+                                          <button
+                                            type="button"
+                                            disabled={isBusy || !blockFallbackSecret.trim()}
+                                            onClick={async () => {
+                                              setDeviceBusyId(sess.deviceId);
+                                              setBlockVerifyError(null);
+                                              try {
+                                                await blockDeviceWithVerification(sess.deviceId, {
+                                                  allowPopupFallback: true,
+                                                  ...(user?.hasAppLockPin
+                                                    ? { appLockPin: blockFallbackSecret }
+                                                    : { confirmedEmail: blockFallbackSecret }),
+                                                });
+                                                setBlockTargetDeviceId(null);
+                                                setShowBlockFallbackInput(false);
+                                                setBlockFallbackSecret('');
+                                                setBlockedWarningBanner({
+                                                  label: sess.deviceLabel,
+                                                  resetSent: false,
+                                                });
+                                              } catch (err) {
+                                                setBlockVerifyError(
+                                                  err instanceof Error ? err.message : 'Verification failed.'
+                                                );
+                                              } finally {
+                                                setDeviceBusyId(null);
+                                              }
+                                            }}
+                                            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-lg text-[10px] font-bold cursor-pointer shrink-0"
+                                          >
+                                            {language === 'bn' ? 'নিশ্চিত ও ব্লক' : 'Confirm & Block'}
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
                               )}
                             </div>
                           );
@@ -1144,6 +1687,104 @@ export function ProfileModal({
                         </p>
                       )}
                     </div>
+
+                    {/* Recent & Blocked Sessions History */}
+                    {userSessions.some(
+                      (s) => s.status === 'rejected' || s.status === 'logged_out'
+                    ) && (
+                      <div className="pt-2.5 border-t border-slate-800/80 space-y-1.5">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                          {language === 'bn'
+                            ? 'সাম্প্রতিক ও ব্লকড সেশন ইতিহাস'
+                            : 'Recent & Blocked Session History'}
+                        </div>
+                        <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                          {userSessions
+                            .filter((s) => s.status === 'rejected' || s.status === 'logged_out')
+                            .map((sess) => {
+                              const isRejected = sess.status === 'rejected';
+                              return (
+                                <div
+                                  key={sess.deviceId}
+                                  className="px-2.5 py-2 bg-slate-900/60 border border-slate-800/70 rounded-xl flex items-center justify-between gap-2 text-[11px]"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-medium text-slate-200 truncate max-w-[160px]">
+                                        {sess.deviceLabel}
+                                      </span>
+                                      <span
+                                        className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                                          isRejected
+                                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                            : 'bg-slate-800 text-slate-400'
+                                        }`}
+                                      >
+                                        {isRejected
+                                          ? language === 'bn'
+                                            ? 'ব্লকড'
+                                            : 'BLOCKED'
+                                          : language === 'bn'
+                                          ? 'লগ-আউট'
+                                          : 'LOGGED OUT'}
+                                      </span>
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 truncate">
+                                      {sess.approxLocation ? `${sess.approxLocation} · ` : ''}
+                                      {new Date(sess.lastActiveAt || sess.createdAt).toLocaleString(
+                                        language === 'bn' ? 'bn-BD' : 'en-US'
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    disabled={deviceBusyId === sess.deviceId}
+                                    onClick={async () => {
+                                      setDeviceBusyId(sess.deviceId);
+                                      setErrorMessage(null);
+                                      try {
+                                        await removeDeviceHistoryItem(sess.deviceId);
+                                      } catch (err) {
+                                        setErrorMessage(
+                                          err instanceof Error
+                                            ? err.message
+                                            : language === 'bn'
+                                            ? 'সেশন ইতিহাস মুছতে সমস্যা হয়েছে।'
+                                            : 'Failed to remove device record.'
+                                        );
+                                      } finally {
+                                        setDeviceBusyId(null);
+                                      }
+                                    }}
+                                    title={
+                                      language === 'bn'
+                                        ? isRejected
+                                          ? 'ব্লক লিস্ট ও রেকর্ড থেকে সরান'
+                                          : 'ইতিহাস মুছুন'
+                                        : isRejected
+                                        ? 'Unblock & remove record'
+                                        : 'Remove record'
+                                    }
+                                    className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 border border-slate-700 text-[10px] font-semibold cursor-pointer inline-flex items-center gap-1 shrink-0"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    <span>
+                                      {isRejected
+                                        ? language === 'bn'
+                                          ? 'আনব্লক/মুছুন'
+                                          : 'Unblock'
+                                        : language === 'bn'
+                                        ? 'মুছুন'
+                                        : 'Remove'}
+                                    </span>
+                                  </button>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Password Change / Recovery */}

@@ -20,6 +20,7 @@ export interface DeviceSession {
   approxLocation?: string | null;
   status: 'active' | 'pending_approval' | 'rejected' | 'logged_out';
   isPrimaryTrusted?: boolean;
+  adminAlertPending?: boolean;
   limitBlocked?: boolean;
   approvedByDeviceId?: string | null;
   rejectedByDeviceId?: string | null;
@@ -33,6 +34,14 @@ export interface AppSecuritySettings {
   defaultMobileLimit: number;
   defaultWebLimit: number;
   requireApprovalForNewDevice: boolean;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface AdminSecuritySettings {
+  adminMobileLimit: number;
+  adminWebLimit: number;
+  adminLoginMode: 'fast_alert' | 'strict_approval';
   updatedAt: string;
   updatedBy: string;
 }
@@ -215,6 +224,7 @@ export interface AdminAuditLog {
     | 'update_device_policy'
     | 'force_logout_device'
     | 'approve_device_session'
+    | 'admin_device_login'
     | 'unlock_phone_cooldown';
   targetId?: string;
   targetName?: string;

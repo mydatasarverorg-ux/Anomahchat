@@ -35,7 +35,7 @@ import {
   isDeviceAccountSaved,
   saveDeviceAccount,
 } from '../utils/accountShortcut';
-import { SUPER_ADMIN_EMAIL } from '../services/adminService';
+import { isSuperAdmin, SUPER_ADMIN_EMAIL } from '../services/adminService';
 import { getCanonicalPhoneKey, validateMobileNumber } from '../utils/phoneUtils';
 import {
   claimPhoneSlot,
@@ -44,18 +44,26 @@ import {
   formatPhoneLimitError,
 } from '../services/phoneRegistryService';
 import {
+  DEFAULT_ADMIN_SECURITY_SETTINGS,
   DEFAULT_SECURITY_SETTINGS,
+  acknowledgeAdminLoginSession,
   approveDeviceSession,
   getOrCreateDeviceId,
+  logoutAllOtherDeviceSessions,
   markDeviceSessionLoggedOut,
   registerOrSyncDeviceSession,
   rejectDeviceSession,
+  remoteLogoutDeviceSession,
+  removeSessionHistoryRecord,
   resolveEffectiveDeviceLimits,
   retryRejectedDeviceSession,
+  subscribeToAdminSecuritySettings,
   subscribeToGlobalSecuritySettings,
   subscribeToUserDeviceSessions,
+  toggleDeviceTrust,
 } from '../services/deviceSessionService';
 import type {
+  AdminSecuritySettings,
   AppSecuritySettings,
   DeviceSession,
   PhoneChangeHistoryEntry,
@@ -69,6 +77,14 @@ function getActiveLanguage(): 'en' | 'bn' {
   } catch {
     return 'en';
   }
+}
+
+export interface OwnerVerificationInput {
+  password?: string;
+  verifyGoogle?: boolean;
+  allowPopupFallback?: boolean;
+  appLockPin?: string;
+  confirmedEmail?: string;
 }
 
 interface AuthContextType {
@@ -113,13 +129,23 @@ interface AuthContextType {
   currentDeviceSession: DeviceSession | null;
   userSessions: DeviceSession[];
   pendingApprovalSessions: DeviceSession[];
+  adminAlertSessions: DeviceSession[];
+  isVerifiedSuperAdmin: boolean;
   deviceLimitsSummary: { mobile: number; web: number };
   hasPasswordProvider: boolean;
   approvePendingDevice: (targetDeviceId: string) => Promise<void>;
   rejectPendingDevice: (
     targetDeviceId: string,
-    verification?: { password?: string; verifyGoogle?: boolean }
+    verification?: OwnerVerificationInput
   ) => Promise<void>;
+  acknowledgeAdminAlert: (targetDeviceId: string, trustDevice: boolean) => Promise<void>;
+  blockDeviceWithVerification: (
+    targetDeviceId: string,
+    verification?: OwnerVerificationInput
+  ) => Promise<void>;
+  trustOrUntrustDevice: (targetDeviceId: string, trusted: boolean) => Promise<void>;
+  logoutAllOtherDevices: () => Promise<number>;
+  removeDeviceHistoryItem: (targetDeviceId: string) => Promise<void>;
   retryCurrentDeviceApproval: () => Promise<void>;
   selfApproveCurrentDeviceWithPin: (pin: string) => Promise<{ success: boolean; error?: string }>;
   forceLogoutOtherDevice: (targetDeviceId: string) => Promise<void>;
@@ -165,10 +191,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentDeviceSession, setCurrentDeviceSession] = useState<DeviceSession | null>(null);
   const [globalSecuritySettings, setGlobalSecuritySettings] =
     useState<AppSecuritySettings>(DEFAULT_SECURITY_SETTINGS);
+  const [adminSecuritySettings, setAdminSecuritySettings] =
+    useState<AdminSecuritySettings>(DEFAULT_ADMIN_SECURITY_SETTINGS);
 
   // Prevents locking the user out immediately during an explicit login/signup action
   const explicitAuthInProgressRef = useRef(false);
   const knownPendingAlertIdsRef = useRef<Set<string>>(new Set());
+  const knownAdminAlertIdsRef = useRef<Set<string>>(new Set());
   const wasSessionActiveRef = useRef(false);
 
   const [theme, setThemeState] = useState<ThemeMode>(() => {
@@ -297,12 +326,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe();
   }, [user?.userId]);
 
+  const isVerifiedSuperAdmin = Boolean(
+    user && firebaseUser?.emailVerified && isSuperAdmin(user.email)
+  );
+
+  // Subscribe to Super Admin dedicated security policy only when verified Super Admin is signed in
+  useEffect(() => {
+    if (!user?.userId || !isVerifiedSuperAdmin) {
+      setAdminSecuritySettings(DEFAULT_ADMIN_SECURITY_SETTINGS);
+      return;
+    }
+    return subscribeToAdminSecuritySettings((settings) => {
+      setAdminSecuritySettings(settings);
+    });
+  }, [user?.userId, isVerifiedSuperAdmin]);
+
   // Global security settings & real-time per-device session listener
   useEffect(() => {
     if (!user?.userId) {
       setUserSessions([]);
       setCurrentDeviceSession(null);
       knownPendingAlertIdsRef.current.clear();
+      knownAdminAlertIdsRef.current.clear();
       wasSessionActiveRef.current = false;
       return;
     }
@@ -317,7 +362,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (mine) {
         if (mine.status === 'active') {
           wasSessionActiveRef.current = true;
-        } else if (mine.status === 'logged_out' && wasSessionActiveRef.current) {
+        } else if (mine.status === 'rejected') {
+          wasSessionActiveRef.current = false;
+        } else if (mine.status === 'logged_out' && !explicitAuthInProgressRef.current) {
           wasSessionActiveRef.current = false;
           const lang = getActiveLanguage();
           setAuthError(
@@ -326,10 +373,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               : 'This device session was signed out from another trusted device or by an administrator.'
           );
           clearPinSessionUnlocked(user.userId);
+          setCurrentDeviceSession(mine);
           signOut(auth).catch(() => {});
           return;
         }
         setCurrentDeviceSession(mine);
+      } else {
+        setCurrentDeviceSession(null);
+        if (wasSessionActiveRef.current && !explicitAuthInProgressRef.current) {
+          wasSessionActiveRef.current = false;
+          const lang = getActiveLanguage();
+          setAuthError(
+            lang === 'bn'
+              ? 'অ্যাডমিন বা অন্য ডিভাইস থেকে এই সেশন রেকর্ডটি সরানো হয়েছে।'
+              : 'This device session record was removed by an administrator.'
+          );
+          clearPinSessionUnlocked(user.userId);
+          signOut(auth).catch(() => {});
+          return;
+        }
       }
 
       // Desktop/PWA notification when a new unapproved login awaits owner action
@@ -365,6 +427,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
           }
         }
+
+        // Fast-Alert notification for verified Super Admin new logins
+        if (isVerifiedSuperAdmin) {
+          const fastAlerts = sessions.filter(
+            (s) =>
+              s.status === 'active' &&
+              s.adminAlertPending === true &&
+              s.deviceId !== currentDeviceId
+          );
+          for (const a of fastAlerts) {
+            if (!knownAdminAlertIdsRef.current.has(a.deviceId)) {
+              knownAdminAlertIdsRef.current.add(a.deviceId);
+              if (
+                typeof window !== 'undefined' &&
+                'Notification' in window &&
+                Notification.permission === 'granted'
+              ) {
+                try {
+                  const lang = getActiveLanguage();
+                  new Notification(
+                    lang === 'bn'
+                      ? 'সুপার অ্যাডমিন নতুন ডিভাইস লগইন!'
+                      : 'Super Admin New Device Login',
+                    {
+                      body:
+                        lang === 'bn'
+                          ? `${a.deviceLabel}${a.approxLocation ? ` (${a.approxLocation})` : ''} থেকে লগইন হয়েছে। আপনি না হলে ব্লক করুন।`
+                          : `Signed in from ${a.deviceLabel}${a.approxLocation ? ` (${a.approxLocation})` : ''}. Review in app.`,
+                      tag: `admin_alert_${a.deviceId}`,
+                    }
+                  );
+                } catch {
+                  // Ignore Notification errors on unsupported platforms
+                }
+              }
+            }
+          }
+        }
       }
     });
 
@@ -372,7 +472,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       unsubSettings();
       unsubSessions();
     };
-  }, [user?.userId, currentDeviceId]);
+  }, [user?.userId, currentDeviceId, isVerifiedSuperAdmin]);
 
   // Check deletion status on login
   const verifyDeletionStatus = (profile: UserProfile): boolean => {
@@ -406,9 +506,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
           if (verifyDeletionStatus(profile)) {
             const devSess = await registerOrSyncDeviceSession(profile);
+            if (devSess?.status === 'logged_out') {
+              wasSessionActiveRef.current = false;
+              setCurrentDeviceSession(null);
+              const lang = getActiveLanguage();
+              setAuthError(
+                lang === 'bn'
+                  ? 'অ্যাডমিন থেকে এই ডিভাইস ক্যাটাগরির অনুমতি বন্ধ (লিমিট ০) করা হয়েছে।'
+                  : 'Access from this device category has been restricted by an administrator.'
+              );
+              clearPinSessionUnlocked(profile.userId);
+              await signOut(auth);
+              setUser(null);
+              setIsAppLocked(false);
+              setLoading(false);
+              return;
+            }
             if (devSess) {
-              if (devSess.status === 'active') wasSessionActiveRef.current = true;
+              wasSessionActiveRef.current = devSess.status === 'active';
               setCurrentDeviceSession(devSess);
+            } else {
+              wasSessionActiveRef.current = false;
+              setCurrentDeviceSession(null);
             }
             if (profile.hasAppLockPin && !isPinSessionUnlocked(profile.userId)) {
               setIsAppLocked(true);
@@ -431,7 +550,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               await releasePhoneSlot(profile.userId, profile.phoneNumber);
             }
             await updateDoc(doc(db, 'users', profile.userId), { status: 'deleted' }).catch(() => {});
-            await syncDirectoryEntry(profile.userId, { status: 'deleted' }).catch(() => {});
+            await syncDirectoryEntry(profile.userId, {
+              status: 'deleted',
+              phoneLookupHash: null,
+              username: deleteField(),
+            }).catch(() => {});
             await markDeviceSessionLoggedOut(profile.userId, currentDeviceId).catch(() => {});
             await signOut(auth);
             setIsAppLocked(false);
@@ -441,6 +564,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } else {
         setUser(null);
+        setCurrentDeviceSession(null);
         setDeletionNotice(null);
         setIsAppLocked(false);
       }
@@ -472,18 +596,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             await releasePhoneSlot(profile.userId, profile.phoneNumber);
           }
           await updateDoc(doc(db, 'users', profile.userId), { status: 'deleted' }).catch(() => {});
-          await syncDirectoryEntry(profile.userId, { status: 'deleted' }).catch(() => {});
+          await syncDirectoryEntry(profile.userId, {
+            status: 'deleted',
+            phoneLookupHash: null,
+            username: deleteField(),
+          }).catch(() => {});
           await signOut(auth);
           setIsAppLocked(false);
           return;
         }
         const devSess = await registerOrSyncDeviceSession(profile);
+        if (devSess?.status === 'logged_out') {
+          wasSessionActiveRef.current = false;
+          setCurrentDeviceSession(null);
+          const lang = getActiveLanguage();
+          setAuthError(
+            lang === 'bn'
+              ? 'অ্যাডমিন থেকে এই ডিভাইস ক্যাটাগরির অনুমতি বন্ধ (লিমিট ০) করা হয়েছে।'
+              : 'Access from this device category has been restricted by an administrator.'
+          );
+          clearPinSessionUnlocked(profile.userId);
+          await signOut(auth);
+          setIsAppLocked(false);
+          return;
+        }
         if (devSess) {
-          if (devSess.status === 'active') wasSessionActiveRef.current = true;
+          wasSessionActiveRef.current = devSess.status === 'active';
           setCurrentDeviceSession(devSess);
+        } else {
+          wasSessionActiveRef.current = false;
+          setCurrentDeviceSession(null);
         }
         setUser(profile);
-        if (!devSess || devSess.status === 'active') {
+        if (devSess?.status === 'active') {
           setPresence(res.user.uid, true);
         }
         if (consumeRememberDevicePending() || isDeviceAccountSaved(profile.userId)) {
@@ -662,18 +807,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             await releasePhoneSlot(profile.userId, profile.phoneNumber);
           }
           await updateDoc(doc(db, 'users', profile.userId), { status: 'deleted' }).catch(() => {});
-          await syncDirectoryEntry(profile.userId, { status: 'deleted' }).catch(() => {});
+          await syncDirectoryEntry(profile.userId, {
+            status: 'deleted',
+            phoneLookupHash: null,
+            username: deleteField(),
+          }).catch(() => {});
           await signOut(auth);
           setIsAppLocked(false);
           return;
         }
         const devSess = await registerOrSyncDeviceSession(profile);
+        if (devSess?.status === 'logged_out') {
+          wasSessionActiveRef.current = false;
+          setCurrentDeviceSession(null);
+          const lang = getActiveLanguage();
+          setAuthError(
+            lang === 'bn'
+              ? 'অ্যাডমিন থেকে এই ডিভাইস ক্যাটাগরির অনুমতি বন্ধ (লিমিট ০) করা হয়েছে।'
+              : 'Access from this device category has been restricted by an administrator.'
+          );
+          clearPinSessionUnlocked(profile.userId);
+          await signOut(auth);
+          setIsAppLocked(false);
+          return;
+        }
         if (devSess) {
-          if (devSess.status === 'active') wasSessionActiveRef.current = true;
+          wasSessionActiveRef.current = devSess.status === 'active';
           setCurrentDeviceSession(devSess);
+        } else {
+          wasSessionActiveRef.current = false;
+          setCurrentDeviceSession(null);
         }
         setUser(profile);
-        if (!devSess || devSess.status === 'active') {
+        if (devSess?.status === 'active') {
           setPresence(res.user.uid, true);
         }
         if (consumeRememberDevicePending() || isDeviceAccountSaved(profile.userId)) {
@@ -1110,32 +1276,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         )
       : [];
 
-  const deviceLimitsSummary = resolveEffectiveDeviceLimits(user, globalSecuritySettings);
+  const adminAlertSessions =
+    isVerifiedSuperAdmin && currentDeviceSession?.status === 'active'
+      ? userSessions.filter(
+          (s) =>
+            s.adminAlertPending === true &&
+            s.deviceId !== currentDeviceId &&
+            s.status === 'active'
+        )
+      : [];
 
-  const approvePendingDevice = async (targetDeviceId: string) => {
-    if (!user) return;
-    await approveDeviceSession(user.userId, targetDeviceId, currentDeviceId, user);
-  };
+  const deviceLimitsSummary = resolveEffectiveDeviceLimits(user, globalSecuritySettings, {
+    isVerifiedAdmin: isVerifiedSuperAdmin,
+    adminSettings: adminSecuritySettings,
+  });
 
-  const rejectPendingDevice = async (
-    targetDeviceId: string,
-    verification?: { password?: string; verifyGoogle?: boolean }
-  ) => {
-    if (!user || !auth.currentUser) return;
+  const verifyOwnerIdentity = async (
+    verification?: OwnerVerificationInput
+  ): Promise<void> => {
+    if (!user || !auth.currentUser) {
+      throw new Error('No active signed-in session.');
+    }
     const lang = getActiveLanguage();
+    const isPasswordAcct = auth.currentUser.providerData.some((p) => p.providerId === 'password');
 
-    if (verification?.password !== undefined) {
+    if (isPasswordAcct) {
       if (!user.email) {
         throw new Error(lang === 'bn' ? 'অ্যাকাউন্টের ইমেইল পাওয়া যায়নি।' : 'Account email missing.');
       }
-      if (!verification.password.trim()) {
+      if (!verification?.password || !verification.password.trim()) {
         throw new Error(
-          lang === 'bn' ? 'অনুগ্রহ করে আপনার অ্যাকাউন্টের পাসওয়ার্ড দিন।' : 'Please enter your account password.'
+          lang === 'bn'
+            ? 'মালিকানা যাচাই করতে আপনার অ্যাকাউন্টের পাসওয়ার্ড দিন।'
+            : 'Please enter your account password to verify ownership.'
         );
       }
       try {
         const cred = EmailAuthProvider.credential(user.email, verification.password);
         await reauthenticateWithCredential(auth.currentUser, cred);
+        return;
       } catch (err: unknown) {
         const code = (err as { code?: string })?.code || '';
         if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
@@ -1151,9 +1330,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             : 'Could not verify password. Please try again.'
         );
       }
-    } else if (verification?.verifyGoogle) {
+    }
+
+    if (verification?.verifyGoogle) {
       try {
         await reauthenticateWithPopup(auth.currentUser, googleProvider);
+        return;
       } catch {
         throw new Error(
           lang === 'bn'
@@ -1163,12 +1345,95 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    if (verification?.allowPopupFallback) {
+      if (user.hasAppLockPin) {
+        if (!verification.appLockPin || verification.appLockPin.trim().length < 4) {
+          throw new Error(
+            lang === 'bn'
+              ? 'পপআপ না খুললে আপনার ৪-৬ ডিজিটের অ্যাপ-লক পিন দিয়ে যাচাই করুন।'
+              : 'Enter your 4-6 digit App-Lock PIN to verify ownership.'
+          );
+        }
+        const pinResult = await verifyAppLockPin(user.userId, verification.appLockPin.trim());
+        if (!pinResult.success) {
+          throw new Error(
+            pinResult.error ||
+              (lang === 'bn' ? 'অ্যাপ-লক পিন সঠিক নয়।' : 'Incorrect App-Lock PIN.')
+          );
+        }
+        return;
+      }
+
+      const expectedEmail = (user.email || auth.currentUser.email || '').trim().toLowerCase();
+      const providedEmail = (verification.confirmedEmail || '').trim().toLowerCase();
+      if (!expectedEmail || providedEmail !== expectedEmail) {
+        throw new Error(
+          lang === 'bn'
+            ? 'যাচাই করতে আপনার অ্যাকাউন্টের সঠিক ইমেইল ঠিকানা লিখে নিশ্চিত করুন।'
+            : 'Please type your registered account email address to confirm ownership.'
+        );
+      }
+      return;
+    }
+
+    throw new Error(
+      lang === 'bn'
+        ? 'এই কাজের জন্য মালিকানা যাচাইকরণ আবশ্যক।'
+        : 'Owner identity verification is required for this action.'
+    );
+  };
+
+  const approvePendingDevice = async (targetDeviceId: string) => {
+    if (!user) return;
+    await approveDeviceSession(user.userId, targetDeviceId, currentDeviceId, user);
+  };
+
+  const rejectPendingDevice = async (
+    targetDeviceId: string,
+    verification?: OwnerVerificationInput
+  ) => {
+    if (!user || !auth.currentUser) return;
+    await verifyOwnerIdentity(verification);
     await rejectDeviceSession(
       user.userId,
       targetDeviceId,
       currentDeviceId,
       'Rejected by trusted owner device'
     );
+  };
+
+  const acknowledgeAdminAlert = async (targetDeviceId: string, trustDevice: boolean) => {
+    if (!user) return;
+    await acknowledgeAdminLoginSession(user.userId, targetDeviceId, trustDevice);
+  };
+
+  const blockDeviceWithVerification = async (
+    targetDeviceId: string,
+    verification?: OwnerVerificationInput
+  ) => {
+    if (!user || !auth.currentUser || targetDeviceId === currentDeviceId) return;
+    await verifyOwnerIdentity(verification);
+    await rejectDeviceSession(
+      user.userId,
+      targetDeviceId,
+      currentDeviceId,
+      'Blocked by account owner from device controls'
+    );
+  };
+
+  const trustOrUntrustDevice = async (targetDeviceId: string, trusted: boolean) => {
+    if (!user) return;
+    await toggleDeviceTrust(user.userId, targetDeviceId, trusted);
+  };
+
+  const logoutAllOtherDevices = async (): Promise<number> => {
+    if (!user) return 0;
+    return logoutAllOtherDeviceSessions(user.userId, currentDeviceId);
+  };
+
+  const removeDeviceHistoryItem = async (targetDeviceId: string) => {
+    if (!user) return;
+    await removeSessionHistoryRecord(user.userId, targetDeviceId, currentDeviceId);
   };
 
   const retryCurrentDeviceApproval = async () => {
@@ -1190,7 +1455,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const forceLogoutOtherDevice = async (targetDeviceId: string) => {
     if (!user || targetDeviceId === currentDeviceId) return;
-    await markDeviceSessionLoggedOut(user.userId, targetDeviceId);
+    await remoteLogoutDeviceSession(user.userId, targetDeviceId);
   };
 
   return (
@@ -1224,10 +1489,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         currentDeviceSession,
         userSessions,
         pendingApprovalSessions,
+        adminAlertSessions,
+        isVerifiedSuperAdmin,
         deviceLimitsSummary,
         hasPasswordProvider,
         approvePendingDevice,
         rejectPendingDevice,
+        acknowledgeAdminAlert,
+        blockDeviceWithVerification,
+        trustOrUntrustDevice,
+        logoutAllOtherDevices,
+        removeDeviceHistoryItem,
         retryCurrentDeviceApproval,
         selfApproveCurrentDeviceWithPin,
         forceLogoutOtherDevice,

@@ -44,13 +44,16 @@ import {
   adminUpdatePhoneMaxLimit,
 } from '../services/phoneRegistryService';
 import {
+  DEFAULT_ADMIN_SECURITY_SETTINGS,
   DEFAULT_SECURITY_SETTINGS,
   adminApproveDeviceSession,
   adminDeleteDeviceSession,
   adminForceLogoutDeviceSession,
   adminUnlockPhoneCooldown,
+  adminUpdateAdminSecuritySettings,
   adminUpdateGlobalSecuritySettings,
   adminUpdateUserDeviceLimits,
+  subscribeToAdminSecuritySettings,
   subscribeToGlobalSecuritySettings,
   subscribeToUserDeviceSessions,
 } from '../services/deviceSessionService';
@@ -69,6 +72,7 @@ import type {
   AnnouncementType,
   PasswordRecoveryRequest,
   PhoneRegistryEntry,
+  AdminSecuritySettings,
   AppSecuritySettings,
   DeviceSession,
   ChatRoom,
@@ -107,7 +111,7 @@ interface AdminModalProps {
 }
 
 export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
-  const { user } = useAuth();
+  const { user, isVerifiedSuperAdmin } = useAuth();
   const { t, language } = useLanguage();
 
   const [activeTab, setActiveTab] = useState<
@@ -145,6 +149,8 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   const [phoneActionBusy, setPhoneActionBusy] = useState(false);
   const [globalSecuritySettings, setGlobalSecuritySettings] =
     useState<AppSecuritySettings>(DEFAULT_SECURITY_SETTINGS);
+  const [adminSecuritySettings, setAdminSecuritySettings] =
+    useState<AdminSecuritySettings>(DEFAULT_ADMIN_SECURITY_SETTINGS);
   const [dossierDeviceSessions, setDossierDeviceSessions] = useState<DeviceSession[]>([]);
   const [securityActionBusy, setSecurityActionBusy] = useState(false);
 
@@ -354,6 +360,11 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   useEffect(() => subscribeToGlobalSecuritySettings((settings) => setGlobalSecuritySettings(settings)), []);
 
   useEffect(() => {
+    if (!isVerifiedSuperAdmin) return;
+    return subscribeToAdminSecuritySettings((settings) => setAdminSecuritySettings(settings));
+  }, [isVerifiedSuperAdmin]);
+
+  useEffect(() => {
     if (!activeDossierUser?.userId) {
       setDossierDeviceSessions([]);
       return;
@@ -530,6 +541,30 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     }
   };
 
+  const handleSaveAdminSecuritySettings = async (settings: {
+    adminMobileLimit: number;
+    adminWebLimit: number;
+    adminLoginMode: 'fast_alert' | 'strict_approval';
+  }) => {
+    if (!user?.email) return;
+    setSecurityActionBusy(true);
+    setActionErrorMsg(null);
+    try {
+      await adminUpdateAdminSecuritySettings(settings, user.email);
+      showSuccessBanner(
+        language === 'bn'
+          ? `সুপার অ্যাডমিন ডিভাইস নীতি সেভ হয়েছে (মোবাইল: ${settings.adminMobileLimit}, ওয়েব/পিসি: ${settings.adminWebLimit}, মোড: ${
+              settings.adminLoginMode === 'fast_alert' ? 'ফাস্ট অ্যালার্ট' : 'কঠোর অনুমোদন'
+            })।`
+          : `Saved Super Admin policy (Mobile: ${settings.adminMobileLimit}, Web/PC: ${settings.adminWebLimit}, Mode: ${settings.adminLoginMode}).`
+      );
+    } catch (err) {
+      setActionErrorMsg(extractReadableError(err, 'Failed to save Super Admin device policy.'));
+    } finally {
+      setSecurityActionBusy(false);
+    }
+  };
+
   const handleUpdateUserDeviceLimits = async (
     targetUser: UserProfile,
     limits: { mobile?: number; web?: number } | null
@@ -544,11 +579,16 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
         user.email,
         targetUser.displayName
       );
+      const targetIsSuperAdmin = isSuperAdmin(targetUser.email);
       showSuccessBanner(
         limits
           ? language === 'bn'
             ? `${targetUser.displayName}-এর ডিভাইস সীমা আপডেট করা হয়েছে।`
             : `Updated device limits for ${targetUser.displayName}.`
+          : targetIsSuperAdmin
+          ? language === 'bn'
+            ? `${targetUser.displayName}-এর ডিভাইস সীমা সুপার অ্যাডমিন নীতি ডিফল্টে রিসেট করা হয়েছে।`
+            : `Reset device limits for ${targetUser.displayName} to Super Admin policy defaults.`
           : language === 'bn'
           ? `${targetUser.displayName}-এর ডিভাইস সীমা গ্লোবাল ডিফল্টে রিসেট করা হয়েছে।`
           : `Reset device limits for ${targetUser.displayName} to global defaults.`
@@ -1225,8 +1265,10 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
               userPhoneRegistryMap={userPhoneRegistryMap}
               allUsersList={usersList}
               globalSecuritySettings={globalSecuritySettings}
+              adminSecuritySettings={adminSecuritySettings}
               securityPolicyBusy={securityActionBusy}
               onSaveGlobalSecuritySettings={handleSaveGlobalSecuritySettings}
+              onSaveAdminSecuritySettings={handleSaveAdminSecuritySettings}
             />
           )}
 
@@ -1503,6 +1545,7 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
         onUpdatePhoneLimit={handleUpdatePhoneLimit}
         onSelectDossierUser={(u) => setSelectedDossierUser(u)}
         globalSecuritySettings={globalSecuritySettings}
+        adminSecuritySettings={adminSecuritySettings}
         dossierDeviceSessions={dossierDeviceSessions}
         securityActionBusy={securityActionBusy}
         onUnlockPhoneCooldown={handleUnlockPhoneCooldown}
