@@ -125,10 +125,10 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   const [releaseApkSha256, setReleaseApkSha256] = useState('');
   const [releaseFileSizeText, setReleaseFileSizeText] = useState('');
   const [releaseChangelogEn, setReleaseChangelogEn] = useState(
-    '• Immutable First Phone Identity, Change History & 30-Day Cooldown\n• Automatic Phone Quota Slot Sync (3/number) & Deleted/Stale Cleanup\n• Separate Mobile vs. Web/PC Device Limits & Live Owner Login Approval (Mahi A12)'
+    '• Enhanced Account Security: PBKDF2 PIN Lock & Immutable Suspension Enforcement\n• Safer In-App Updates: Fail-Closed SHA-256 Verification & Hardened Media Rules\n• Stronger Privacy Defaults & Android WebView Security Improvements (Mahi A13)'
   );
   const [releaseChangelogBn, setReleaseChangelogBn] = useState(
-    '• স্থায়ী প্রথম মোবাইল নম্বর ট্র্যাকিং, নম্বর পরিবর্তনের ইতিহাস ও ৩০ দিনের কুলডাউন\n• অটোমেটিক ফোন কোটা সিঙ্ক (সর্বোচ্চ ৩টি অ্যাকাউন্ট) ও অপ্রয়োজনীয় স্লট পরিষ্কার\n• মোবাইল বনাম ওয়েব/পিসি আলাদা ডিভাইস সীমা ও নতুন লগইন অনুমোদন পপআপ (Mahi A12)'
+    '• আরও শক্তিশালী অ্যাকাউন্ট নিরাপত্তা: PBKDF2 পিন লক ও স্থায়ী সাসপেনশন সুরক্ষা\n• নিরাপদ ইন-অ্যাপ আপডেট: বাধ্যতামূলক SHA-256 যাচাই ও সুরক্ষিত মিডিয়া নিয়ম\n• ফোন ডিসকভারি প্রাইভেসি উন্নয়ন ও অ্যান্ড্রয়েড নিরাপত্তা আপডেট (Mahi A13)'
   );
   const [releaseForceUpdate, setReleaseForceUpdate] = useState(false);
   const [publishingRelease, setPublishingRelease] = useState(false);

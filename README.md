@@ -1,9 +1,9 @@
-# Anomah Chat (`v1.0.12` · `Mahi A12`)
+# Anomah Chat (`v1.0.13` · `Mahi A13`)
 
 > **Developer & Owner:** Mahi Muhtasim  
 > **Package ID:** `com.mahimuhtasim.anomahchat`  
 > **Platforms:** Web (PWA) & Android Native APK (Capacitor 8)  
-> **Release Channel:** Stable (`versionCode: 112`)
+> **Release Channel:** Stable (`versionCode: 113`)
 
 Anomah Chat is a real-time cross-platform cloud messenger built with React, TypeScript, Tailwind CSS, Firebase Authentication, Cloud Firestore, WebRTC, and Capacitor Android. Users can connect worldwide via 1-on-1 direct messaging, group chats, voice notes, compressed image sharing, and peer-to-peer audio/video calls, backed by defense-in-depth Firestore Security Rules.
 
@@ -55,7 +55,7 @@ Anomah Chat is a real-time cross-platform cloud messenger built with React, Type
 
 ---
 
-## Changelog (`v1.0.12 · Mahi A12`)
+## Changelog (`v1.0.13 · Mahi A13`)
 - **Free-Tier Security Hardening Audit Fixes:**
   - Moved active suspension records to immutable `bans/{uid}` tombstones and disabled owner `users/{uid}` deletion so suspensions and phone histories cannot be erased.
   - Upgraded Quick App-Lock PIN hashing to **PBKDF2-HMAC-SHA256 (120,000 iterations)**, fixed fail-open unlock behavior, and combined in-memory + persistent brute-force backoff.
@@ -142,8 +142,8 @@ The workflow in `.github/workflows/build-apk.yml` automatically builds an Androi
    - `ANDROID_KEY_ALIAS`
    - `ANDROID_KEY_PASSWORD`
    *(Falls back to a Debug APK if keystore secrets are not set.)*
-3. Computes the APK **SHA-256** digest, uploads `AnomahChat-v1.0.12-APK` as a workflow artifact, and publishes `v1.0.12` (`AnomahChat-v1.0.12.apk` & `AnomahChat.apk`) to **GitHub Releases**.
+3. Computes the APK **SHA-256** digest, uploads `AnomahChat-v1.0.13-APK` as a workflow artifact, and publishes `v1.0.13` (`AnomahChat-v1.0.13.apk` & `AnomahChat.apk`) to **GitHub Releases**.
 
 ---
 
-*Built & maintained by **Mahi Muhtasim** · Anomah Chat `v1.0.12` (`Mahi A12`)*
+*Built & maintained by **Mahi Muhtasim** · Anomah Chat `v1.0.13` (`Mahi A13`)*
