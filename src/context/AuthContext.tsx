@@ -715,11 +715,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const extraUpdates: Record<string, unknown> = {};
           if (profile.phoneNumber !== cleanPhone) {
             extraUpdates.phoneNumber = cleanPhone;
-            extraUpdates.discoverableByPhone = true;
+            extraUpdates.discoverableByPhone = false;
             profile.phoneNumber = cleanPhone;
-            profile.discoverableByPhone = true;
-            const hash = await hashPhoneForDirectory(cleanPhone);
-            if (hash) await syncDirectoryEntry(res.user.uid, { phoneLookupHash: hash });
+            profile.discoverableByPhone = false;
+            await syncDirectoryEntry(res.user.uid, { phoneLookupHash: null });
           }
           if (cleanUsername && cleanUsername.length >= 3) {
             const available = await isUsernameAvailable(cleanUsername, res.user.uid);
@@ -1023,7 +1022,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setDeletionNotice(null);
   };
 
-  const savePhoneNumber = async (phoneNumber: string, username?: string, discoverableByPhone = true) => {
+  const savePhoneNumber = async (phoneNumber: string, username?: string, discoverableByPhone = false) => {
     if (!user) return;
     const lang = getActiveLanguage();
     const validation = validateMobileNumber(phoneNumber, lang);
@@ -1128,9 +1127,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             (lang === 'bn' ? 'দয়া করে সঠিক মোবাইল নম্বর দিন।' : 'Please enter a valid mobile number.')
         );
       }
-      resolvedPhone = validation.normalized;
       const oldKey = getCanonicalPhoneKey(user.phoneNumber);
       isCanonicalPhoneChange = Boolean(oldKey && oldKey !== validation.canonicalKey);
+      resolvedPhone =
+        oldKey && validation.canonicalKey === oldKey && user.phoneNumber
+          ? user.phoneNumber
+          : validation.normalized;
 
       if (isCanonicalPhoneChange) {
         if (user.isBanned || (user.warningNotice && !user.warningDismissed)) {
@@ -1167,7 +1169,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const resolvedDiscoverable =
-      discoverableByPhone !== undefined ? discoverableByPhone : user.discoverableByPhone !== false;
+      discoverableByPhone !== undefined ? discoverableByPhone : user.discoverableByPhone === true;
 
     const cleanDisplayName = displayName.trim().slice(0, 100);
     const cleanAbout = about.trim().slice(0, 200);
@@ -1207,6 +1209,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         nextLastChangedAt = nowIso;
         docUpdates.phoneHistory = nextHistory;
         docUpdates.lastPhoneChangedAt = nowIso;
+        docUpdates.lastPhoneChangedAtMs = Date.now();
         if (user.phoneChangeCooldownBypass) {
           docUpdates.phoneChangeCooldownBypass = false;
         }

@@ -55,6 +55,7 @@ export interface UserProfile {
   initialPhoneSetAt?: string;
   phoneHistory?: PhoneChangeHistoryEntry[];
   lastPhoneChangedAt?: string;
+  lastPhoneChangedAtMs?: number;
   phoneChangeCooldownBypass?: boolean;
   deviceLimits?: UserDeviceLimits | null;
   discoverableByPhone?: boolean;

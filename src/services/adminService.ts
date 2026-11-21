@@ -173,6 +173,15 @@ export async function banUser(
       isOnline: false,
     };
 
+    await setDoc(doc(db, 'bans', targetUserId), {
+      userId: targetUserId,
+      isBanned: true,
+      reason: cleanReason,
+      bannedAt: nowIso,
+      bannedBy: cleanAdminEmail,
+      bannedUntil,
+      bannedUntilMs,
+    });
     await updateDoc(userRef, updates);
     await syncBanStateToPhoneRegistry(targetUserId, targetPhone, true);
     await setDoc(
@@ -228,6 +237,7 @@ export async function unbanUser(
       ? (existingUserSnap.data() as UserProfile).phoneNumber
       : undefined;
 
+    await deleteDoc(doc(db, 'bans', targetUserId)).catch(() => {});
     await updateDoc(userRef, {
       isBanned: false,
       banReason: null,
@@ -286,6 +296,7 @@ export async function claimExpiredSuspension(userId: string): Promise<void> {
       ? (existingUserSnap.data() as UserProfile).phoneNumber
       : undefined;
 
+    await deleteDoc(doc(db, 'bans', userId)).catch(() => {});
     await updateDoc(userRef, {
       isBanned: false,
       banReason: null,

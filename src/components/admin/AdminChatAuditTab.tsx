@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { AlertOctagon, AlertTriangle, ArrowLeft, Eye, Flag, MessageSquare, Search, Trash2, Users, X } from 'lucide-react';
 import type { ChatMessage, ChatRoom, UserProfile } from '../../types/chat';
+import { getSafeAttachmentHref, isSafeAudioMediaUrl, isSafeImageMediaUrl } from '../../utils/mediaUrl';
 
 interface AdminChatAuditTabProps {
   t: (key: any) => string;
@@ -437,29 +438,36 @@ export function AdminChatAuditTab({
 
                           {msg.mediaUrl && (
                             <div className="mt-2 max-w-sm rounded-xl overflow-hidden border border-slate-800 bg-slate-900/60 p-1">
-                              {msg.type === 'image' ? (
+                              {msg.type === 'image' && isSafeImageMediaUrl(msg.mediaUrl) ? (
                                 <img
                                   src={msg.mediaUrl}
                                   alt="Attachment"
                                   className="max-h-52 w-full object-cover rounded-lg"
                                 />
-                              ) : msg.type === 'audio' ? (
+                              ) : msg.type === 'audio' && isSafeAudioMediaUrl(msg.mediaUrl) ? (
                                 <div className="p-2 space-y-1">
                                   <div className="text-[10px] font-semibold text-slate-400 flex items-center gap-1">
                                     <span>Voice Note Recording</span>
                                   </div>
                                   <audio controls src={msg.mediaUrl} className="w-full h-8" />
                                 </div>
-                              ) : (
-                                <a
-                                  href={msg.mediaUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-xs text-sky-400 underline p-2 block hover:text-sky-300"
-                                >
-                                  View File Attachment
-                                </a>
-                              )}
+                              ) : (() => {
+                                const safeHref = getSafeAttachmentHref(msg.mediaUrl);
+                                return safeHref ? (
+                                  <a
+                                    href={safeHref}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs text-sky-400 underline p-2 block hover:text-sky-300"
+                                  >
+                                    View File Attachment
+                                  </a>
+                                ) : (
+                                  <span className="text-[11px] text-amber-400 p-2 block">
+                                    [Blocked unverified media source]
+                                  </span>
+                                );
+                              })()}
                             </div>
                           )}
                         </div>

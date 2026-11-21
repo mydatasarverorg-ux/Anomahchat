@@ -102,7 +102,7 @@ export function ProfileModal({
   const [about, setAbout] = useState(user?.about || 'Available | Using Anomah Chat');
   const [photoURL, setPhotoURL] = useState(user?.photoURL || '');
   const [phoneNumber, setPhoneNumber] = useState(user?.phoneNumber || '');
-  const [discoverableByPhone, setDiscoverableByPhone] = useState(user?.discoverableByPhone !== false);
+  const [discoverableByPhone, setDiscoverableByPhone] = useState(user?.discoverableByPhone === true);
   const [phoneSlotStatus, setPhoneSlotStatus] = useState<PhoneSlotStatus | null>(null);
 
   // Security Fields (Quick App-Lock PIN is hashed client-side, never stored in plaintext)
@@ -226,7 +226,7 @@ export function ProfileModal({
     setAbout(user?.about || 'Available | Using Anomah Chat');
     setPhotoURL(user?.photoURL || '');
     setPhoneNumber(user?.phoneNumber || '');
-    setDiscoverableByPhone(user?.discoverableByPhone !== false);
+    setDiscoverableByPhone(user?.discoverableByPhone === true);
     setUsername(user?.username || '');
     setSavedOnDevice(isDeviceAccountSaved(user?.userId));
     setAppLockPinInput('');

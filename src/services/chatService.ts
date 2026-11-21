@@ -106,7 +106,20 @@ export async function syncUserProfile(user: {
   const path = `users/${user.uid}`;
   try {
     const userRef = doc(db, 'users', user.uid);
-    const existingSnap = await getDoc(userRef);
+    const [existingSnap, banSnap] = await Promise.all([
+      getDoc(userRef),
+      getDoc(doc(db, 'bans', user.uid)).catch(() => null),
+    ]);
+    const activeBanData = banSnap?.exists()
+      ? (banSnap.data() as {
+          isBanned?: boolean;
+          reason?: string;
+          bannedAt?: string;
+          bannedBy?: string;
+          bannedUntil?: string | null;
+          bannedUntilMs?: number | null;
+        })
+      : null;
 
     const fallbackName = user.displayName || user.email?.split('@')[0] || 'User';
     const fallbackPhoto = user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.uid}`;
@@ -119,7 +132,7 @@ export async function syncUserProfile(user: {
       const resolvedName = (data.displayName || user.displayName || fallbackName).slice(0, 100);
       const resolvedPhoto = (data.photoURL || user.photoURL || fallbackPhoto).slice(0, 1000);
       const updated: Record<string, unknown> = {
-        isOnline: true,
+        isOnline: activeBanData?.isBanned ? false : true,
         lastSeen: nowIso,
         displayName: resolvedName,
         photoURL: resolvedPhoto,
@@ -139,13 +152,24 @@ export async function syncUserProfile(user: {
       }
       await updateDoc(userRef, updated);
 
-      const merged = { ...data, ...updated } as UserProfile;
+      const merged = {
+        ...data,
+        ...updated,
+        ...(activeBanData?.isBanned
+          ? {
+              isBanned: true,
+              banReason: activeBanData.reason || data.banReason,
+              bannedAt: activeBanData.bannedAt || data.bannedAt,
+              bannedBy: activeBanData.bannedBy || data.bannedBy,
+              bannedUntil: activeBanData.bannedUntil ?? data.bannedUntil,
+              bannedUntilMs: activeBanData.bannedUntilMs ?? data.bannedUntilMs,
+            }
+          : {}),
+      } as UserProfile;
       const resolvedPhoneHash =
-        merged.discoverableByPhone === false
-          ? null
-          : merged.phoneNumber
+        merged.discoverableByPhone === true && merged.phoneNumber
           ? await hashPhoneForDirectory(merged.phoneNumber)
-          : undefined;
+          : null;
       await syncDirectoryEntry(
         user.uid,
         toDirectoryPayload({
@@ -156,7 +180,7 @@ export async function syncUserProfile(user: {
           username: merged.username,
           phoneLookupHash: resolvedPhoneHash,
           status: merged.status || 'active',
-          isOnline: true,
+          isOnline: Boolean(updated.isOnline),
           lastSeen: nowIso,
           isBanned: merged.isBanned,
         })
@@ -166,7 +190,22 @@ export async function syncUserProfile(user: {
       }
       return merged;
     } else {
-      const initialPhoneHash = cleanPhone.length >= 6 ? await hashPhoneForDirectory(cleanPhone) : null;
+      if (activeBanData?.isBanned) {
+        return {
+          userId: user.uid,
+          displayName: fallbackName.slice(0, 100),
+          email: cleanEmail,
+          photoURL: fallbackPhoto.slice(0, 1000),
+          status: 'active',
+          isBanned: true,
+          banReason: activeBanData.reason || 'Suspended by administrator',
+          bannedAt: activeBanData.bannedAt || nowIso,
+          bannedBy: activeBanData.bannedBy || 'admin',
+          bannedUntil: activeBanData.bannedUntil || undefined,
+          bannedUntilMs: activeBanData.bannedUntilMs ?? null,
+          createdAt: nowIso,
+        };
+      }
       const newProfile: UserProfile = {
         userId: user.uid,
         displayName: fallbackName.slice(0, 100),
@@ -177,9 +216,11 @@ export async function syncUserProfile(user: {
               initialPhoneNumber: cleanPhone,
               initialPhoneSetAt: nowIso,
               phoneHistory: [],
-              discoverableByPhone: true,
+              discoverableByPhone: false,
             }
-          : {}),
+          : {
+              discoverableByPhone: false,
+            }),
         photoURL: fallbackPhoto.slice(0, 1000),
         about: 'Available | Using Anomah Chat',
         status: 'active',
@@ -192,7 +233,7 @@ export async function syncUserProfile(user: {
         user.uid,
         toDirectoryPayload({
           ...newProfile,
-          ...(initialPhoneHash ? { phoneLookupHash: initialPhoneHash } : {}),
+          phoneLookupHash: null,
         })
       );
       return newProfile;
@@ -1365,9 +1406,12 @@ export async function findDirectoryUserByIdentifier(identifier: string): Promise
 }
 
 // ------------------------------------------------------------------
-// QUICK APP-LOCK PIN (Free Client-Side WebCrypto SHA-256 + Owner-Private Doc)
-// Replaces insecure unauthenticated plaintext PIN login.
+// QUICK APP-LOCK PIN (Client Screen-Lock via PBKDF2-SHA256 + Fail-Closed Guard)
 // ------------------------------------------------------------------
+
+const PIN_PBKDF2_PREFIX = 'pbkdf2$';
+const PIN_PBKDF2_ITERATIONS = 120000;
+const inMemoryPinGuard = new Map<string, { failedCount: number; lockedUntil: number }>();
 
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes)
@@ -1376,13 +1420,35 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 function generateSalt(): string {
-  const arr = new Uint8Array(16);
+  const arr = new Uint8Array(24);
   crypto.getRandomValues(arr);
-  return bytesToHex(arr);
+  return `${PIN_PBKDF2_PREFIX}${bytesToHex(arr)}`;
 }
 
 export async function hashAppLockPin(pin: string, salt: string): Promise<string> {
-  const data = new TextEncoder().encode(`${salt}:${pin.trim()}`);
+  const cleanPin = pin.trim();
+  const encoder = new TextEncoder();
+  if (salt.startsWith(PIN_PBKDF2_PREFIX)) {
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(cleanPin),
+      { name: 'PBKDF2' },
+      false,
+      ['deriveBits']
+    );
+    const derived = await crypto.subtle.deriveBits(
+      {
+        name: 'PBKDF2',
+        salt: encoder.encode(salt),
+        iterations: PIN_PBKDF2_ITERATIONS,
+        hash: 'SHA-256',
+      },
+      keyMaterial,
+      256
+    );
+    return bytesToHex(new Uint8Array(derived));
+  }
+  const data = encoder.encode(`${salt}:${cleanPin}`);
   const digest = await crypto.subtle.digest('SHA-256', data);
   return bytesToHex(new Uint8Array(digest));
 }
@@ -1402,8 +1468,10 @@ export async function saveAppLockPin(userId: string, pin: string): Promise<void>
 
   await setDoc(doc(db, 'users', userId, 'private', 'security'), payload);
   await updateDoc(doc(db, 'users', userId), { hasAppLockPin: true });
+  inMemoryPinGuard.delete(userId);
   try {
     localStorage.setItem(`anomah_app_lock_${userId}`, JSON.stringify(payload));
+    localStorage.removeItem(`anomah_app_lock_guard_${userId}`);
   } catch {
     // ignore storage quota
   }
@@ -1412,6 +1480,7 @@ export async function saveAppLockPin(userId: string, pin: string): Promise<void>
 export async function removeAppLockPin(userId: string): Promise<void> {
   await deleteDoc(doc(db, 'users', userId, 'private', 'security')).catch(() => {});
   await updateDoc(doc(db, 'users', userId), { hasAppLockPin: false });
+  inMemoryPinGuard.delete(userId);
   try {
     localStorage.removeItem(`anomah_app_lock_${userId}`);
     localStorage.removeItem(`anomah_app_lock_guard_${userId}`);
@@ -1425,14 +1494,15 @@ export async function verifyAppLockPin(
   enteredPin: string
 ): Promise<{ success: boolean; error?: string }> {
   const guardKey = `anomah_app_lock_guard_${userId}`;
-  let failedCount = 0;
-  let lockedUntil = 0;
+  const memGuard = inMemoryPinGuard.get(userId);
+  let failedCount = memGuard?.failedCount || 0;
+  let lockedUntil = memGuard?.lockedUntil || 0;
   try {
     const raw = localStorage.getItem(guardKey);
     if (raw) {
       const parsed = JSON.parse(raw);
-      failedCount = Number(parsed.failedCount || 0);
-      lockedUntil = Number(parsed.lockedUntil || 0);
+      failedCount = Math.max(failedCount, Number(parsed.failedCount || 0));
+      lockedUntil = Math.max(lockedUntil, Number(parsed.lockedUntil || 0));
     }
   } catch {
     // ignore
@@ -1447,11 +1517,18 @@ export async function verifyAppLockPin(
   }
 
   let lockConfig: UserSecurityLock | null = null;
+  let securityDocExplicitlyMissing = false;
   try {
     const snap = await getDoc(doc(db, 'users', userId, 'private', 'security'));
     if (snap.exists()) {
       lockConfig = snap.data() as UserSecurityLock;
-      localStorage.setItem(`anomah_app_lock_${userId}`, JSON.stringify(lockConfig));
+      try {
+        localStorage.setItem(`anomah_app_lock_${userId}`, JSON.stringify(lockConfig));
+      } catch {
+        // ignore storage quota
+      }
+    } else {
+      securityDocExplicitlyMissing = true;
     }
   } catch {
     try {
@@ -1463,11 +1540,26 @@ export async function verifyAppLockPin(
   }
 
   if (!lockConfig?.pinHash || !lockConfig?.salt) {
-    return { success: true };
+    if (securityDocExplicitlyMissing) {
+      try {
+        const userSnap = await getDoc(doc(db, 'users', userId));
+        if (userSnap.exists() && (userSnap.data() as UserProfile).hasAppLockPin === false) {
+          inMemoryPinGuard.delete(userId);
+          return { success: true };
+        }
+      } catch {
+        // Fail closed below
+      }
+    }
+    return {
+      success: false,
+      error: 'Unable to verify App-Lock configuration right now. Check your connection or sign out and sign in again.',
+    };
   }
 
   const candidateHash = await hashAppLockPin(enteredPin, lockConfig.salt);
   if (candidateHash === lockConfig.pinHash) {
+    inMemoryPinGuard.delete(userId);
     try {
       localStorage.removeItem(guardKey);
     } catch {}
@@ -1476,6 +1568,7 @@ export async function verifyAppLockPin(
 
   const nextFailed = failedCount + 1;
   const nextLockedUntil = nextFailed >= 5 ? Date.now() + 5 * 60 * 1000 : 0;
+  inMemoryPinGuard.set(userId, { failedCount: nextFailed, lockedUntil: nextLockedUntil });
   try {
     localStorage.setItem(
       guardKey,

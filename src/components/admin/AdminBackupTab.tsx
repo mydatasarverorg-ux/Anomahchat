@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { isSafeAudioMediaUrl, isSafeImageMediaUrl } from '../../utils/mediaUrl';
 import {
   HardDrive,
   CloudUpload,
@@ -1210,14 +1211,14 @@ export function AdminBackupTab({
                         </span>
                       </div>
                       {m.text && <p className="text-slate-200 whitespace-pre-wrap break-words">{m.text}</p>}
-                      {m.type === 'image' && m.mediaUrl && (
+                      {m.type === 'image' && isSafeImageMediaUrl(m.mediaUrl) && (
                         <img
                           src={m.mediaUrl}
                           alt="Archived media"
                           className="max-h-56 rounded-lg border border-slate-800 object-contain"
                         />
                       )}
-                      {m.type === 'audio' && m.mediaUrl && (
+                      {m.type === 'audio' && isSafeAudioMediaUrl(m.mediaUrl) && (
                         <audio controls src={m.mediaUrl} className="w-full max-w-xs h-8" />
                       )}
                     </div>

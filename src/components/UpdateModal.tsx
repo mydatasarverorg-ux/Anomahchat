@@ -79,12 +79,20 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
 
     const win = window as unknown as { AndroidUpdater?: NativeUpdaterBridge };
     if (win.AndroidUpdater) {
+      const cleanSha = (release.apkSha256 || '').trim();
+      if (!/^[a-fA-F0-9]{64}$/.test(cleanSha)) {
+        setDownloadStarted(false);
+        setUrlError(
+          language === 'bn'
+            ? 'নিরাপত্তা যাচাইয়ের জন্য এই রিলিজে SHA-256 ডাইজেস্ট পাওয়া যায়নি। নিচের "ব্রাউজার থেকে সরাসরি ডাউনলোড" দিয়ে নিরাপদে GitHub Releases থেকে নিন।'
+            : 'Missing SHA-256 verification digest for in-app install. Please use "Download via Browser" from official GitHub Releases.'
+        );
+        return;
+      }
+
       try {
         if (typeof win.AndroidUpdater.downloadAndInstall === 'function') {
-          win.AndroidUpdater.downloadAndInstall(url, release.versionName, release.apkSha256 || '');
-          return;
-        } else if (typeof win.AndroidUpdater.downloadWithManager === 'function') {
-          win.AndroidUpdater.downloadWithManager(url);
+          win.AndroidUpdater.downloadAndInstall(url, release.versionName, cleanSha);
           return;
         }
       } catch (e) {

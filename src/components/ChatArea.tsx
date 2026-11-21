@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
+import { isSafeImageMediaUrl } from '../utils/mediaUrl';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import {
@@ -1142,7 +1143,7 @@ export function ChatArea({
         </form>
       )}
 
-      {previewImage && (
+      {isSafeImageMediaUrl(previewImage) && (
         <div
           onClick={() => setPreviewImage(null)}
           className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 cursor-zoom-out"

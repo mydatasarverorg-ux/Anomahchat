@@ -1,11 +1,11 @@
-# Anomah Chat (`v1.0.11` · `Mahi A11`)
+# Anomah Chat (`v1.0.12` · `Mahi A12`)
 
 > **Developer & Owner:** Mahi Muhtasim  
 > **Package ID:** `com.mahimuhtasim.anomahchat`  
 > **Platforms:** Web (PWA) & Android Native APK (Capacitor 8)  
-> **Release Channel:** Stable (`versionCode: 111`)
+> **Release Channel:** Stable (`versionCode: 112`)
 
-Anomah Chat is a real-time cross-platform cloud messenger built with React, TypeScript, Tailwind CSS, Firebase Authentication, Cloud Firestore, WebRTC, and Capacitor Android. Users can connect worldwide via 1-on-1 direct messaging, group chats, voice notes, compressed image sharing, and peer-to-peer audio/video calls, backed by strict Zero-Trust Firestore Security Rules.
+Anomah Chat is a real-time cross-platform cloud messenger built with React, TypeScript, Tailwind CSS, Firebase Authentication, Cloud Firestore, WebRTC, and Capacitor Android. Users can connect worldwide via 1-on-1 direct messaging, group chats, voice notes, compressed image sharing, and peer-to-peer audio/video calls, backed by defense-in-depth Firestore Security Rules.
 
 ---
 
@@ -23,12 +23,15 @@ Anomah Chat is a real-time cross-platform cloud messenger built with React, Type
 - Supports live camera preview, microphone mute/unmute, camera toggle, incoming call ringing/accept/decline controls, and automatic 45-second unanswered call timeout.
 
 ### Security & Privacy Architecture
-- **Zero-Trust Firestore Security Rules (`firestore.rules`):**
+- **Defense-in-Depth Firestore Security Rules (`firestore.rules`):**
   - Default-deny catch-all rule (`match /{document=**}`).
-  - Strict separation between private user PII (`users/{uid}`) and public non-PII discovery profiles (`directory/{uid}`).
+  - Strict separation between private user PII (`users/{uid}`), immutable moderation tombstones (`bans/{uid}`), and public non-PII discovery profiles (`directory/{uid}`).
+  - Owner self-deletion of `users/{uid}` is blocked to prevent suspension and phone-history bypasses.
   - Group permissions enforce creator/admin privileges for group management, message moderation, and room deletion.
-  - Suspension enforcement blocks banned accounts from sending messages or creating/updating chats, with server-time (`request.time`) verified temporary ban expiry.
-- **Quick App-Lock PIN:** Optional 4–6 digit lock screen protected with client-side salted **SHA-256** digests stored in owner-private `users/{uid}/private/security` documents and brute-force lockout protection.
+  - Suspension enforcement checks both `bans/{uid}` and `users/{uid}` to block suspended accounts from messaging or creating/updating chats, with server-time (`request.time`) verified temporary ban expiry and 30-day phone-change cooldowns.
+  - Inline message media URLs (`mediaUrl`) are restricted to validated base64 image/audio data URLs to prevent external tracking beacons.
+  - *Privacy Note:* Messages are stored as standard Firestore documents (not end-to-end encrypted) to support multi-device sync, moderation reporting, and admin Drive backups.
+- **Quick App-Lock PIN (Client Screen Lock):** Optional 4–6 digit client screen lock protected with **PBKDF2-HMAC-SHA256 (120,000 iterations)** digests stored in owner-private `users/{uid}/private/security` documents, fail-closed verification, and lockout rate-limiting.
 - **15-Day Account Deletion Grace Period:** Scheduled account deactivation with self-service recovery within 15 days.
 
 ### Super Admin Control Panel
@@ -36,7 +39,7 @@ Anomah Chat is a real-time cross-platform cloud messenger built with React, Type
 - Includes live overview metrics, user dossier & 7-day activity insights, temporary/permanent ban & official warning tools, read-only Ghost DM audit mode, abuse report resolution, recovery ticket desk, global announcements, immutable audit logs, and **APK Release publishing**.
 
 ### Native Android APK & In-App Auto-Updater
-- **Native Updater Bridge (`MainActivity.java`):** Downloads release APKs strictly from the allowlisted GitHub Releases repository prefix, verifies optional **SHA-256 checksums**, and launches the Android package installer directly.
+- **Native Updater Bridge (`MainActivity.java`):** Downloads release APKs strictly from the allowlisted GitHub Releases repository prefix, enforces **fail-closed SHA-256 checksum verification**, scopes WebView OAuth popups to trusted domains, and launches the Android package installer directly.
 
 ---
 
@@ -52,7 +55,15 @@ Anomah Chat is a real-time cross-platform cloud messenger built with React, Type
 
 ---
 
-## Changelog (`v1.0.11 · Mahi A11`)
+## Changelog (`v1.0.12 · Mahi A12`)
+- **Free-Tier Security Hardening Audit Fixes:**
+  - Moved active suspension records to immutable `bans/{uid}` tombstones and disabled owner `users/{uid}` deletion so suspensions and phone histories cannot be erased.
+  - Upgraded Quick App-Lock PIN hashing to **PBKDF2-HMAC-SHA256 (120,000 iterations)**, fixed fail-open unlock behavior, and combined in-memory + persistent brute-force backoff.
+  - Enforced server-time (`request.time`) 30-day phone-change cooldowns, sender-spoof checks on `lastMessageSenderId`, and strict `data:image/*` / `data:audio/*` validation on `mediaUrl`.
+  - Defaulted `discoverableByPhone` to opt-in (`false`) and removed third-party Google Fonts requests.
+  - Hardened Android `MainActivity.java` with **fail-closed** SHA-256 APK update verification, DownloadManager status checks, scoped `FileProvider` (`Download/`), OAuth-only popup URL filtering, and WebView leak cleanup.
+
+### Previous (`v1.0.11 · Mahi A11`)
 - **Friend Request & Accepted Connection System (`RequestsModal`, `ConnectPreviewModal`, `firestore.rules`):**
   - Enforced accepted friend status (`friendships`) prior to opening new 1-on-1 DMs or starting calls, with full incoming/sent/friends/blocked management.
   - Added QR auto-request flow (`?chat=` / `?group=`) with instant cancel support.
@@ -131,8 +142,8 @@ The workflow in `.github/workflows/build-apk.yml` automatically builds an Androi
    - `ANDROID_KEY_ALIAS`
    - `ANDROID_KEY_PASSWORD`
    *(Falls back to a Debug APK if keystore secrets are not set.)*
-3. Computes the APK **SHA-256** digest, uploads `AnomahChat-v1.0.11-APK` as a workflow artifact, and publishes `v1.0.11` (`AnomahChat-v1.0.11.apk` & `AnomahChat.apk`) to **GitHub Releases**.
+3. Computes the APK **SHA-256** digest, uploads `AnomahChat-v1.0.12-APK` as a workflow artifact, and publishes `v1.0.12` (`AnomahChat-v1.0.12.apk` & `AnomahChat.apk`) to **GitHub Releases**.
 
 ---
 
-*Built & maintained by **Mahi Muhtasim** · Anomah Chat `v1.0.11` (`Mahi A11`)*
+*Built & maintained by **Mahi Muhtasim** · Anomah Chat `v1.0.12` (`Mahi A12`)*

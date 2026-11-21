@@ -1,6 +1,7 @@
 import type React from 'react';
 import { CheckCheck, Pause, Play, Phone, Video, PhoneIncoming, PhoneOutgoing, PhoneMissed } from 'lucide-react';
 import type { ChatMessage, ChatRoom, DirectoryUser, UserProfile } from '../../types/chat';
+import { isSafeAudioMediaUrl, isSafeImageMediaUrl } from '../../utils/mediaUrl';
 
 interface MessageBubbleProps {
   msg: ChatMessage;
@@ -229,14 +230,14 @@ export function MessageBubble({
             </div>
           )}
 
-          {msg.type === 'image' && msg.mediaUrl && (
+          {msg.type === 'image' && isSafeImageMediaUrl(msg.mediaUrl) && (
             <div className="mb-2 rounded-xl overflow-hidden cursor-pointer">
               <img
                 src={msg.mediaUrl}
                 alt="Shared media"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (msg.mediaUrl) onPreviewImage(msg.mediaUrl);
+                  if (isSafeImageMediaUrl(msg.mediaUrl)) onPreviewImage(msg.mediaUrl);
                 }}
                 className="max-h-64 w-full object-cover hover:opacity-95 transition rounded-xl"
               />
@@ -249,7 +250,8 @@ export function MessageBubble({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  playVoiceNote(msg.id, msg.mediaUrl);
+                  const safeAudio = isSafeAudioMediaUrl(msg.mediaUrl) ? msg.mediaUrl : undefined;
+                  playVoiceNote(msg.id, safeAudio);
                 }}
                 className={`w-9 h-9 rounded-full flex items-center justify-center transition cursor-pointer shadow shrink-0 ${
                   isMine
@@ -268,7 +270,8 @@ export function MessageBubble({
               <div
                 onClick={(e) => {
                   e.stopPropagation();
-                  playVoiceNote(msg.id, msg.mediaUrl);
+                  const safeAudio = isSafeAudioMediaUrl(msg.mediaUrl) ? msg.mediaUrl : undefined;
+                  playVoiceNote(msg.id, safeAudio);
                 }}
                 className="flex-1 flex items-center gap-1 h-6 cursor-pointer"
               >

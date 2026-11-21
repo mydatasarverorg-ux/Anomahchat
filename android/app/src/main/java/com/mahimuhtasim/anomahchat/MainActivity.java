@@ -57,7 +57,22 @@ public class MainActivity extends BridgeActivity {
     private boolean isAllowedReleaseUrl(String url) {
         if (url == null) return false;
         String trimmed = url.trim();
-        return trimmed.startsWith(ALLOWED_RELEASE_PREFIX);
+        if (!trimmed.startsWith(ALLOWED_RELEASE_PREFIX)) return false;
+        try {
+            Uri uri = Uri.parse(trimmed);
+            String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase() : "";
+            String host = uri.getHost() != null ? uri.getHost().toLowerCase() : "";
+            String userInfo = uri.getUserInfo();
+            String path = uri.getPath() != null ? uri.getPath() : "";
+            return "https".equals(scheme)
+                    && "github.com".equals(host)
+                    && (userInfo == null || userInfo.isEmpty())
+                    && path.startsWith("/mydatasarverorg-ux/Anomahchat/releases/")
+                    && !trimmed.contains("..")
+                    && !trimmed.contains("@");
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private boolean isTrustedWebOrigin(Uri origin) {
@@ -70,10 +85,25 @@ public class MainActivity extends BridgeActivity {
         if ("https".equals(scheme) || "http".equals(scheme)) {
             return "mydatasarverorg-ux.github.io".equals(host)
                     || "localhost".equals(host)
-                    || "127.0.0.1".equals(host)
-                    || host.endsWith(".run.app");
+                    || "127.0.0.1".equals(host);
         }
         return false;
+    }
+
+    private boolean isAllowedOAuthPopupUrl(Uri uri) {
+        if (uri == null) return false;
+        String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase() : "";
+        String host = uri.getHost() != null ? uri.getHost().toLowerCase() : "";
+        if (!"https".equals(scheme)) {
+            return false;
+        }
+        return "accounts.google.com".equals(host)
+                || host.endsWith(".google.com")
+                || host.endsWith(".googleusercontent.com")
+                || host.endsWith(".gstatic.com")
+                || host.endsWith(".firebaseapp.com")
+                || host.endsWith(".web.app")
+                || "mydatasarverorg-ux.github.io".equals(host);
     }
 
     private String computeStreamSha256(InputStream is) {
@@ -95,11 +125,12 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    // Fail-closed: refuse installation unless expectedSha256 is a valid 64-char hex digest matching the downloaded APK
     private boolean verifyDownloadedApkSha256(Uri downloadedUri, File fallbackFile, String expectedSha256) {
-        if (expectedSha256 == null) return true;
+        if (expectedSha256 == null) return false;
         String cleanExpected = expectedSha256.trim().toLowerCase();
         if (!cleanExpected.matches("^[a-f0-9]{64}$")) {
-            return true;
+            return false;
         }
 
         InputStream is = null;
@@ -161,6 +192,7 @@ public class MainActivity extends BridgeActivity {
                 settings.setJavaScriptCanOpenWindowsAutomatically(true);
                 settings.setMediaPlaybackRequiresUserGesture(false);
 
+                // Standard Chrome UA is intentionally required so Google Sign-In works inside WebView without 403 disallowed_useragent
                 String standardChromeUA = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
                 settings.setUserAgentString(standardChromeUA);
 
@@ -218,7 +250,7 @@ public class MainActivity extends BridgeActivity {
                     @Override
                     public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, android.os.Message resultMsg) {
                         final android.app.Dialog authDialog = new android.app.Dialog(MainActivity.this, android.R.style.Theme_DeviceDefault_Light_NoActionBar_Fullscreen);
-                        WebView authWebView = new WebView(MainActivity.this);
+                        final WebView authWebView = new WebView(MainActivity.this);
                         WebSettings authSettings = authWebView.getSettings();
                         authSettings.setJavaScriptEnabled(true);
                         authSettings.setDomStorageEnabled(true);
@@ -238,7 +270,28 @@ public class MainActivity extends BridgeActivity {
                         authWebView.setWebViewClient(new android.webkit.WebViewClient() {
                             @Override
                             public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest request) {
-                                return false;
+                                Uri targetUri = request != null ? request.getUrl() : null;
+                                if (isAllowedOAuthPopupUrl(targetUri)) {
+                                    return false;
+                                }
+                                if (targetUri != null && "https".equalsIgnoreCase(targetUri.getScheme())) {
+                                    try {
+                                        Intent externalIntent = new Intent(Intent.ACTION_VIEW, targetUri);
+                                        externalIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                        startActivity(externalIntent);
+                                    } catch (Exception ignored) {
+                                    }
+                                }
+                                return true;
+                            }
+                        });
+
+                        authDialog.setOnDismissListener(d -> {
+                            try {
+                                authWebView.stopLoading();
+                                authWebView.loadUrl("about:blank");
+                                authWebView.destroy();
+                            } catch (Exception ignored) {
                             }
                         });
 
@@ -640,7 +693,31 @@ public class MainActivity extends BridgeActivity {
                                 @Override
                                 public void onReceive(Context context, Intent intent) {
                                     long id = intent.getLongExtra(android.app.DownloadManager.EXTRA_DOWNLOAD_ID, -1);
-                                    if (id == activeDownloadId) {
+                                    if (id == activeDownloadId && id != -1) {
+                                        boolean downloadSucceeded = false;
+                                        android.database.Cursor cursor = null;
+                                        try {
+                                            android.app.DownloadManager.Query q = new android.app.DownloadManager.Query().setFilterById(activeDownloadId);
+                                            cursor = manager.query(q);
+                                            if (cursor != null && cursor.moveToFirst()) {
+                                                int statusIdx = cursor.getColumnIndex(android.app.DownloadManager.COLUMN_STATUS);
+                                                if (statusIdx >= 0 && cursor.getInt(statusIdx) == android.app.DownloadManager.STATUS_SUCCESSFUL) {
+                                                    downloadSucceeded = true;
+                                                }
+                                            }
+                                        } catch (Exception ignored) {
+                                        } finally {
+                                            if (cursor != null) {
+                                                cursor.close();
+                                            }
+                                        }
+
+                                        if (!downloadSucceeded) {
+                                            cleanOldUpdateFiles();
+                                            Toast.makeText(MainActivity.this, "আপডেট ডাউনলোড সম্পন্ন হয়নি। অনুগ্রহ করে আবার চেষ্টা করুন।", Toast.LENGTH_LONG).show();
+                                            return;
+                                        }
+
                                         notifyWebViewDownloadFinished();
                                         Uri downloadedUri = manager.getUriForDownloadedFile(activeDownloadId);
                                         File pubFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "AnomahChat-Update.apk");
@@ -683,7 +760,8 @@ public class MainActivity extends BridgeActivity {
 
         @android.webkit.JavascriptInterface
         public void downloadWithManager(final String url) {
-            downloadAndInstall(url, "latest", "");
+            Toast.makeText(MainActivity.this, "নিরাপত্তা যাচাইয়ের জন্য ব্রাউজার থেকে ডাউনলোড চালু করা হচ্ছে।", Toast.LENGTH_SHORT).show();
+            openSystemDownload(url);
         }
     }
 

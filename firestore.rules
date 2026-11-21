@@ -36,12 +36,17 @@ service cloud.firestore {
         && request.auth.token.email_verified == true;
     }
 
-    // Check caller is not currently banned in their master profile
+    // Check caller is not currently banned in immutable bans/{uid} or master profile
     function isCallerNotBanned() {
       return isAdmin()
-        || !exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        || !('isBanned' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data)
-        || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isBanned != true;
+        || (
+          !exists(/databases/$(database)/documents/bans/$(request.auth.uid))
+          && (
+            !exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            || !('isBanned' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data)
+            || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isBanned != true
+          )
+        );
     }
 
     function getSortedPairId(uidA, uidB) {
@@ -94,7 +99,7 @@ service cloud.firestore {
       return data.keys().hasAll(['userId', 'displayName', 'email', 'createdAt'])
         && data.keys().hasOnly([
           'userId', 'displayName', 'email', 'phoneNumber', 'initialPhoneNumber', 'initialPhoneSetAt',
-          'phoneHistory', 'lastPhoneChangedAt', 'phoneChangeCooldownBypass', 'deviceLimits',
+          'phoneHistory', 'lastPhoneChangedAt', 'lastPhoneChangedAtMs', 'phoneChangeCooldownBypass', 'deviceLimits',
           'discoverableByPhone', 'photoURL', 'about', 'username',
           'hasAppLockPin', 'status', 'deleteRequestedAt', 'deleteScheduledAt',
           'themePreference', 'role', 'isBanned', 'banReason', 'bannedAt',
@@ -112,6 +117,7 @@ service cloud.firestore {
         && (!('initialPhoneSetAt' in data) || data.initialPhoneSetAt == null || (data.initialPhoneSetAt is string && data.initialPhoneSetAt.size() <= 64))
         && (!('phoneHistory' in data) || (data.phoneHistory is list && data.phoneHistory.size() <= 20 && (data.phoneHistory.size() == 0 || data.phoneHistory[0] is map)))
         && (!('lastPhoneChangedAt' in data) || data.lastPhoneChangedAt == null || (data.lastPhoneChangedAt is string && data.lastPhoneChangedAt.size() <= 64))
+        && (!('lastPhoneChangedAtMs' in data) || data.lastPhoneChangedAtMs == null || data.lastPhoneChangedAtMs is number)
         && (!('phoneChangeCooldownBypass' in data) || data.phoneChangeCooldownBypass is bool)
         && (!('deviceLimits' in data) || data.deviceLimits == null || (
           data.deviceLimits is map &&
@@ -143,6 +149,20 @@ service cloud.firestore {
         && (!('lastExitAt' in data) || (data.lastExitAt is string && data.lastExitAt.size() <= 64))
         && (!('totalActiveMinutes' in data) || data.totalActiveMinutes is number)
         && (!('dailyActivity' in data) || data.dailyActivity is map);
+    }
+
+    function isValidBanRecord(data, userId) {
+      return data.keys().hasAll(['userId', 'isBanned', 'bannedAt', 'bannedBy'])
+        && data.keys().hasOnly([
+          'userId', 'isBanned', 'reason', 'bannedAt', 'bannedBy', 'bannedUntil', 'bannedUntilMs'
+        ])
+        && data.userId is string && data.userId == userId && data.userId.size() <= 128
+        && data.isBanned == true
+        && (!('reason' in data) || data.reason == null || (data.reason is string && data.reason.size() <= 500))
+        && data.bannedAt is string && data.bannedAt.size() <= 64
+        && data.bannedBy is string && data.bannedBy.size() <= 150
+        && (!('bannedUntil' in data) || data.bannedUntil == null || (data.bannedUntil is string && data.bannedUntil.size() <= 64))
+        && (!('bannedUntilMs' in data) || data.bannedUntilMs == null || data.bannedUntilMs is number);
     }
 
     function isValidSecurityLock(data) {
@@ -311,7 +331,11 @@ service cloud.firestore {
         && data.readBy is list && data.readBy.size() >= 1 && data.readBy.size() <= 100 && data.readBy[0] is string
         && data.createdAt is string && data.createdAt.size() <= 64
         && (!('senderPhoto' in data) || (data.senderPhoto is string && data.senderPhoto.size() <= 1000))
-        && (!('mediaUrl' in data) || (data.mediaUrl is string && data.mediaUrl.size() <= 950000))
+        && (!('mediaUrl' in data) || (
+          data.mediaUrl is string &&
+          data.mediaUrl.size() <= 950000 &&
+          (data.mediaUrl == '' || data.mediaUrl.matches('^data:(image/(jpeg|jpg|png|webp|gif)|audio/[a-zA-Z0-9.+_-]+)(;[a-zA-Z0-9=+._ -]+)*;base64,[A-Za-z0-9+/=]+$'))
+        ))
         && (!('audioDuration' in data) || data.audioDuration is number)
         && (!('callId' in data) || (data.callId is string && data.callId.size() <= 128))
         && (!('callerId' in data) || (data.callerId is string && data.callerId.size() <= 128))
@@ -463,6 +487,7 @@ service cloud.firestore {
         && data.versionCode is number && data.versionCode >= 100
         && data.apkDownloadUrl is string && data.apkDownloadUrl.size() <= 500
         && data.apkDownloadUrl.matches('^https://github\\.com/mydatasarverorg-ux/Anomahchat/releases/.*')
+        && !data.apkDownloadUrl.matches('.*(@|\\.\\.).*')
         && (!('apkSha256' in data) || (data.apkSha256 is string && data.apkSha256.size() == 64 && data.apkSha256.matches('^[a-fA-F0-9]{64}$')))
         && (!('fileSizeBytes' in data) || data.fileSizeBytes is number)
         && (!('fileSizeText' in data) || (data.fileSizeText is string && data.fileSizeText.size() <= 32))
@@ -535,28 +560,47 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
       allow list: if isAdmin();
-      allow create: if isSignedIn() && isValidId(userId) && isOwner(userId) && isValidUserCreate(incoming(), userId);
+      allow create: if isSignedIn() && isValidId(userId) && isOwner(userId) && isCallerNotBanned() && isValidUserCreate(incoming(), userId);
 
       allow update: if isSignedIn() && isValidId(userId) && isValidUserUpdate(incoming(), existing()) && (
         isAdmin() ||
         (isOwner(userId) && (
           // Action 1: Presence and active minutes tracking
           incoming().diff(existing()).affectedKeys().hasOnly(['isOnline', 'lastSeen', 'lastLoginAt', 'lastExitAt', 'dailyActivity', 'totalActiveMinutes']) ||
-          // Action 2: Profile, phone (immutable initial + append-only history) & sign-in sync
+          // Action 2: Profile, phone (immutable initial + append-only history + server-time 30d cooldown) & sign-in sync
           (
             incoming().diff(existing()).affectedKeys().hasOnly([
               'displayName', 'about', 'photoURL', 'username', 'email',
               'phoneNumber', 'initialPhoneNumber', 'initialPhoneSetAt',
-              'phoneHistory', 'lastPhoneChangedAt', 'phoneChangeCooldownBypass',
+              'phoneHistory', 'lastPhoneChangedAt', 'lastPhoneChangedAtMs', 'phoneChangeCooldownBypass',
               'discoverableByPhone', 'themePreference', 'isOnline', 'lastSeen'
             ]) &&
+            (!('email' in incoming().diff(existing()).affectedKeys()) ||
+              (request.auth.token.email is string && incoming().email.lower() == request.auth.token.email.lower())) &&
             (!('initialPhoneNumber' in existing()) || existing().initialPhoneNumber == null ||
               (('initialPhoneNumber' in incoming()) && incoming().initialPhoneNumber == existing().initialPhoneNumber)) &&
             (!('initialPhoneSetAt' in existing()) || existing().initialPhoneSetAt == null ||
               (('initialPhoneSetAt' in incoming()) && incoming().initialPhoneSetAt == existing().initialPhoneSetAt)) &&
             (!('phoneHistory' in existing()) ||
               (('phoneHistory' in incoming()) && incoming().phoneHistory.size() >= existing().phoneHistory.size())) &&
-            (!('phoneChangeCooldownBypass' in incoming()) || incoming().phoneChangeCooldownBypass == false)
+            (!('phoneChangeCooldownBypass' in incoming()) || incoming().phoneChangeCooldownBypass == false) &&
+            (
+              !('initialPhoneNumber' in existing()) || existing().initialPhoneNumber == null ||
+              !('phoneNumber' in incoming().diff(existing()).affectedKeys()) ||
+              incoming().phoneNumber == existing().phoneNumber ||
+              (
+                isCallerNotBanned() &&
+                ('lastPhoneChangedAtMs' in incoming()) &&
+                incoming().lastPhoneChangedAtMs is number &&
+                incoming().lastPhoneChangedAtMs >= request.time.toMillis() - 300000 &&
+                incoming().lastPhoneChangedAtMs <= request.time.toMillis() + 300000 &&
+                (
+                  (('phoneChangeCooldownBypass' in existing()) && existing().phoneChangeCooldownBypass == true && incoming().phoneChangeCooldownBypass == false) ||
+                  (!('lastPhoneChangedAtMs' in existing()) || existing().lastPhoneChangedAtMs == null ||
+                    request.time.toMillis() >= existing().lastPhoneChangedAtMs + 2592000000)
+                )
+              )
+            )
           ) ||
           // Action 3: Toggle Quick App-Lock PIN flag
           incoming().diff(existing()).affectedKeys().hasOnly(['hasAppLockPin']) ||
@@ -575,7 +619,8 @@ service cloud.firestore {
         ))
       );
 
-      allow delete: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      // Owner cannot self-delete their account record (prevents ban/phone-history bypass)
+      allow delete: if isValidId(userId) && isAdmin();
 
       // Owner-private hashed Quick App-Lock PIN
       match /private/{docId} {
@@ -601,6 +646,19 @@ service cloud.firestore {
           && (isOwner(userId) || isAdmin());
         allow delete: if isValidId(userId) && isValidId(deviceId) && (isOwner(userId) || isAdmin());
       }
+    }
+
+    // 1A. Immutable Ban Tombstones (Admin-managed; cannot be erased by user self-deletion)
+    match /bans/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(userId) && isValidBanRecord(incoming(), userId);
+      allow delete: if isValidId(userId) && (
+        isAdmin() ||
+        (isOwner(userId) &&
+          ('bannedUntilMs' in existing()) && existing().bannedUntilMs is number &&
+          request.time.toMillis() >= existing().bannedUntilMs)
+      );
     }
 
     // 2. Non-PII Discovery & Presence Directory (Strictly excludes email and credentials)
@@ -846,12 +904,19 @@ service cloud.firestore {
         (request.auth.uid in existing().participantIds &&
           incoming().type == existing().type &&
           incoming().createdAt == existing().createdAt && (
-          // Action 1: Last message snippet sync on send
+          // Action 1: Last message snippet sync on send (prevents sender spoofing)
           (isCallerNotBanned() &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'lastMessageId', 'lastMessageText', 'lastMessageSenderId',
               'lastMessageTime', 'lastMessageReadBy', 'updatedAt'
-            ])) ||
+            ]) &&
+            (!('lastMessageSenderId' in incoming().diff(existing()).affectedKeys()) ||
+              incoming().lastMessageSenderId == request.auth.uid ||
+              incoming().lastMessageSenderId in ['', 'system'] ||
+              (incoming().lastMessageId is string &&
+                incoming().lastMessageId.size() >= 1 &&
+                exists(/databases/$(database)/documents/chats/$(chatId)/messages/$(incoming().lastMessageId)) &&
+                get(/databases/$(database)/documents/chats/$(chatId)/messages/$(incoming().lastMessageId)).data.senderId == incoming().lastMessageSenderId))) ||
           // Action 2: Group admin manages title, settings, members, bans, and admins
           (isCallerNotBanned() && existing().type == 'group' &&
             (!('adminIds' in existing()) || request.auth.uid in existing().adminIds || (('creatorId' in existing()) && existing().creatorId == request.auth.uid)) &&

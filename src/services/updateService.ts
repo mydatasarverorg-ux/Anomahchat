@@ -26,7 +26,20 @@ export const ALLOWED_APK_URL_PREFIX = `https://github.com/${GITHUB_REPO}/release
 export function isAllowedApkUrl(url?: string | null): boolean {
   if (!url || typeof url !== 'string') return false;
   const trimmed = url.trim();
-  return trimmed.startsWith(ALLOWED_APK_URL_PREFIX);
+  if (!trimmed.startsWith(ALLOWED_APK_URL_PREFIX)) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return (
+      parsed.protocol === 'https:' &&
+      parsed.hostname.toLowerCase() === 'github.com' &&
+      !parsed.username &&
+      !parsed.password &&
+      parsed.pathname.startsWith(`/${GITHUB_REPO}/releases/`) &&
+      !parsed.pathname.includes('..')
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -114,6 +127,13 @@ export async function getLatestRelease(): Promise<AppReleaseInfo | null> {
     return await fetchGitHubLatestRelease();
   }
 
+  if (!firestoreRelease.apkSha256) {
+    const gh = await fetchGitHubLatestRelease();
+    if (gh?.apkSha256 && gh.versionName === firestoreRelease.versionName) {
+      firestoreRelease = { ...firestoreRelease, apkSha256: gh.apkSha256 };
+    }
+  }
+
   return firestoreRelease;
 }
 
@@ -127,7 +147,19 @@ export function subscribeToLatestRelease(
       if (snap.exists()) {
         const data = snap.data() as AppReleaseInfo;
         if (isAllowedApkUrl(data.apkDownloadUrl)) {
-          onUpdate(data);
+          if (!data.apkSha256) {
+            fetchGitHubLatestRelease()
+              .then((gh) => {
+                if (gh?.apkSha256 && gh.versionName === data.versionName) {
+                  onUpdate({ ...data, apkSha256: gh.apkSha256 });
+                } else {
+                  onUpdate(data);
+                }
+              })
+              .catch(() => onUpdate(data));
+          } else {
+            onUpdate(data);
+          }
         } else {
           console.warn('Ignored release notification with untrusted APK URL');
           onUpdate(null);
@@ -150,7 +182,15 @@ export async function publishAppRelease(
     throw new Error(`APK Download URL must start with ${ALLOWED_APK_URL_PREFIX}`);
   }
 
-  if (info.apkSha256 && !/^[a-fA-F0-9]{64}$/.test(info.apkSha256.trim())) {
+  let resolvedSha = info.apkSha256?.trim().toLowerCase() || '';
+  if (!resolvedSha) {
+    const gh = await fetchGitHubLatestRelease();
+    if (gh?.apkSha256 && gh.versionName === info.versionName.trim()) {
+      resolvedSha = gh.apkSha256;
+    }
+  }
+
+  if (resolvedSha && !/^[a-fA-F0-9]{64}$/.test(resolvedSha)) {
     throw new Error('APK SHA-256 digest must be a valid 64-character hex string.');
   }
 
@@ -172,8 +212,8 @@ export async function publishAppRelease(
   if (info.fileSizeBytes) {
     fullRelease.fileSizeBytes = info.fileSizeBytes;
   }
-  if (info.apkSha256?.trim()) {
-    fullRelease.apkSha256 = info.apkSha256.trim().toLowerCase();
+  if (resolvedSha) {
+    fullRelease.apkSha256 = resolvedSha;
   }
 
   const ref = doc(db, 'app_updates', 'latest');

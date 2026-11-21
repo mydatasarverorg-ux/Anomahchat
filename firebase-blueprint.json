@@ -44,6 +44,10 @@
           "description": "ISO timestamp of most recent mobile number change for cooldown enforcement",
           "maxLength": 64
         },
+        "lastPhoneChangedAtMs": {
+          "type": "number",
+          "description": "Epoch milliseconds of most recent mobile number change for server-time cooldown enforcement"
+        },
         "phoneChangeCooldownBypass": {
           "type": "boolean",
           "description": "Admin-granted flag allowing user to bypass the 30-day phone change cooldown once"
@@ -1057,9 +1061,47 @@
         "updatedBy": { "type": "string", "maxLength": 150 }
       },
       "required": ["adminMobileLimit", "adminWebLimit", "adminLoginMode", "updatedAt", "updatedBy"]
+    },
+    "BanRecord": {
+      "title": "BanRecord",
+      "description": "Admin-controlled authoritative suspension record preventing ban bypass via profile deletion",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "isBanned": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "bannedAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "bannedBy": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "bannedUntil": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "bannedUntilMs": {
+          "type": "number"
+        }
+      },
+      "required": ["userId", "isBanned", "bannedAt", "bannedBy"]
     }
   },
   "firestore": {
+    "/bans/{userId}": {
+      "schema": "BanRecord",
+      "description": "Authoritative admin-only suspension records read by Firestore security rules"
+    },
     "/users/{userId}": {
       "schema": "User",
       "description": "Private owner/admin user records with PII, phone change history, moderation status, and device limit overrides"
