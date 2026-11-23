@@ -81,22 +81,16 @@ import type {
 } from '../types/chat';
 import {
   Shield,
-  Users,
-  Flag,
-  Radio,
-  FileText,
   CheckCircle2,
-  Rocket,
   X,
   ArrowLeft,
-  KeyRound,
-  MessageSquare,
-  Sparkles,
   AlertTriangle,
-  HardDrive,
+  Menu,
 } from 'lucide-react';
+import { AdminSidebar, type AdminTabId } from './admin/AdminSidebar';
 import { AdminOverviewTab } from './admin/AdminOverviewTab';
 import { AdminUsersTab } from './admin/AdminUsersTab';
+import { AdminSecurityPolicyTab } from './admin/AdminSecurityPolicyTab';
 import { AdminChatAuditTab } from './admin/AdminChatAuditTab';
 import { AdminRecoveryTab } from './admin/AdminRecoveryTab';
 import { AdminReportsTab } from './admin/AdminReportsTab';
@@ -115,9 +109,8 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   const { user, isVerifiedSuperAdmin } = useAuth();
   const { t, language } = useLanguage();
 
-  const [activeTab, setActiveTab] = useState<
-    'overview' | 'users' | 'chat_audit' | 'backup' | 'recovery' | 'reports' | 'announcements' | 'logs' | 'updates'
-  >('overview');
+  const [activeTab, setActiveTab] = useState<AdminTabId>('overview');
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const [currentLiveRelease, setCurrentLiveRelease] = useState<AppReleaseInfo | null>(null);
   const [releaseVersionName, setReleaseVersionName] = useState(APP_VERSION.versionName);
@@ -1122,63 +1115,113 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     );
   });
 
+  const breadcrumbMeta: Record<AdminTabId, { group: string; label: string }> = {
+    overview: {
+      group: language === 'bn' ? 'মনিটরিং' : 'Monitoring',
+      label: t('adminTabOverview'),
+    },
+    chat_audit: {
+      group: language === 'bn' ? 'মনিটরিং' : 'Monitoring',
+      label: t('adminTabChatAudit'),
+    },
+    reports: {
+      group: language === 'bn' ? 'মনিটরিং' : 'Monitoring',
+      label: t('adminTabReports'),
+    },
+    users: {
+      group: language === 'bn' ? 'ইউজার ও সুরক্ষা' : 'Users & Safety',
+      label: t('adminTabUsers'),
+    },
+    recovery: {
+      group: language === 'bn' ? 'ইউজার ও সুরক্ষা' : 'Users & Safety',
+      label: t('adminTabRecovery'),
+    },
+    security_policy: {
+      group: language === 'bn' ? 'ইউজার ও সুরক্ষা' : 'Users & Safety',
+      label: language === 'bn' ? 'সিকিউরিটি নীতি' : 'Security Policy',
+    },
+    announcements: {
+      group: language === 'bn' ? 'প্ল্যাটফর্ম' : 'Platform',
+      label: t('adminTabAnnouncements'),
+    },
+    backup: {
+      group: language === 'bn' ? 'প্ল্যাটফর্ম' : 'Platform',
+      label: language === 'bn' ? 'ড্রাইভ ব্যাকআপ' : 'Drive Backup',
+    },
+    updates: {
+      group: language === 'bn' ? 'প্ল্যাটফর্ম' : 'Platform',
+      label: language === 'bn' ? 'APK রিলিজ' : 'APK Releases',
+    },
+    logs: {
+      group: language === 'bn' ? 'প্ল্যাটফর্ম' : 'Platform',
+      label: t('adminTabLogs'),
+    },
+  };
+
+  const activeCrumb = breadcrumbMeta[activeTab];
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 animate-in fade-in select-none">
-      <div className="bg-slate-900 border border-slate-700/80 rounded-3xl w-full max-w-6xl h-[92vh] flex flex-col shadow-2xl overflow-hidden relative">
-        <div className="h-16 px-4 sm:px-6 bg-slate-950/90 border-b border-slate-800 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in select-none">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-6xl h-[92vh] flex flex-col shadow-2xl overflow-hidden relative">
+        {/* Standard Contextual Top Header */}
+        <div className="h-14 px-3.5 sm:px-5 bg-slate-950 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              type="button"
+              onClick={() => setMobileSidebarOpen(true)}
+              className="lg:hidden p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white cursor-pointer shrink-0"
+              aria-label="Open admin menu"
+            >
+              <Menu className="w-4 h-4" />
+            </button>
+
             <button
               onClick={onClose}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 hover:border-slate-600 transition cursor-pointer shadow-sm group"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 transition cursor-pointer whitespace-nowrap shrink-0"
               title={t('exitPanelTooltip')}
             >
-              <ArrowLeft className="w-4 h-4 text-emerald-400 group-hover:-translate-x-0.5 transition" />
+              <ArrowLeft className="w-3.5 h-3.5 text-emerald-400" />
               <span className="hidden sm:inline">{t('backToMessenger')}</span>
               <span className="sm:hidden">{t('close')}</span>
             </button>
 
-            <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-              <Shield className="w-5 h-5" />
+            <div className="hidden sm:flex items-center gap-1.5 text-xs min-w-0 truncate pl-1">
+              <Shield className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="text-slate-400 font-medium">{t('adminPanelTitle')}</span>
+              <span className="text-slate-600">/</span>
+              <span className="text-slate-400">{activeCrumb.group}</span>
+              <span className="text-slate-600">/</span>
+              <span className="text-white font-semibold truncate">{activeCrumb.label}</span>
             </div>
 
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
-                  {t('adminPanelTitle')}
-                </h2>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30 shrink-0">
-                  {t('superAdminBadge')}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 truncate hidden sm:block">
-                {t('adminPanelSubtitle')}
-              </p>
-            </div>
+            <span className="sm:hidden text-xs font-bold text-white truncate">
+              {activeCrumb.label}
+            </span>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/40 px-2.5 py-1 rounded-xl border border-emerald-500/20 hidden md:inline">
+          <div className="flex items-center gap-2.5 shrink-0">
+            <span className="text-[11px] font-mono text-emerald-400 hidden md:inline">
               {SUPER_ADMIN_EMAIL}
             </span>
             <button
               onClick={onClose}
-              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
               title={t('close')}
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
         {actionSuccessMsg && (
-          <div className="bg-emerald-600 text-white text-xs py-2 px-4 flex items-center justify-center gap-2 font-medium shadow animate-in slide-in-from-top-1 z-30">
-            <CheckCircle2 className="w-4 h-4" />
+          <div className="bg-emerald-600 text-white text-xs py-2 px-4 flex items-center justify-center gap-2 font-medium z-30 shrink-0">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
             <span>{actionSuccessMsg}</span>
           </div>
         )}
 
         {actionErrorMsg && (
-          <div className="bg-rose-600 text-white text-xs py-2 px-4 flex items-center justify-between gap-2 font-medium shadow z-30">
+          <div className="bg-rose-600 text-white text-xs py-2 px-4 flex items-center justify-between gap-2 font-medium z-30 shrink-0">
             <div className="w-4 shrink-0" />
             <div className="flex items-center justify-center gap-2 text-center">
               <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -1195,100 +1238,84 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
           </div>
         )}
 
-        <div className="flex border-b border-slate-800 bg-slate-950/40 px-3 sm:px-6 gap-1.5 overflow-x-auto shrink-0 scrollbar-none">
-          {[
-            { id: 'overview', label: t('adminTabOverview'), icon: Sparkles },
-            { id: 'users', label: t('adminTabUsers'), icon: Users, badge: totalUsersCount },
-            { id: 'chat_audit', label: t('adminTabChatAudit'), icon: MessageSquare, badge: totalChatsCount },
-            { id: 'backup', label: language === 'bn' ? 'ড্রাইভ ব্যাকআপ' : 'Drive Backup', icon: HardDrive },
-            { id: 'recovery', label: t('adminTabRecovery'), icon: KeyRound, badge: pendingRecoveryCount, alert: pendingRecoveryCount > 0 },
-            { id: 'reports', label: t('adminTabReports'), icon: Flag, badge: pendingReportsCount, alert: pendingReportsCount > 0 },
-            { id: 'announcements', label: t('adminTabAnnouncements'), icon: Radio },
-            { id: 'updates', label: language === 'bn' ? 'APK রিলিজ' : 'APK Releases', icon: Rocket },
-            { id: 'logs', label: t('adminTabLogs'), icon: FileText },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as typeof activeTab)}
-                className={`flex items-center gap-2 py-3 px-3.5 border-b-2 text-xs font-semibold transition cursor-pointer shrink-0 ${
-                  isActive
-                    ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10'
-                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-                {typeof tab.badge === 'number' && tab.badge > 0 && (
-                  <span
-                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                      tab.alert ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-300'
-                    }`}
-                  >
-                    {tab.badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+        {/* Workspace Shell: Grouped Left Rail + Scrollable Content Viewport */}
+        <div className="flex-1 min-h-0 flex overflow-hidden">
+          <AdminSidebar
+            t={t}
+            language={language}
+            activeTab={activeTab}
+            onSelectTab={(tab) => setActiveTab(tab)}
+            totalUsersCount={totalUsersCount}
+            totalChatsCount={totalChatsCount}
+            pendingRecoveryCount={pendingRecoveryCount}
+            pendingReportsCount={pendingReportsCount}
+            mobileOpen={mobileSidebarOpen}
+            onCloseMobile={() => setMobileSidebarOpen(false)}
+          />
 
-        <div
-          className={`flex-1 min-h-0 bg-slate-900/60 ${
-            activeTab === 'chat_audit'
-              ? 'flex flex-col p-2.5 sm:p-4 md:p-5 overflow-hidden'
-              : 'overflow-y-auto p-4 sm:p-6'
-          }`}
-        >
-          {activeTab === 'overview' && (
-            <AdminOverviewTab
-              t={t}
-              totalUsersCount={totalUsersCount}
-              onlineUsersCount={onlineUsersCount}
-              totalChatsCount={totalChatsCount}
-              pendingRecoveryCount={pendingRecoveryCount}
-              pendingReportsCount={pendingReportsCount}
-              bannedUsersCount={bannedUsersCount}
-              onSelectTab={(tab) => setActiveTab(tab)}
-            />
-          )}
+          <div
+            className={`flex-1 min-w-0 min-h-0 bg-slate-900 ${
+              activeTab === 'chat_audit'
+                ? 'flex flex-col p-2.5 sm:p-4 md:p-5 overflow-hidden'
+                : 'overflow-y-auto p-4 sm:p-6'
+            }`}
+          >
+            {activeTab === 'overview' && (
+              <AdminOverviewTab
+                t={t}
+                language={language}
+                totalUsersCount={totalUsersCount}
+                onlineUsersCount={onlineUsersCount}
+                totalChatsCount={totalChatsCount}
+                pendingRecoveryCount={pendingRecoveryCount}
+                pendingReportsCount={pendingReportsCount}
+                bannedUsersCount={bannedUsersCount}
+                onSelectTab={(tab) => setActiveTab(tab)}
+              />
+            )}
 
-          {activeTab === 'users' && (
-            <AdminUsersTab
-              t={t}
-              language={language}
-              currentUserEmail={user?.email}
-              filteredUsers={filteredUsers}
-              userSearch={userSearch}
-              setUserSearch={setUserSearch}
-              userFilter={userFilter}
-              setUserFilter={setUserFilter}
-              onOpenDossier={(u) => setSelectedDossierUser(u)}
-              onInspectChats={handleInspectUserChats}
-              onEnterGhostMode={onEnterGhostMode}
-              onUnban={handleConfirmUnban}
-              onOpenBan={(u) => {
-                if (isSuperAdmin(u.email)) return;
-                setBanTarget(u);
-                setBanReason('');
-                setBanDuration('7');
-              }}
-              onClearWarning={handleClearWarning}
-              onOpenWarn={(u) => {
-                setWarnTarget(u);
-                setWarnText('');
-              }}
-              userPhoneRegistryMap={userPhoneRegistryMap}
-              allUsersList={usersList}
-              globalSecuritySettings={globalSecuritySettings}
-              adminSecuritySettings={adminSecuritySettings}
-              securityPolicyBusy={securityActionBusy}
-              onSaveGlobalSecuritySettings={handleSaveGlobalSecuritySettings}
-              onSaveAdminSecuritySettings={handleSaveAdminSecuritySettings}
-            />
-          )}
+            {activeTab === 'users' && (
+              <AdminUsersTab
+                t={t}
+                language={language}
+                currentUserEmail={user?.email}
+                filteredUsers={filteredUsers}
+                userSearch={userSearch}
+                setUserSearch={setUserSearch}
+                userFilter={userFilter}
+                setUserFilter={setUserFilter}
+                onOpenDossier={(u) => setSelectedDossierUser(u)}
+                onInspectChats={handleInspectUserChats}
+                onEnterGhostMode={onEnterGhostMode}
+                onUnban={handleConfirmUnban}
+                onOpenBan={(u) => {
+                  if (isSuperAdmin(u.email)) return;
+                  setBanTarget(u);
+                  setBanReason('');
+                  setBanDuration('7');
+                }}
+                onClearWarning={handleClearWarning}
+                onOpenWarn={(u) => {
+                  setWarnTarget(u);
+                  setWarnText('');
+                }}
+                userPhoneRegistryMap={userPhoneRegistryMap}
+                allUsersList={usersList}
+                globalSecuritySettings={globalSecuritySettings}
+                onOpenSecurityPolicy={() => setActiveTab('security_policy')}
+              />
+            )}
+
+            {activeTab === 'security_policy' && (
+              <AdminSecurityPolicyTab
+                language={language}
+                globalSecuritySettings={globalSecuritySettings}
+                adminSecuritySettings={adminSecuritySettings}
+                securityPolicyBusy={securityActionBusy}
+                onSaveGlobalSecuritySettings={handleSaveGlobalSecuritySettings}
+                onSaveAdminSecuritySettings={handleSaveAdminSecuritySettings}
+              />
+            )}
 
           {activeTab === 'chat_audit' && (
             <AdminChatAuditTab
@@ -1539,6 +1566,7 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
           )}
 
           {activeTab === 'logs' && <AdminLogsTab t={t} logs={logs} />}
+          </div>
         </div>
       </div>
 

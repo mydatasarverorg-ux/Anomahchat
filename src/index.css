@@ -93,14 +93,16 @@ html:not([data-theme]) .bg-slate-800 {
   background-color: #e2e8f0 !important;
 }
 
-/* Borders */
+/* Borders & Hairline Dividers */
 [data-theme="minimal-light"] .border-slate-800,
 [data-theme="minimal-light"] .border-slate-800\/80,
 [data-theme="minimal-light"] .border-slate-800\/60,
 [data-theme="minimal-light"] .border-slate-700,
 [data-theme="minimal-light"] .border-slate-700\/80,
 [data-theme="minimal-light"] .border-slate-700\/60,
-[data-theme="minimal-light"] .border-slate-700\/50 {
+[data-theme="minimal-light"] .border-slate-700\/50,
+[data-theme="minimal-light"] .divide-slate-800 > :not(:last-child),
+[data-theme="minimal-light"] .divide-slate-800\/80 > :not(:last-child) {
   border-color: #e2e8f0 !important;
 }
 
@@ -226,7 +228,9 @@ html:not([data-theme]) .bg-slate-800 {
 [data-theme="telegram-blue"] .border-slate-800,
 [data-theme="telegram-blue"] .border-slate-800\/80,
 [data-theme="telegram-blue"] .border-slate-700,
-[data-theme="telegram-blue"] .border-slate-700\/50 {
+[data-theme="telegram-blue"] .border-slate-700\/50,
+[data-theme="telegram-blue"] .divide-slate-800 > :not(:last-child),
+[data-theme="telegram-blue"] .divide-slate-800\/80 > :not(:last-child) {
   border-color: #2b394a !important;
 }
 

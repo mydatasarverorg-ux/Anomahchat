@@ -50,32 +50,32 @@ export function AdminReleaseTab({
   const urlValid = isAllowedApkUrl(releaseApkUrl);
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      <div className="bg-gradient-to-r from-emerald-950/60 via-slate-900 to-teal-950/40 border border-emerald-500/30 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-lg">
+    <div className="space-y-6 max-w-4xl mx-auto">
+      <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
+          <div className="w-10 h-10 rounded-xl bg-slate-900 text-emerald-400 flex items-center justify-center shrink-0 border border-slate-800">
             <Rocket className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-              {language === 'bn' ? 'APK অটো-আপডেট ও রিলিজ সেন্টার' : 'APK Auto-Updater & Release Center'}
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                {language === 'bn' ? 'সরাসরি ইন-অ্যাপ' : 'In-App Direct'}
+            <h3 className="text-sm font-bold text-white flex items-center gap-2 flex-wrap">
+              <span>{language === 'bn' ? 'APK অটো-আপডেট ও রিলিজ সেন্টার' : 'APK Auto-Updater & Release Center'}</span>
+              <span className="text-[11px] font-medium text-emerald-400">
+                · {language === 'bn' ? 'সরাসরি ইন-অ্যাপ' : 'In-App Direct'}
               </span>
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
               {language === 'bn'
                 ? 'এখানে নতুন APK সংস্করণ প্রকাশ করলে সকল অ্যান্ড্রয়েড ডিভাইসে স্বয়ংক্রিয়ভাবে ইন-অ্যাপ আপডেট ডায়ালগ চলে যাবে এবং ১ ক্লিকে ইনস্টল হবে।'
-                : 'Publishing a new APK release here immediately pushes the in-app update banner to all active Android APK installations worldwide.'}
+                : 'Publishing a new APK release here immediately pushes the in-app update banner to all active Android APK installations.'}
             </p>
           </div>
         </div>
 
-        <div className="bg-slate-950/70 border border-slate-800 rounded-xl px-3.5 py-2 shrink-0 text-right">
-          <span className="text-[10px] text-slate-500 block uppercase font-mono font-bold">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2 shrink-0 text-right">
+          <span className="text-[10px] text-slate-400 block font-medium">
             {language === 'bn' ? 'বর্তমান অ্যাপ বিল্ড' : 'Current App Build'}
           </span>
-          <span className="text-xs font-mono font-bold text-emerald-400">
+          <span className="text-xs font-mono tabular-nums font-bold text-emerald-400">
             v{APP_VERSION.versionName} ({APP_VERSION.versionCode})
           </span>
         </div>

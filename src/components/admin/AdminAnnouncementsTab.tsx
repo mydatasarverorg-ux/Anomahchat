@@ -94,69 +94,71 @@ export function AdminAnnouncementsTab({
       </form>
 
       <div className="space-y-3">
-        <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
           Existing Broadcasts ({announcements.length})
         </h4>
 
         {announcements.length === 0 ? (
           <div className="py-8 text-center text-slate-500 text-xs">{t('noAnnouncementsFound')}</div>
         ) : (
-          announcements.map((ann) => (
-            <div
-              key={ann.id}
-              className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-            >
-              <div className="space-y-1 flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                      ann.type === 'alert'
-                        ? 'bg-red-500/20 text-red-300'
-                        : ann.type === 'warning'
-                        ? 'bg-amber-500/20 text-amber-300'
-                        : ann.type === 'update'
-                        ? 'bg-purple-500/20 text-purple-300'
-                        : 'bg-emerald-500/20 text-emerald-300'
-                    }`}
-                  >
-                    {ann.type}
-                  </span>
-                  <span className="text-xs font-bold text-white truncate">{ann.title}</span>
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                      ann.active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'
-                    }`}
-                  >
-                    {ann.active ? 'ACTIVE' : 'INACTIVE'}
+          <div className="bg-slate-950/60 border border-slate-800 rounded-2xl divide-y divide-slate-800/80 overflow-hidden">
+            {announcements.map((ann) => (
+              <div
+                key={ann.id}
+                className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              >
+                <div className="space-y-1 flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className={`text-[10px] font-bold uppercase ${
+                        ann.type === 'alert'
+                          ? 'text-red-400'
+                          : ann.type === 'warning'
+                          ? 'text-amber-400'
+                          : ann.type === 'update'
+                          ? 'text-sky-400'
+                          : 'text-emerald-400'
+                      }`}
+                    >
+                      {ann.type}
+                    </span>
+                    <span className="text-xs font-bold text-white truncate">{ann.title}</span>
+                    <span
+                      className={`text-[10px] font-semibold ${
+                        ann.active ? 'text-emerald-400' : 'text-slate-500'
+                      }`}
+                    >
+                      · {ann.active ? 'ACTIVE' : 'INACTIVE'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed">{ann.content}</p>
+                  <span className="text-[11px] text-slate-500 font-mono tabular-nums block">
+                    {new Date(ann.createdAt).toLocaleString()} · {ann.authorName}
                   </span>
                 </div>
-                <p className="text-xs text-slate-300 leading-relaxed">{ann.content}</p>
-                <span className="text-[10px] text-slate-500 block">
-                  {new Date(ann.createdAt).toLocaleString()} · by {ann.authorName}
-                </span>
-              </div>
 
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => onToggleAnnouncement(ann.id, !ann.active)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
-                    ann.active
-                      ? 'bg-amber-600/20 text-amber-300 hover:bg-amber-600/30'
-                      : 'bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30'
-                  }`}
-                >
-                  {ann.active ? 'Deactivate' : 'Activate'}
-                </button>
-                <button
-                  onClick={() => onDeleteAnnouncement(ann.id)}
-                  className="p-1.5 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
-                  title="Delete announcement"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => onToggleAnnouncement(ann.id, !ann.active)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-800 transition cursor-pointer ${
+                      ann.active
+                        ? 'bg-slate-900 text-amber-300 hover:bg-slate-800'
+                        : 'bg-slate-900 text-emerald-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    {ann.active ? 'Deactivate' : 'Activate'}
+                  </button>
+                  <button
+                    onClick={() => onDeleteAnnouncement(ann.id)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
+                    title="Delete announcement"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-            </div>
-          ))
+            ))}
+          </div>
         )}
       </div>
     </div>
