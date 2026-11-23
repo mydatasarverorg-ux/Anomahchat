@@ -359,11 +359,21 @@ export function LoginScreen() {
                       if (acc.provider === 'google') {
                         setRememberDevicePending(true);
                         signInWithGoogle();
-                      } else if (acc.provider === 'magic_link' && publicAuthFlags.enableMagicLinkLogin) {
+                      } else if (acc.provider === 'magic_link') {
                         setSelectedSavedAccount(acc);
                         setEmail(acc.email);
                         setPassword('');
-                        setMagicLinkMode(true);
+                        if (publicAuthFlags.enableMagicLinkLogin) {
+                          setMagicLinkMode(true);
+                        } else {
+                          setMagicLinkMode(false);
+                          setInfoMessage(
+                            language === 'bn'
+                              ? 'Magic Link বর্তমানে বন্ধ রয়েছে। পাসওয়ার্ড দিয়ে লগইন করুন, পাসওয়ার্ড না থাকলে "Forgot Password?" থেকে পাসওয়ার্ড সেট করুন অথবা Google ব্যবহার করুন।'
+                              : 'Magic Link is currently disabled. Sign in with your password, tap "Forgot Password?" to set one, or use Google.'
+                          );
+                          setTimeout(() => passwordInputRef.current?.focus(), 60);
+                        }
                       } else {
                         setSelectedSavedAccount(acc);
                         setEmail(acc.email);
@@ -586,7 +596,7 @@ export function LoginScreen() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full pl-10 pr-10 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
-                    minLength={6}
+                    minLength={authMode === 'email-signup' ? 6 : undefined}
                   />
                   <button
                     type="button"

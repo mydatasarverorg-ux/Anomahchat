@@ -102,6 +102,7 @@ export async function syncUserProfile(user: {
   email: string | null;
   photoURL: string | null;
   phoneNumber?: string | null;
+  username?: string | null;
 }): Promise<UserProfile> {
   const path = `users/${user.uid}`;
   try {
@@ -126,6 +127,7 @@ export async function syncUserProfile(user: {
     const nowIso = new Date().toISOString();
     const cleanEmail = (user.email || '').trim().toLowerCase().slice(0, 150);
     const cleanPhone = (user.phoneNumber || '').trim().replace(/\s+/g, ' ').slice(0, 50);
+    const cleanUsername = (user.username || '').trim().toLowerCase().replace(/^@/, '').slice(0, 50);
 
     if (existingSnap.exists()) {
       const data = existingSnap.data() as UserProfile;
@@ -210,6 +212,7 @@ export async function syncUserProfile(user: {
         userId: user.uid,
         displayName: fallbackName.slice(0, 100),
         email: cleanEmail,
+        ...(cleanUsername.length >= 3 ? { username: cleanUsername } : {}),
         ...(cleanPhone.length >= 6
           ? {
               phoneNumber: cleanPhone,

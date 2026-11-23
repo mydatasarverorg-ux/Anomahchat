@@ -95,7 +95,7 @@ export function AdminUsersTab({
     globalSecuritySettings?.newDeviceApprovalMode ?? 'optional'
   );
   const [enableMagicLinkDraft, setEnableMagicLinkDraft] = useState<boolean>(
-    globalSecuritySettings?.enableMagicLinkLogin !== false
+    globalSecuritySettings?.enableMagicLinkLogin === true
   );
   const [enableQrApprovalDraft, setEnableQrApprovalDraft] = useState<boolean>(
     globalSecuritySettings?.enableQrDeviceApproval !== false
@@ -116,7 +116,7 @@ export function AdminUsersTab({
     setMobileLimitDraft(String(globalSecuritySettings.defaultMobileLimit));
     setWebLimitDraft(String(globalSecuritySettings.defaultWebLimit));
     setApprovalModeDraft(globalSecuritySettings.newDeviceApprovalMode ?? 'optional');
-    setEnableMagicLinkDraft(globalSecuritySettings.enableMagicLinkLogin !== false);
+    setEnableMagicLinkDraft(globalSecuritySettings.enableMagicLinkLogin === true);
     setEnableQrApprovalDraft(globalSecuritySettings.enableQrDeviceApproval !== false);
   }, [
     globalSecuritySettings?.defaultMobileLimit,
@@ -173,8 +173,8 @@ export function AdminUsersTab({
                   </div>
                   <p className="text-[10px] text-slate-400 leading-snug">
                     {language === 'bn'
-                      ? 'বন্ধ করলে লগইন স্ক্রিন থেকে Magic Link বাটন সাথে সাথে সরে যাবে।'
-                      : 'Turn OFF to immediately hide Magic Link sign-in from the login screen.'}
+                      ? 'ডিফল্টভাবে বন্ধ (সহজ Password ও Google লগইন)। চাইলে এখান থেকে চালু/বন্ধ করতে পারবেন।'
+                      : 'Off by default for simple Password & Google sign-in. Toggle ON here anytime if needed.'}
                   </p>
                 </div>
               </div>

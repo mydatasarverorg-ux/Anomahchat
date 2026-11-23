@@ -82,6 +82,7 @@ import {
   Mail,
   ShieldAlert,
   EyeOff,
+  RefreshCw,
 } from 'lucide-react';
 
 function AppLockGate() {
@@ -1596,7 +1597,16 @@ function ChatDashboard({ user }: { user: UserProfile }) {
 }
 
 function MainContent() {
-  const { user, loading, isAppLocked, currentDeviceSession, signOutUser } = useAuth();
+  const {
+    user,
+    initializing,
+    isAppLocked,
+    currentDeviceSession,
+    sessionSyncError,
+    retryingSession,
+    retryDeviceSessionVerification,
+    signOutUser,
+  } = useAuth();
   const { t, language } = useLanguage();
   const [pendingRelease, setPendingRelease] = useState<AppReleaseInfo | null>(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -1686,7 +1696,7 @@ function MainContent() {
     return () => window.removeEventListener('anomah_open_update_modal', handleCheckEvent as EventListener);
   }, []);
 
-  if (loading) {
+  if (initializing) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white">
         <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-3" />
@@ -1707,27 +1717,39 @@ function MainContent() {
         <PendingDeviceGate />
       ) : !isDeviceApproved ? (
         <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-center space-y-4">
-          <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
-          <div className="space-y-1 max-w-xs">
+          <Loader2 className={`w-8 h-8 text-emerald-400 ${retryingSession || !sessionSyncError ? 'animate-spin' : ''}`} />
+          <div className="space-y-1.5 max-w-xs">
             <p className="text-xs font-semibold text-white">
               {language === 'bn'
                 ? 'ডিভাইস সেশন নিরাপত্তা যাচাই করা হচ্ছে...'
                 : 'Verifying device session security...'}
             </p>
             <p className="text-[11px] text-slate-400">
-              {language === 'bn'
-                ? 'নেটওয়ার্ক ধীর হলে অনুগ্রহ করে অপেক্ষা করুন অথবা লগআউট করে পুনরায় ঢুকুন।'
-                : 'Please wait a moment, or sign out and sign in again if your connection was interrupted.'}
+              {sessionSyncError ||
+                (language === 'bn'
+                  ? 'নেটওয়ার্ক ধীর হলে অনুগ্রহ করে অপেক্ষা করুন অথবা নিচের বাটনে পুনরায় চেষ্টা করুন।'
+                  : 'Please wait a moment, or tap Retry below if your connection was interrupted.')}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={signOutUser}
-            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>{language === 'bn' ? 'লগআউট করুন' : 'Sign Out'}</span>
-          </button>
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              disabled={retryingSession}
+              onClick={retryDeviceSessionVerification}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${retryingSession ? 'animate-spin' : ''}`} />
+              <span>{language === 'bn' ? 'পুনরায় যাচাই করুন' : 'Retry Verification'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={signOutUser}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>{language === 'bn' ? 'লগআউট করুন' : 'Sign Out'}</span>
+            </button>
+          </div>
         </div>
       ) : !user.phoneNumber?.trim() ? (
         <PhoneNumberGate />

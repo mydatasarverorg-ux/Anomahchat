@@ -138,11 +138,157 @@ export interface OwnerVerificationInput {
   confirmedEmail?: string;
 }
 
+function formatFirebaseAuthError(
+  err: unknown,
+  context: 'signin' | 'signup' | 'google' | 'reset',
+  lang: 'en' | 'bn'
+): string {
+  const code = ((err as { code?: string })?.code || '').toLowerCase();
+  const rawMsg = (err instanceof Error ? err.message : String(err || '')).trim();
+  const rawLower = rawMsg.toLowerCase();
+
+  const effectiveCode =
+    code ||
+    (rawLower.includes('operation-not-allowed')
+      ? 'auth/operation-not-allowed'
+      : rawLower.includes('invalid-credential')
+      ? 'auth/invalid-credential'
+      : rawLower.includes('wrong-password')
+      ? 'auth/wrong-password'
+      : rawLower.includes('user-not-found')
+      ? 'auth/user-not-found'
+      : rawLower.includes('email-already-in-use')
+      ? 'auth/email-already-in-use'
+      : rawLower.includes('weak-password')
+      ? 'auth/weak-password'
+      : rawLower.includes('invalid-email')
+      ? 'auth/invalid-email'
+      : rawLower.includes('too-many-requests')
+      ? 'auth/too-many-requests'
+      : rawLower.includes('network-request-failed')
+      ? 'auth/network-request-failed'
+      : rawLower.includes('user-disabled')
+      ? 'auth/user-disabled'
+      : rawLower.includes('account-exists-with-different-credential')
+      ? 'auth/account-exists-with-different-credential'
+      : rawLower.includes('unauthorized-domain')
+      ? 'auth/unauthorized-domain'
+      : rawLower.includes('popup-blocked')
+      ? 'auth/popup-blocked'
+      : rawLower.includes('popup-closed-by-user') || rawLower.includes('cancelled-popup-request')
+      ? 'auth/popup-closed-by-user'
+      : '');
+
+  switch (effectiveCode) {
+    case 'auth/operation-not-allowed':
+      if (context === 'google') {
+        return lang === 'bn'
+          ? 'Firebase Console > Authentication > Sign-in method-এ Google সাইন-ইন চালু করা নেই।'
+          : 'Google sign-in is not enabled in Firebase Console > Authentication > Sign-in method yet.';
+      }
+      return lang === 'bn'
+        ? 'Firebase Console > Authentication > Sign-in method-এ Email/Password অপশনটি চালু করা নেই।'
+        : 'Email/Password sign-in is not enabled in Firebase Console > Authentication > Sign-in method yet.';
+
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      if (context === 'reset') {
+        return lang === 'bn'
+          ? 'এই ইমেইল দিয়ে কোনো নিবন্ধিত অ্যাকাউন্ট পাওয়া যায়নি।'
+          : 'No registered account was found with this email address.';
+      }
+      return lang === 'bn'
+        ? 'ইমেইল বা পাসওয়ার্ড ভুল হয়েছে। আর যদি এই অ্যাকাউন্টটি আগে Google দিয়ে খোলা থাকে, তবে "পাসওয়ার্ড ভুলে গেছেন?" থেকে পাসওয়ার্ড সেট করুন অথবা "Continue with Google" ব্যবহার করুন।'
+        : 'Incorrect email or password. If this account was created with Google, tap "Forgot Password?" to set a password or use "Continue with Google".';
+
+    case 'auth/email-already-in-use':
+      return lang === 'bn'
+        ? 'এই ইমেইল দিয়ে ইতিমধ্যেই অ্যাকাউন্ট খোলা আছে। অনুগ্রহ করে Sign In করুন (অথবা পাসওয়ার্ড না থাকলে "Forgot Password?" ব্যবহার করুন)।'
+        : 'This email is already registered. Please sign in instead, or use "Forgot Password?" to set/reset your password.';
+
+    case 'auth/weak-password':
+      return lang === 'bn'
+        ? 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে।'
+        : 'Password should be at least 6 characters long.';
+
+    case 'auth/invalid-email':
+      return lang === 'bn'
+        ? 'অনুগ্রহ করে সঠিক ফরম্যাটের ইমেইল ঠিকানা লিখুন।'
+        : 'Please enter a valid email address.';
+
+    case 'auth/too-many-requests':
+      return lang === 'bn'
+        ? 'অনেকবার ভুল চেষ্টা করা হয়েছে। নিরাপত্তার স্বার্থে কিছুক্ষণ পর আবার চেষ্টা করুন।'
+        : 'Too many failed attempts. Please wait a few minutes and try again.';
+
+    case 'auth/network-request-failed':
+      return lang === 'bn'
+        ? 'ইন্টারনেট সংযোগে সমস্যা হয়েছে। নেটওয়ার্ক যাচাই করে আবার চেষ্টা করুন।'
+        : 'Network error. Please check your internet connection and try again.';
+
+    case 'auth/user-disabled':
+      return lang === 'bn'
+        ? 'এই অ্যাকাউন্টটি নিষ্ক্রিয় বা স্থগিত করা হয়েছে। সহায়তার জন্য সাপোর্ট ডেস্কে যোগাযোগ করুন।'
+        : 'This account has been disabled. Please contact the Support Desk for help.';
+
+    case 'auth/account-exists-with-different-credential':
+      return lang === 'bn'
+        ? 'এই ইমেইলে অন্য লগইন পদ্ধতি (ইমেইল/পাসওয়ার্ড বা Google) যুক্ত আছে। সেই পদ্ধতি দিয়ে লগইন করুন।'
+        : 'An account already exists with this email using a different sign-in method. Please sign in with that method.';
+
+    case 'auth/unauthorized-domain':
+      return lang === 'bn'
+        ? 'এই ডোমেইনটি Firebase Console > Authentication > Settings > Authorized domains-এ যুক্ত নেই (যেমন: "mydatasarverorg-ux.github.io")।'
+        : 'This domain is not authorized in Firebase Console > Authentication > Settings > Authorized domains yet.';
+
+    case 'auth/popup-blocked':
+      return lang === 'bn'
+        ? 'লগইন পপআপ ব্লক হয়েছে। ব্রাউজার পপআপ অনুমতি দিন অথবা ইমেইল ও পাসওয়ার্ড দিয়ে লগইন করুন।'
+        : 'Sign-in popup was blocked. Please allow popups or sign in with Email & Password.';
+
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      return lang === 'bn'
+        ? isNativeApkApp()
+          ? 'Google লগইন বাতিল হয়েছে বা ব্রাউজার পপআপ আটকে গেছে। আবার চেষ্টা করুন অথবা ইমেইল ও পাসওয়ার্ড দিয়ে লগইন করুন।'
+          : 'Google সাইন-ইন বাতিল হয়েছে। আবার "Continue with Google" বাটনে চাপুন।'
+        : isNativeApkApp()
+        ? 'Google sign-in was cancelled or interrupted. Try again, or sign in with Email & Password.'
+        : 'Google sign-in was cancelled. Please tap "Continue with Google" to try again.';
+
+    default:
+      if (rawMsg) return rawMsg;
+      if (context === 'signup') {
+        return lang === 'bn'
+          ? 'অ্যাকাউন্ট তৈরি করা যায়নি। আপনার তথ্যগুলো যাচাই করে আবার চেষ্টা করুন।'
+          : 'Unable to create account. Please check your details and try again.';
+      }
+      if (context === 'reset') {
+        return lang === 'bn'
+          ? 'পাসওয়ার্ড রিসেট ইমেইল পাঠানো যায়নি। ইমেইল ঠিকানাটি যাচাই করুন।'
+          : 'Failed to send password reset email. Please check the email address.';
+      }
+      if (context === 'google') {
+        return lang === 'bn'
+          ? 'Google দিয়ে লগইন সম্পন্ন করা যায়নি। আবার চেষ্টা করুন বা ইমেইল-পাসওয়ার্ড ব্যবহার করুন।'
+          : 'Unable to complete Google sign-in. Please try again or use Email & Password.';
+      }
+      return lang === 'bn'
+        ? 'লগইন করা যায়নি। আপনার ইমেইল ও পাসওয়ার্ড যাচাই করে আবার চেষ্টা করুন।'
+        : 'Unable to sign in. Please verify your email and password.';
+  }
+}
+
 interface AuthContextType {
   user: UserProfile | null;
   firebaseUser: FirebaseUser | null;
+  initializing: boolean;
   loading: boolean;
   authError: string | null;
+  sessionSyncError: string | null;
+  retryingSession: boolean;
+  retryDeviceSessionVerification: () => Promise<void>;
   theme: ThemeMode;
   setTheme: (theme: ThemeMode) => void;
   deletionNotice: { daysRemaining: number } | null;
@@ -242,8 +388,11 @@ function isPinSessionUnlocked(uid: string): boolean {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [initializing, setInitializing] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [sessionSyncError, setSessionSyncError] = useState<string | null>(null);
+  const [retryingSession, setRetryingSession] = useState(false);
   const [deletionNotice, setDeletionNotice] = useState<{ daysRemaining: number } | null>(null);
   const [isAppLocked, setIsAppLocked] = useState(false);
   const [currentDeviceId] = useState<string>(() => getOrCreateDeviceId());
@@ -598,9 +747,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (devSess) {
               wasSessionActiveRef.current = devSess.status === 'active';
               setCurrentDeviceSession(devSess);
+              setSessionSyncError(null);
             } else {
               wasSessionActiveRef.current = false;
               setCurrentDeviceSession(null);
+              const lang = getActiveLanguage();
+              setSessionSyncError(
+                lang === 'bn'
+                  ? 'ডিভাইস সেশন যাচাই সম্পন্ন করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।'
+                  : 'Could not verify this device session. Please retry.'
+              );
             }
             if (profile.hasAppLockPin && !isPinSessionUnlocked(profile.userId)) {
               setIsAppLocked(true);
@@ -637,13 +793,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         } catch (err) {
           console.error('Failed to sync profile on state change:', err);
+          const lang = getActiveLanguage();
+          setAuthError(
+            lang === 'bn'
+              ? 'ক্লাউড প্রোফাইল লোড করতে সমস্যা হয়েছে। ইন্টারনেট সংযোগ দেখে আবার চেষ্টা করুন।'
+              : 'Failed to load your cloud profile. Please check your connection and try again.'
+          );
         }
       } else {
         setUser(null);
         setCurrentDeviceSession(null);
+        setSessionSyncError(null);
         setDeletionNotice(null);
         setIsAppLocked(false);
       }
+      setInitializing(false);
       setLoading(false);
     });
 
@@ -699,9 +863,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (devSess) {
           wasSessionActiveRef.current = devSess.status === 'active';
           setCurrentDeviceSession(devSess);
+          setSessionSyncError(null);
         } else {
           wasSessionActiveRef.current = false;
           setCurrentDeviceSession(null);
+          const lang = getActiveLanguage();
+          setSessionSyncError(
+            lang === 'bn'
+              ? 'ডিভাইস সেশন যাচাই সম্পন্ন করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।'
+              : 'Could not verify this device session. Please retry.'
+          );
         }
         setUser(profile);
         if (devSess?.status === 'active') {
@@ -722,39 +893,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err: unknown) {
       console.warn('Google sign-in attempt notice:', err);
       const lang = getActiveLanguage();
-      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-
-      if (msg.includes('popup-closed-by-user') || msg.includes('cancelled')) {
-        setAuthError(
-          lang === 'bn'
-            ? isNativeApkApp()
-              ? 'Google লগইন বাতিল হয়েছে অথবা ব্রাউজার পপআপ আটকে গেছে। আবার চেষ্টা করুন অথবা নিচের Email Magic Link / পাসওয়ার্ড দিয়ে লগইন করুন।'
-              : 'Google সাইন-ইন বাতিল হয়েছে। আবার "Continue with Google" বাটনে চাপুন।'
-            : isNativeApkApp()
-            ? 'Google sign-in was cancelled or interrupted. Try again, or use Email Magic Link / Password inside the APK.'
-            : 'Google sign-in was cancelled. Please tap "Continue with Google" to try again.'
-        );
-      } else if (msg.includes('popup-blocked')) {
-        setAuthError(
-          lang === 'bn'
-            ? 'লগইন পপআপ ব্লক হয়েছে। নতুন APK ইনস্টল করে আবার চেষ্টা করুন অথবা Email Magic Link ব্যবহার করুন।'
-            : 'Google sign-in popup was blocked. Please allow popups, update the APK, or sign in with Email Magic Link.'
-        );
-      } else if (msg.includes('unauthorized-domain')) {
-        setAuthError(
-          lang === 'bn'
-            ? 'এই ডোমেইনটি Firebase Console > Authentication > Settings > Authorized domains-এ যুক্ত নেই (যেমন: "mydatasarverorg-ux.github.io")।'
-            : 'This domain is not authorized in Firebase Console yet. Please add your domain (e.g. "mydatasarverorg-ux.github.io") under Authentication > Settings > Authorized domains.'
-        );
-      } else {
-        setAuthError(
-          err instanceof Error
-            ? err.message
-            : lang === 'bn'
-            ? 'Google দিয়ে লগইন সম্পন্ন করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন অথবা ইমেইল / ম্যাজিক লিংক ব্যবহার করুন।'
-            : 'Unable to complete Google sign-in. Please try again or use Email / Magic Link login.'
-        );
-      }
+      setAuthError(formatFirebaseAuthError(err, 'google', lang));
     } finally {
       explicitAuthInProgressRef.current = false;
       setLoading(false);
@@ -784,12 +923,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             (lang === 'bn' ? 'দয়া করে সঠিক মোবাইল নম্বর দিন।' : 'Please enter a valid mobile number.')
         );
       }
+      if (cleanUsername && cleanUsername.length < 3) {
+        throw new Error(
+          lang === 'bn'
+            ? 'ইউজারনেম দিলে কমপক্ষে ৩ অক্ষরের হতে হবে।'
+            : 'Username must be at least 3 characters if provided.'
+        );
+      }
       const cleanPhone = phoneCheck.normalized;
 
       const res = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
       if (res.user) {
         let claimedSlot = false;
         try {
+          if (cleanUsername && cleanUsername.length >= 3) {
+            const available = await isUsernameAvailable(cleanUsername, res.user.uid);
+            if (!available) {
+              throw new Error(
+                lang === 'bn'
+                  ? `@${cleanUsername} ইউজারনেমটি ইতিমধ্যেই অন্য কেউ ব্যবহার করছে। অনুগ্রহ করে অন্য ইউজারনেম দিন অথবা ঘরটি ফাঁকা রাখুন।`
+                  : `Username @${cleanUsername} is already taken. Please choose another username or leave it blank.`
+              );
+            }
+          }
+
           await claimPhoneSlot(res.user.uid, cleanPhone, lang);
           claimedSlot = true;
 
@@ -802,38 +959,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email: cleanEmail,
             photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanName)}`,
             phoneNumber: cleanPhone,
+            username: cleanUsername,
           });
 
           // Send verification link non-blockingly so Super Admin / standard accounts can verify email
           sendEmailVerification(res.user).catch(() => {});
 
-          const extraUpdates: Record<string, unknown> = {};
-          if (profile.phoneNumber !== cleanPhone) {
-            extraUpdates.phoneNumber = cleanPhone;
-            extraUpdates.discoverableByPhone = false;
-            profile.phoneNumber = cleanPhone;
-            profile.discoverableByPhone = false;
-            await syncDirectoryEntry(res.user.uid, { phoneLookupHash: null });
-          }
-          if (cleanUsername && cleanUsername.length >= 3) {
-            const available = await isUsernameAvailable(cleanUsername, res.user.uid);
-            if (available) {
-              extraUpdates.username = cleanUsername;
-              await syncDirectoryEntry(res.user.uid, { username: cleanUsername });
-              profile.username = cleanUsername;
-            }
-          }
-          if (Object.keys(extraUpdates).length > 0) {
-            await updateDoc(doc(db, 'users', res.user.uid), extraUpdates);
-          }
-
           const devSess = await registerOrSyncDeviceSession(profile);
           if (devSess) {
             if (devSess.status === 'active') wasSessionActiveRef.current = true;
             setCurrentDeviceSession(devSess);
+            setSessionSyncError(null);
+          } else {
+            wasSessionActiveRef.current = false;
+            setCurrentDeviceSession(null);
+            setSessionSyncError(
+              lang === 'bn'
+                ? 'ডিভাইস সেশন যাচাই সম্পন্ন করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।'
+                : 'Could not verify this device session. Please retry.'
+            );
           }
           setUser(profile);
-          setPresence(res.user.uid, true);
+          if (devSess?.status === 'active') {
+            setPresence(res.user.uid, true);
+          }
           if (consumeRememberDevicePending()) {
             saveDeviceAccount({
               userId: profile.userId,
@@ -856,21 +1005,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err: unknown) {
       console.warn('Email sign up error:', err);
       const phoneLimitMsg = formatPhoneLimitError(err, lang);
-      const code = (err as { code?: string })?.code || '';
       if (phoneLimitMsg) {
         setAuthError(phoneLimitMsg);
-      } else if (code === 'auth/email-already-in-use') {
-        setAuthError(
-          lang === 'bn'
-            ? 'এই ইমেইলটি দিয়ে ইতিমধ্যেই অ্যাকাউন্ট খোলা আছে। অনুগ্রহ করে সাইন ইন করুন।'
-            : 'This email is already registered. Please sign in instead.'
-        );
-      } else if (code === 'auth/weak-password') {
-        setAuthError('Password should be at least 6 characters long.');
-      } else if (code === 'auth/invalid-email') {
-        setAuthError('Please enter a valid email address.');
       } else {
-        setAuthError(err instanceof Error ? err.message : 'Unable to create account. Please check your details.');
+        setAuthError(formatFirebaseAuthError(err, 'signup', lang));
       }
       throw err;
     } finally {
@@ -883,6 +1021,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setAuthError(null);
     explicitAuthInProgressRef.current = true;
+    const lang = getActiveLanguage();
     const cleanEmail = email.trim().toLowerCase();
 
     try {
@@ -914,7 +1053,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (devSess?.status === 'logged_out') {
           wasSessionActiveRef.current = false;
           setCurrentDeviceSession(null);
-          const lang = getActiveLanguage();
           setAuthError(
             lang === 'bn'
               ? 'অ্যাডমিন থেকে এই ডিভাইস ক্যাটাগরির অনুমতি বন্ধ (লিমিট ০) করা হয়েছে।'
@@ -928,9 +1066,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (devSess) {
           wasSessionActiveRef.current = devSess.status === 'active';
           setCurrentDeviceSession(devSess);
+          setSessionSyncError(null);
         } else {
           wasSessionActiveRef.current = false;
           setCurrentDeviceSession(null);
+          setSessionSyncError(
+            lang === 'bn'
+              ? 'ডিভাইস সেশন যাচাই সম্পন্ন করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।'
+              : 'Could not verify this device session. Please retry.'
+          );
         }
         setUser(profile);
         if (devSess?.status === 'active') {
@@ -948,14 +1092,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (err: unknown) {
       console.warn('Email sign in error:', err);
-      const code = (err as { code?: string })?.code || '';
-      if (code === 'auth/user-not-found' || code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
-        setAuthError('Incorrect email or password. Please verify and try again.');
-      } else if (code === 'auth/invalid-email') {
-        setAuthError('Please enter a valid email address.');
-      } else {
-        setAuthError(err instanceof Error ? err.message : 'Unable to sign in. Please try again.');
-      }
+      setAuthError(formatFirebaseAuthError(err, 'signin', lang));
       throw err;
     } finally {
       explicitAuthInProgressRef.current = false;
@@ -1127,9 +1264,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (devSess) {
           wasSessionActiveRef.current = devSess.status === 'active';
           setCurrentDeviceSession(devSess);
+          setSessionSyncError(null);
         } else {
           wasSessionActiveRef.current = false;
           setCurrentDeviceSession(null);
+          setSessionSyncError(
+            lang === 'bn'
+              ? 'ডিভাইস সেশন যাচাই সম্পন্ন করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।'
+              : 'Could not verify this device session. Please retry.'
+          );
         }
         setUser(profile);
         if (devSess?.status === 'active') {
@@ -1261,18 +1404,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const sendPasswordReset = async (email: string) => {
     setAuthError(null);
+    const lang = getActiveLanguage();
     try {
       await sendPasswordResetEmail(auth, email.trim().toLowerCase());
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code || '';
       console.warn('Password reset error:', code || 'unknown');
-      if (code === 'auth/user-not-found') {
-        throw new Error('No registered account was found with this email address.');
-      } else if (code === 'auth/too-many-requests') {
-        throw new Error('Too many requests. Please wait a few minutes before trying again.');
-      } else {
-        throw new Error('Failed to send password reset email. Please check the address.');
-      }
+      throw new Error(formatFirebaseAuthError(err, 'reset', lang));
     }
   };
 
@@ -1605,13 +1743,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     setUser(merged);
     if (isDeviceAccountSaved(user.userId) && user.email) {
-      const isGoogleUser = !auth.currentUser?.providerData.some((p) => p.providerId === 'password');
+      const isGoogleUser = auth.currentUser?.providerData.some((p) => p.providerId === 'google.com');
+      const isMagicLinkUser =
+        auth.currentUser?.providerData.some((p) => p.providerId === 'emailLink') &&
+        !auth.currentUser?.providerData.some((p) => p.providerId === 'password');
       saveDeviceAccount({
         userId: user.userId,
         displayName: cleanDisplayName,
         photoURL: cleanPhoto,
         email: user.email,
-        provider: isGoogleUser ? 'google' : 'password',
+        provider: isGoogleUser ? 'google' : isMagicLinkUser ? 'magic_link' : 'password',
       });
     }
   };
@@ -1838,13 +1979,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return approveDeviceViaQrPayload(user, currentDeviceId, payload, getActiveLanguage());
   };
 
+  const retryDeviceSessionVerification = async () => {
+    if (!user) return;
+    setRetryingSession(true);
+    setSessionSyncError(null);
+    const lang = getActiveLanguage();
+    try {
+      const devSess = await registerOrSyncDeviceSession(user);
+      if (devSess?.status === 'logged_out') {
+        wasSessionActiveRef.current = false;
+        setCurrentDeviceSession(null);
+        setAuthError(
+          lang === 'bn'
+            ? 'অ্যাডমিন থেকে এই ডিভাইস ক্যাটাগরির অনুমতি বন্ধ (লিমিট ০) করা হয়েছে।'
+            : 'Access from this device category has been restricted by an administrator.'
+        );
+        clearPinSessionUnlocked(user.userId);
+        await signOut(auth);
+        setIsAppLocked(false);
+        return;
+      }
+      if (devSess) {
+        wasSessionActiveRef.current = devSess.status === 'active';
+        setCurrentDeviceSession(devSess);
+        setSessionSyncError(null);
+        if (devSess.status === 'active') {
+          setPresence(user.userId, true);
+        }
+      } else {
+        setSessionSyncError(
+          lang === 'bn'
+            ? 'এখনো ডিভাইস সেশন যাচাই করা যায়নি। নেটওয়ার্ক সংযোগ দেখে আবার চেষ্টা করুন।'
+            : 'Still unable to verify device session. Please check your internet and retry.'
+        );
+      }
+    } catch {
+      setSessionSyncError(
+        lang === 'bn'
+          ? 'সার্ভারের সাথে সংযোগ বিচ্ছিন্ন হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।'
+          : 'Connection to server failed. Please try again in a moment.'
+      );
+    } finally {
+      setRetryingSession(false);
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
         user,
         firebaseUser,
+        initializing,
         loading,
         authError,
+        sessionSyncError,
+        retryingSession,
+        retryDeviceSessionVerification,
         theme,
         setTheme,
         deletionNotice,

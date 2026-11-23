@@ -35,14 +35,14 @@ export const DEFAULT_SECURITY_SETTINGS: AppSecuritySettings = {
   requireApprovalForNewDevice: false,
   newDeviceApprovalMode: 'optional',
   defaultOptionalApproval: false,
-  enableMagicLinkLogin: true,
+  enableMagicLinkLogin: false,
   enableQrDeviceApproval: true,
   updatedAt: '',
   updatedBy: SECURITY_SUPER_ADMIN_EMAIL,
 };
 
 export const DEFAULT_PUBLIC_AUTH_FLAGS: PublicAuthFlags = {
-  enableMagicLinkLogin: true,
+  enableMagicLinkLogin: false,
   enableQrDeviceApproval: true,
   updatedAt: '',
 };
@@ -93,7 +93,7 @@ function normalizeSecuritySettings(
     requireApprovalForNewDevice: newDeviceApprovalMode !== 'off',
     newDeviceApprovalMode,
     defaultOptionalApproval: data.defaultOptionalApproval === true,
-    enableMagicLinkLogin: data.enableMagicLinkLogin !== false,
+    enableMagicLinkLogin: data.enableMagicLinkLogin === true,
     enableQrDeviceApproval: data.enableQrDeviceApproval !== false,
     updatedAt: data.updatedAt || '',
     updatedBy: data.updatedBy || SECURITY_SUPER_ADMIN_EMAIL,
@@ -275,7 +275,7 @@ export async function getPublicAuthFlags(): Promise<PublicAuthFlags> {
     if (!snap.exists()) return DEFAULT_PUBLIC_AUTH_FLAGS;
     const data = snap.data() as Partial<PublicAuthFlags>;
     return {
-      enableMagicLinkLogin: data.enableMagicLinkLogin !== false,
+      enableMagicLinkLogin: data.enableMagicLinkLogin === true,
       enableQrDeviceApproval: data.enableQrDeviceApproval !== false,
       updatedAt: data.updatedAt || '',
     };
@@ -296,7 +296,7 @@ export function subscribeToPublicAuthFlags(
       }
       const data = snap.data() as Partial<PublicAuthFlags>;
       callback({
-        enableMagicLinkLogin: data.enableMagicLinkLogin !== false,
+        enableMagicLinkLogin: data.enableMagicLinkLogin === true,
         enableQrDeviceApproval: data.enableQrDeviceApproval !== false,
         updatedAt: data.updatedAt || '',
       });
@@ -461,14 +461,14 @@ export async function adminUpdateGlobalSecuritySettings(
     requireApprovalForNewDevice: mode !== 'off',
     newDeviceApprovalMode: mode,
     defaultOptionalApproval: settings.defaultOptionalApproval === true,
-    enableMagicLinkLogin: settings.enableMagicLinkLogin !== false,
+    enableMagicLinkLogin: settings.enableMagicLinkLogin === true,
     enableQrDeviceApproval: settings.enableQrDeviceApproval !== false,
     updatedAt: nowIso,
     updatedBy: cleanAdmin,
   };
 
   const publicFlagsPayload: PublicAuthFlags = {
-    enableMagicLinkLogin: payload.enableMagicLinkLogin !== false,
+    enableMagicLinkLogin: payload.enableMagicLinkLogin === true,
     enableQrDeviceApproval: payload.enableQrDeviceApproval !== false,
     updatedAt: nowIso,
   };
