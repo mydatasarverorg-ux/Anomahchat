@@ -427,6 +427,7 @@ function ChatDashboard({ user }: { user: UserProfile }) {
     blockDeviceWithVerification,
     hasPasswordProvider,
     sendPasswordReset,
+    approveDeviceByQr,
   } = useAuth();
   const { t, language } = useLanguage();
   const [chats, setChats] = useState<ChatRoom[]>([]);
@@ -455,6 +456,10 @@ function ChatDashboard({ user }: { user: UserProfile }) {
   const [blockedAlertNotice, setBlockedAlertNotice] = useState<{
     deviceLabel: string;
     resetSent: boolean;
+  } | null>(null);
+  const [qrApproveToast, setQrApproveToast] = useState<{
+    type: 'success' | 'error';
+    message: string;
   } | null>(null);
   const [notifPermission, setNotifPermission] = useState<AppNotificationPermission>(() =>
     getAppNotificationPermission()
@@ -908,6 +913,34 @@ function ChatDashboard({ user }: { user: UserProfile }) {
         <div className="bg-amber-600/95 text-amber-50 text-[11px] font-semibold py-1 px-4 text-center flex items-center justify-center gap-2 shadow-lg backdrop-blur-sm z-40">
           <WifiOff className="w-3.5 h-3.5 shrink-0" />
           <span>{t('offlineBanner')}</span>
+        </div>
+      )}
+
+      {/* QR Device Approval Confirmation Toast Banner */}
+      {qrApproveToast && (
+        <div
+          className={`px-4 py-2.5 text-xs flex items-center justify-between gap-2 z-50 border-b ${
+            qrApproveToast.type === 'success'
+              ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-100'
+              : 'bg-rose-950/90 border-rose-500/40 text-rose-100'
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            {qrApproveToast.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            ) : (
+              <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
+            )}
+            <span className="truncate">{qrApproveToast.message}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setQrApproveToast(null)}
+            className="p-1 text-slate-300 hover:text-white cursor-pointer shrink-0"
+            aria-label={t('close')}
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
@@ -1472,6 +1505,31 @@ function ChatDashboard({ user }: { user: UserProfile }) {
           onDetected={(detectedTarget) => {
             setShowQrScanner(false);
             setConnectPreviewTarget(detectedTarget);
+          }}
+          onDeviceApproveQr={async (payload) => {
+            setShowQrScanner(false);
+            try {
+              const approvedSession = await approveDeviceByQr(payload);
+              setQrApproveToast({
+                type: 'success',
+                message:
+                  language === 'bn'
+                    ? `"${approvedSession.deviceLabel}" ডিভাইসটি QR স্ক্যানের মাধ্যমে অনুমোদন দেওয়া হয়েছে!`
+                    : `Approved "${approvedSession.deviceLabel}" via QR scan!`,
+              });
+              setTimeout(() => setQrApproveToast(null), 5000);
+            } catch (err) {
+              setQrApproveToast({
+                type: 'error',
+                message:
+                  err instanceof Error
+                    ? err.message
+                    : language === 'bn'
+                    ? 'QR দিয়ে ডিভাইস অনুমোদন দেওয়া যায়নি।'
+                    : 'Failed to approve device via QR.',
+              });
+              setTimeout(() => setQrApproveToast(null), 5000);
+            }
           }}
         />
       )}

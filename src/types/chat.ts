@@ -11,6 +11,8 @@ export interface UserDeviceLimits {
   web?: number;
 }
 
+export type NewDeviceApprovalMode = 'off' | 'optional' | 'required';
+
 export interface DeviceSession {
   deviceId: string;
   userId: string;
@@ -25,6 +27,10 @@ export interface DeviceSession {
   approvedByDeviceId?: string | null;
   rejectedByDeviceId?: string | null;
   rejectionNote?: string | null;
+  approvalChallenge?: string | null;
+  approvalChallengeExpiresAtMs?: number | null;
+  approvalMethod?: 'device_tap' | 'qr_scan' | 'app_lock_pin' | 'admin' | null;
+  qrApprovedAt?: string | null;
   createdAt: string;
   lastActiveAt: string;
   loginAt?: string;
@@ -34,8 +40,18 @@ export interface AppSecuritySettings {
   defaultMobileLimit: number;
   defaultWebLimit: number;
   requireApprovalForNewDevice: boolean;
+  newDeviceApprovalMode?: NewDeviceApprovalMode;
+  defaultOptionalApproval?: boolean;
+  enableMagicLinkLogin?: boolean;
+  enableQrDeviceApproval?: boolean;
   updatedAt: string;
   updatedBy: string;
+}
+
+export interface PublicAuthFlags {
+  enableMagicLinkLogin: boolean;
+  enableQrDeviceApproval: boolean;
+  updatedAt: string;
 }
 
 export interface AdminSecuritySettings {
@@ -58,6 +74,7 @@ export interface UserProfile {
   lastPhoneChangedAtMs?: number;
   phoneChangeCooldownBypass?: boolean;
   deviceLimits?: UserDeviceLimits | null;
+  requireDeviceApproval?: boolean | null;
   discoverableByPhone?: boolean;
   photoURL: string;
   about?: string;

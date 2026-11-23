@@ -7,6 +7,7 @@ import { isSuperAdmin, SUPER_ADMIN_EMAIL } from '../services/adminService';
 import { validateMobileNumber } from '../utils/phoneUtils';
 import { getPhoneSlotStatus, type PhoneSlotStatus } from '../services/phoneRegistryService';
 import { PWAInstallButton } from './PWAInstallButton';
+import { QrScannerModal } from './QrScannerModal';
 import type { ThemeMode } from '../types/chat';
 import {
   X,
@@ -90,6 +91,10 @@ export function ProfileModal({
     logoutAllOtherDevices,
     removeDeviceHistoryItem,
     forceLogoutOtherDevice,
+    globalSecuritySettings,
+    publicAuthFlags,
+    updateOptionalDevice2FA,
+    approveDeviceByQr,
   } = useAuth();
 
   const { language, setLanguage, t } = useLanguage();
@@ -140,6 +145,9 @@ export function ProfileModal({
     label: string;
     resetSent: boolean;
   } | null>(null);
+  const [toggling2FA, setToggling2FA] = useState(false);
+  const [showDeviceQrScanner, setShowDeviceQrScanner] = useState(false);
+  const [qrApproveBusy, setQrApproveBusy] = useState(false);
 
   // Status & Messages
   const [saving, setSaving] = useState(false);
@@ -1090,6 +1098,136 @@ export function ProfileModal({
                     </button>
                   </div>
 
+                  {/* New Device Login Protection (2FA / QR) */}
+                  {(() => {
+                    const policyMode = globalSecuritySettings.newDeviceApprovalMode;
+                    const userEffective2FA =
+                      policyMode === 'required'
+                        ? true
+                        : policyMode === 'off'
+                        ? false
+                        : typeof user?.requireDeviceApproval === 'boolean'
+                        ? user.requireDeviceApproval
+                        : globalSecuritySettings.defaultOptionalApproval;
+                    const isOptionalMode = policyMode === 'optional';
+
+                    return (
+                      <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-2xl flex items-center justify-between gap-3">
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          <div className="w-8 h-8 rounded-xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0 mt-0.5">
+                            <ShieldCheck className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-xs font-bold text-white">
+                                {language === 'bn'
+                                  ? 'নতুন ডিভাইস লগইন সুরক্ষা (2FA / QR)'
+                                  : 'New Device Login Protection (2FA / QR)'}
+                              </span>
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                                  policyMode === 'required'
+                                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                    : policyMode === 'off'
+                                    ? 'bg-slate-800 text-slate-400 border-slate-700'
+                                    : userEffective2FA
+                                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                    : 'bg-slate-800 text-slate-300 border-slate-700'
+                                }`}
+                              >
+                                {policyMode === 'required'
+                                  ? language === 'bn'
+                                    ? 'অ্যাডমিন থেকে বাধ্যতামূলক'
+                                    : 'Required by Admin'
+                                  : policyMode === 'off'
+                                  ? language === 'bn'
+                                    ? 'অ্যাডমিন থেকে বন্ধ'
+                                    : 'Off by Admin'
+                                  : language === 'bn'
+                                  ? 'ঐচ্ছিক (আপনার ইচ্ছাধীন)'
+                                  : 'Optional (Your Choice)'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                              {policyMode === 'required'
+                                ? language === 'bn'
+                                  ? 'সকল ব্যবহারকারীর নতুন ডিভাইস/PC লগইনে QR স্ক্যান বা অনুমোদন বাধ্যতামূলক।'
+                                  : 'New device logins require QR scan or trusted-device approval for all accounts.'
+                                : policyMode === 'off'
+                                ? language === 'bn'
+                                  ? 'বর্তমানে অ্যাডমিন নতুন ডিভাইস 2FA যাচাই বন্ধ রেখেছেন (শুধু ডিভাইস সীমা পূর্ণ হলে যাচাই চাইবে)।'
+                                  : 'Admin has disabled mandatory 2FA checks (approval only triggers if your device quota is full).'
+                                : userEffective2FA
+                                ? language === 'bn'
+                                  ? 'চালু আছে: অজানা ফোন বা পিসিতে লগইন করলে আপনার মূল ডিভাইসে QR/অনুমোদন চাইবে।'
+                                  : 'Enabled: Logging in on a new phone or PC requires your QR scan or 1-tap approval.'
+                                : language === 'bn'
+                                ? 'বন্ধ আছে: চাইলে এটি চালু করুন—তাহলে কেউ পাসওয়ার্ড জানলেও আপনার অনুমতি ছাড়া নতুন পিসি/ফোনে ঢুকতে পারবে না।'
+                                : 'Off: Turn this ON so logins on any new phone or PC require your QR scan or 1-tap approval.'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {isOptionalMode ? (
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={userEffective2FA}
+                            disabled={toggling2FA}
+                            onClick={async () => {
+                              setToggling2FA(true);
+                              setErrorMessage(null);
+                              setSuccessMessage(null);
+                              try {
+                                const nextVal = !userEffective2FA;
+                                await updateOptionalDevice2FA(nextVal);
+                                setSuccessMessage(
+                                  nextVal
+                                    ? language === 'bn'
+                                      ? 'নতুন ডিভাইস 2FA/QR সুরক্ষা চালু করা হয়েছে!'
+                                      : 'New device 2FA/QR protection enabled!'
+                                    : language === 'bn'
+                                    ? 'নতুন ডিভাইস 2FA/QR সুরক্ষা বন্ধ করা হয়েছে।'
+                                    : 'New device 2FA/QR protection turned off.'
+                                );
+                                setTimeout(() => setSuccessMessage(null), 3500);
+                              } catch (err) {
+                                setErrorMessage(
+                                  err instanceof Error
+                                    ? err.message
+                                    : language === 'bn'
+                                    ? 'সেটিংস আপডেট করা যায়নি।'
+                                    : 'Failed to update 2FA setting.'
+                                );
+                              } finally {
+                                setToggling2FA(false);
+                              }
+                            }}
+                            className={`w-11 h-6 rounded-full transition relative shrink-0 cursor-pointer disabled:opacity-50 ${
+                              userEffective2FA ? 'bg-emerald-500' : 'bg-slate-700'
+                            }`}
+                          >
+                            <span
+                              className={`block w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                                userEffective2FA ? 'translate-x-6' : 'translate-x-1'
+                              }`}
+                            />
+                          </button>
+                        ) : (
+                          <span className="text-[10px] font-bold text-slate-400 shrink-0 px-2 py-1 rounded-lg bg-slate-900 border border-slate-800">
+                            {userEffective2FA
+                              ? language === 'bn'
+                                ? 'সক্রিয়'
+                                : 'ON'
+                              : language === 'bn'
+                              ? 'নিষ্ক্রিয়'
+                              : 'OFF'}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {/* Connected Devices & Active Sessions */}
                   <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-2xl space-y-3">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1119,6 +1257,18 @@ export function ProfileModal({
                               : `Mobile: ${activeM}/${deviceLimitsSummary.mobile} · Web/PC: ${activeW}/${deviceLimitsSummary.web}`;
                           })()}
                         </span>
+
+                        {publicAuthFlags.enableQrDeviceApproval && (
+                          <button
+                            type="button"
+                            disabled={qrApproveBusy}
+                            onClick={() => setShowDeviceQrScanner(true)}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer transition shadow-xs"
+                          >
+                            <QrCode className="w-3 h-3" />
+                            <span>{language === 'bn' ? 'PC QR স্ক্যান' : 'Scan PC QR'}</span>
+                          </button>
+                        )}
 
                         {userSessions.some(
                           (s) =>
@@ -1301,6 +1451,11 @@ export function ProfileModal({
                                       {sess.adminAlertPending && sess.status === 'active' && (
                                         <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/35 text-[9px] font-bold">
                                           {language === 'bn' ? 'নতুন সতর্কতা' : 'NEW ALERT'}
+                                        </span>
+                                      )}
+                                      {sess.approvalMethod === 'qr_scan' && sess.status === 'active' && (
+                                        <span className="px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[9px] font-bold">
+                                          QR
                                         </span>
                                       )}
                                     </div>
@@ -2205,6 +2360,38 @@ export function ProfileModal({
               </div>
             </div>
           </div>
+        )}
+
+        {/* QR Code Device Approval Scanner */}
+        {showDeviceQrScanner && (
+          <QrScannerModal
+            mode="device_approve"
+            onClose={() => setShowDeviceQrScanner(false)}
+            onDeviceApproveQr={async (payload) => {
+              setShowDeviceQrScanner(false);
+              setQrApproveBusy(true);
+              setErrorMessage(null);
+              try {
+                const approvedSession = await approveDeviceByQr(payload);
+                setSuccessMessage(
+                  language === 'bn'
+                    ? `"${approvedSession.deviceLabel}" ডিভাইসটি QR স্ক্যানের মাধ্যমে অনুমোদন দেওয়া হয়েছে!`
+                    : `Approved "${approvedSession.deviceLabel}" via QR scan!`
+                );
+                setTimeout(() => setSuccessMessage(null), 4000);
+              } catch (err) {
+                setErrorMessage(
+                  err instanceof Error
+                    ? err.message
+                    : language === 'bn'
+                    ? 'QR দিয়ে ডিভাইস অনুমোদন দেওয়া যায়নি।'
+                    : 'Failed to approve device via QR.'
+                );
+              } finally {
+                setQrApproveBusy(false);
+              }
+            }}
+          />
         )}
       </div>
     </div>

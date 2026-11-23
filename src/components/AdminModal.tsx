@@ -77,6 +77,7 @@ import type {
   DeviceSession,
   ChatRoom,
   ChatMessage,
+  NewDeviceApprovalMode,
 } from '../types/chat';
 import {
   Shield,
@@ -522,20 +523,37 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
   const handleSaveGlobalSecuritySettings = async (settings: {
     defaultMobileLimit: number;
     defaultWebLimit: number;
-    requireApprovalForNewDevice: boolean;
+    newDeviceApprovalMode: NewDeviceApprovalMode;
+    defaultOptionalApproval: boolean;
+    enableMagicLinkLogin: boolean;
+    enableQrDeviceApproval: boolean;
   }) => {
     if (!user?.email) return;
     setSecurityActionBusy(true);
     setActionErrorMsg(null);
     try {
       await adminUpdateGlobalSecuritySettings(settings, user.email);
+      const modeLabelBn =
+        settings.newDeviceApprovalMode === 'optional'
+          ? 'ইউজারের ইচ্ছাধীন'
+          : settings.newDeviceApprovalMode === 'required'
+          ? 'সবার জন্য আবশ্যিক'
+          : 'বন্ধ';
       showSuccessBanner(
         language === 'bn'
-          ? `গ্লোবাল ডিভাইস নীতি সেভ হয়েছে (মোবাইল: ${settings.defaultMobileLimit}, ওয়েব/পিসি: ${settings.defaultWebLimit})।`
-          : `Saved global device policy (Mobile: ${settings.defaultMobileLimit}, Web/PC: ${settings.defaultWebLimit}).`
+          ? `গ্লোবাল নিরাপত্তা নীতি সেভ হয়েছে (2FA: ${modeLabelBn}, Magic Link: ${
+              settings.enableMagicLinkLogin ? 'চালু' : 'বন্ধ'
+            }, QR: ${settings.enableQrDeviceApproval ? 'চালু' : 'বন্ধ'}, মোবাইল: ${
+              settings.defaultMobileLimit
+            }, ওয়েব/পিসি: ${settings.defaultWebLimit})।`
+          : `Saved global security policy (2FA: ${settings.newDeviceApprovalMode}, Magic Link: ${
+              settings.enableMagicLinkLogin ? 'ON' : 'OFF'
+            }, QR: ${settings.enableQrDeviceApproval ? 'ON' : 'OFF'}, Mobile: ${
+              settings.defaultMobileLimit
+            }, Web/PC: ${settings.defaultWebLimit}).`
       );
     } catch (err) {
-      setActionErrorMsg(extractReadableError(err, 'Failed to save global device policy.'));
+      setActionErrorMsg(extractReadableError(err, 'Failed to save global security policy.'));
     } finally {
       setSecurityActionBusy(false);
     }

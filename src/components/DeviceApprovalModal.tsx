@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { QrScannerModal } from './QrScannerModal';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -14,6 +15,7 @@ import {
   Lock,
   Mail,
   MapPin,
+  QrCode,
   ShieldAlert,
   ShieldCheck,
   Smartphone,
@@ -24,14 +26,17 @@ export function DeviceApprovalModal() {
   const {
     user,
     pendingApprovalSessions,
+    publicAuthFlags,
     hasPasswordProvider,
     approvePendingDevice,
+    approveDeviceByQr,
     rejectPendingDevice,
     sendPasswordReset,
   } = useAuth();
   const { language } = useLanguage();
 
   const [step, setStep] = useState<'choice' | 'verify_reject' | 'rejected_done'>('choice');
+  const [showQrScanner, setShowQrScanner] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showFallbackForm, setShowFallbackForm] = useState(false);
@@ -292,6 +297,25 @@ export function DeviceApprovalModal() {
                 </span>
               </button>
             </div>
+
+            {publicAuthFlags.enableQrDeviceApproval && targetSession.approvalChallenge && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setError(null);
+                  setShowQrScanner(true);
+                }}
+                className="w-full py-2 px-3 bg-slate-800/90 hover:bg-slate-800 disabled:opacity-50 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition"
+              >
+                <QrCode className="w-4 h-4 text-emerald-400" />
+                <span>
+                  {language === 'bn'
+                    ? 'অথবা নতুন পিসির QR কোড স্ক্যান করে অনুমোদন দিন'
+                    : 'Or Scan QR Code on New Device to Approve'}
+                </span>
+              </button>
+            )}
           </>
         )}
 
@@ -550,6 +574,31 @@ export function DeviceApprovalModal() {
           </div>
         )}
       </div>
+
+      {showQrScanner && (
+        <QrScannerModal
+          mode="device_approve"
+          onClose={() => setShowQrScanner(false)}
+          onDeviceApproveQr={async (payload) => {
+            setShowQrScanner(false);
+            setBusy(true);
+            setError(null);
+            try {
+              await approveDeviceByQr(payload);
+            } catch (err) {
+              setError(
+                err instanceof Error
+                  ? err.message
+                  : language === 'bn'
+                  ? 'QR কোড যাচাই করে অনুমোদন দেওয়া যায়নি।'
+                  : 'Failed to approve device via QR code.'
+              );
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

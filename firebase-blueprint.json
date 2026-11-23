@@ -56,6 +56,10 @@
           "type": "object",
           "description": "Admin-controlled per-user override for max simultaneous mobile and web/PC sessions"
         },
+        "requireDeviceApproval": {
+          "type": "boolean",
+          "description": "Per-user optional 2FA setting requiring new device approval when Admin policy is set to optional"
+        },
         "discoverableByPhone": {
           "type": "boolean",
           "description": "Whether friends who already know this user's exact mobile number can find them via privacy-preserving hash lookup"
@@ -1030,6 +1034,21 @@
         "approvedByDeviceId": { "type": "string", "maxLength": 128 },
         "rejectedByDeviceId": { "type": "string", "maxLength": 128 },
         "rejectionNote": { "type": "string", "maxLength": 300 },
+        "approvalChallenge": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-fA-F0-9]{24,64}$",
+          "description": "Short-lived cryptographic single-use challenge encoded into pending-device approval QR"
+        },
+        "approvalChallengeExpiresAtMs": {
+          "type": "number",
+          "description": "Unix epoch ms expiry timestamp for single-use QR challenge"
+        },
+        "approvalMethod": {
+          "type": "string",
+          "enum": ["device_tap", "qr_scan", "app_lock_pin", "admin"]
+        },
+        "qrApprovedAt": { "type": "string", "maxLength": 64 },
         "createdAt": { "type": "string", "maxLength": 64 },
         "lastActiveAt": { "type": "string", "maxLength": 64 },
         "loginAt": { "type": "string", "maxLength": 64 }
@@ -1038,16 +1057,31 @@
     },
     "AppSecuritySettings": {
       "title": "AppSecuritySettings",
-      "description": "Global platform security configuration controlled by Super Admin for default device limits and new login approval",
+      "description": "Global platform security configuration controlled by Super Admin for device limits, login methods, and new device 2FA policy",
       "type": "object",
       "properties": {
         "defaultMobileLimit": { "type": "number" },
         "defaultWebLimit": { "type": "number" },
         "requireApprovalForNewDevice": { "type": "boolean" },
+        "newDeviceApprovalMode": { "type": "string", "enum": ["off", "optional", "required"] },
+        "defaultOptionalApproval": { "type": "boolean" },
+        "enableMagicLinkLogin": { "type": "boolean" },
+        "enableQrDeviceApproval": { "type": "boolean" },
         "updatedAt": { "type": "string", "maxLength": 64 },
         "updatedBy": { "type": "string", "maxLength": 150 }
       },
       "required": ["defaultMobileLimit", "defaultWebLimit", "requireApprovalForNewDevice", "updatedAt", "updatedBy"]
+    },
+    "PublicAuthFlags": {
+      "title": "PublicAuthFlags",
+      "description": "Zero-PII public feature flags readable pre-login for showing or hiding Passwordless Magic Link and QR Device Approval",
+      "type": "object",
+      "properties": {
+        "enableMagicLinkLogin": { "type": "boolean" },
+        "enableQrDeviceApproval": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["enableMagicLinkLogin", "enableQrDeviceApproval", "updatedAt"]
     },
     "AdminSecuritySettings": {
       "title": "AdminSecuritySettings",

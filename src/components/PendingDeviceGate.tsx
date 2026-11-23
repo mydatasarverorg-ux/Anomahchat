@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import QRCode from 'qrcode';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { submitRecoveryRequest } from '../services/adminService';
+import { buildDeviceApprovalQrString } from '../utils/accountShortcut';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -11,6 +13,7 @@ import {
   LogOut,
   Mail,
   MapPin,
+  QrCode,
   RefreshCw,
   Send,
   ShieldAlert,
@@ -22,6 +25,8 @@ export function PendingDeviceGate() {
   const {
     user,
     currentDeviceSession,
+    publicAuthFlags,
+    refreshPendingDeviceQr,
     retryCurrentDeviceApproval,
     selfApproveCurrentDeviceWithPin,
     sendPasswordReset,
@@ -40,15 +45,86 @@ export function PendingDeviceGate() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [qrBusy, setQrBusy] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const autoRefreshLockRef = useRef(false);
+
   const [showSupportForm, setShowSupportForm] = useState(false);
   const [supportPhone, setSupportPhone] = useState(user?.phoneNumber || '');
   const [supportDetails, setSupportDetails] = useState('');
   const [supportBusy, setSupportBusy] = useState(false);
   const [supportTicketId, setSupportTicketId] = useState<string | null>(null);
 
+  const isRejected = currentDeviceSession?.status === 'rejected';
+  const qrFeatureEnabled = Boolean(
+    user && currentDeviceSession && !isRejected && publicAuthFlags.enableQrDeviceApproval
+  );
+  const challenge = currentDeviceSession?.approvalChallenge || '';
+  const challengeExpiresAtMs = currentDeviceSession?.approvalChallengeExpiresAtMs || 0;
+  const remainingSeconds = Math.max(0, Math.ceil((challengeExpiresAtMs - nowMs) / 1000));
+
+  useEffect(() => {
+    if (!qrFeatureEnabled) return;
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [qrFeatureEnabled]);
+
+  useEffect(() => {
+    if (!qrFeatureEnabled || !user || !currentDeviceSession) {
+      setQrDataUrl(null);
+      return;
+    }
+
+    if (!challenge || remainingSeconds <= 0) {
+      if (autoRefreshLockRef.current) return;
+      autoRefreshLockRef.current = true;
+      setQrBusy(true);
+      refreshPendingDeviceQr()
+        .catch(() => {})
+        .finally(() => {
+          setQrBusy(false);
+          setTimeout(() => {
+            autoRefreshLockRef.current = false;
+          }, 1500);
+        });
+      return;
+    }
+
+    const qrString = buildDeviceApprovalQrString({
+      userId: user.userId,
+      deviceId: currentDeviceSession.deviceId,
+      challenge,
+      expiresAtMs: challengeExpiresAtMs,
+    });
+    let cancelled = false;
+    QRCode.toDataURL(qrString, {
+      width: 220,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#0f172a', light: '#ffffff' },
+    })
+      .then((url) => {
+        if (!cancelled) setQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setQrDataUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    qrFeatureEnabled,
+    user?.userId,
+    currentDeviceSession?.deviceId,
+    challenge,
+    challengeExpiresAtMs,
+    remainingSeconds <= 0,
+    refreshPendingDeviceQr,
+  ]);
+
   if (!user || !currentDeviceSession) return null;
 
-  const isRejected = currentDeviceSession.status === 'rejected';
   const runtimeBadge =
     currentDeviceSession.runtimeType === 'apk'
       ? 'Android APK'
@@ -199,6 +275,62 @@ export function PendingDeviceGate() {
                 ? 'মূল ডিভাইসের অনুমোদনের জন্য রিয়েল-টাইমে অপেক্ষা করা হচ্ছে...'
                 : 'Listening in real time for approval from your trusted device...'}
             </span>
+          </div>
+        )}
+
+        {/* QR Code Instant Device Verification Card (Admin Controlled) */}
+        {qrFeatureEnabled && (
+          <div className="p-4 bg-slate-950/90 border border-emerald-500/35 rounded-2xl space-y-3 text-center">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-300">
+                <QrCode className="w-4 h-4 shrink-0" />
+                <span>
+                  {language === 'bn'
+                    ? 'QR স্ক্যান করে ১ ক্লিকে লগইন'
+                    : '1-Scan QR Device Approval'}
+                </span>
+              </div>
+              <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-mono font-bold text-emerald-300">
+                {`${String(Math.floor(remainingSeconds / 60)).padStart(2, '0')}:${String(
+                  remainingSeconds % 60
+                ).padStart(2, '0')}`}
+              </span>
+            </div>
+
+            <div className="mx-auto w-44 h-44 bg-white rounded-2xl p-2 flex items-center justify-center shadow-lg">
+              {qrDataUrl && !qrBusy ? (
+                <img
+                  src={qrDataUrl}
+                  alt="Device Approval QR"
+                  className="w-full h-full object-contain rounded-lg"
+                />
+              ) : (
+                <Loader2 className="w-7 h-7 animate-spin text-emerald-600" />
+              )}
+            </div>
+
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              {language === 'bn'
+                ? 'আপনার সক্রিয় ফোন/অ্যাপ থেকে প্রোফাইল → নিরাপত্তা → "Scan PC QR" অথবা মূল QR স্ক্যানার দিয়ে স্ক্যান করলেই সাথে সাথে চ্যাট খুলে যাবে।'
+                : 'Scan this code from your trusted phone (Settings → Security → Scan PC QR or main QR Scanner) to unlock instantly.'}
+            </p>
+
+            <button
+              type="button"
+              disabled={qrBusy}
+              onClick={async () => {
+                setQrBusy(true);
+                try {
+                  await refreshPendingDeviceQr();
+                } finally {
+                  setQrBusy(false);
+                }
+              }}
+              className="mx-auto px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 rounded-xl text-[11px] font-semibold inline-flex items-center gap-1.5 cursor-pointer transition border border-slate-700"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${qrBusy ? 'animate-spin' : ''}`} />
+              <span>{language === 'bn' ? 'নতুন QR তৈরি করুন' : 'Refresh QR Code'}</span>
+            </button>
           </div>
         )}
 

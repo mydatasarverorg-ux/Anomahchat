@@ -2,7 +2,12 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import jsQR from 'jsqr';
 import { useLanguage } from '../context/LanguageContext';
 import { useModalHistory } from '../hooks/useModalHistory';
-import { extractDeepLinkTarget, type DeepLinkTarget } from '../utils/accountShortcut';
+import {
+  extractDeepLinkTarget,
+  extractDeviceApprovalQrPayload,
+  type DeepLinkTarget,
+  type DeviceApprovalQrPayload,
+} from '../utils/accountShortcut';
 import {
   X,
   QrCode,
@@ -16,10 +21,17 @@ import {
 
 interface QrScannerModalProps {
   onClose: () => void;
-  onDetected: (target: DeepLinkTarget) => void;
+  onDetected?: (target: DeepLinkTarget) => void;
+  onDeviceApproveQr?: (payload: DeviceApprovalQrPayload) => void;
+  mode?: 'default' | 'device_approve';
 }
 
-export function QrScannerModal({ onClose, onDetected }: QrScannerModalProps) {
+export function QrScannerModal({
+  onClose,
+  onDetected,
+  onDeviceApproveQr,
+  mode = 'default',
+}: QrScannerModalProps) {
   const { language } = useLanguage();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -54,20 +66,45 @@ export function QrScannerModal({ onClose, onDetected }: QrScannerModalProps) {
   const handleDecodedString = useCallback(
     (rawText: string) => {
       if (detectedRef.current) return;
+      const approvalPayload = extractDeviceApprovalQrPayload(rawText);
+      if (approvalPayload) {
+        if (onDeviceApproveQr) {
+          detectedRef.current = true;
+          stopCamera();
+          onDeviceApproveQr(approvalPayload);
+          return;
+        }
+        setErrorText(
+          language === 'bn'
+            ? 'এই QR কোডটি ডিভাইস অনুমোদনের জন্য—আগে আপনার সক্রিয় ডিভাইস থেকে অনুমোদন মেনু ব্যবহার করুন।'
+            : 'This is a Device Approval QR code.'
+        );
+        return;
+      }
+
+      if (mode === 'device_approve') {
+        setErrorText(
+          language === 'bn'
+            ? 'এটি সঠিক PC/নতুন ডিভাইস লগইন QR কোড নয়। পিসি স্ক্রিনের QR কোডটি স্ক্যান করুন।'
+            : 'This QR code is not a valid Device Login Approval QR. Scan the QR shown on your PC or new device.'
+        );
+        return;
+      }
+
       const parsed = extractDeepLinkTarget(rawText);
       if (!parsed) {
         setErrorText(
           language === 'bn'
-            ? 'এই QR কোডটি Anomah Chat প্রোফাইল বা গ্রুপ লিংক নয়।'
-            : 'This QR code is not a valid Anomah Chat user or group link.'
+            ? 'এই QR কোডটি Anomah Chat প্রোফাইল, গ্রুপ বা ডিভাইস অনুমোদন QR নয়।'
+            : 'This QR code is not a valid Anomah Chat link or device QR.'
         );
         return;
       }
       detectedRef.current = true;
       stopCamera();
-      onDetected({ ...parsed, isQr: true });
+      onDetected?.({ ...parsed, isQr: true });
     },
-    [language, onDetected, stopCamera]
+    [language, mode, onDetected, onDeviceApproveQr, stopCamera]
   );
 
   const startCamera = useCallback(async () => {
@@ -223,12 +260,22 @@ export function QrScannerModal({ onClose, onDetected }: QrScannerModalProps) {
           </div>
           <div>
             <h3 className="text-base font-bold text-white">
-              {language === 'bn' ? 'QR কোড স্ক্যান করুন' : 'Scan QR Code'}
+              {mode === 'device_approve'
+                ? language === 'bn'
+                  ? 'নতুন ডিভাইস / PC QR স্ক্যান করুন'
+                  : 'Scan PC / New Device QR'
+                : language === 'bn'
+                ? 'QR কোড স্ক্যান করুন'
+                : 'Scan QR Code'}
             </h3>
             <p className="text-xs text-slate-400">
-              {language === 'bn'
-                ? 'প্রোফাইল QR স্ক্যানে অটো ফ্রেন্ড রিকোয়েস্ট ও গ্রুপ QR স্ক্যানে গ্রুপ ওপেন হবে'
-                : 'Scan a friend QR to auto-send a request or a group QR to join'}
+              {mode === 'device_approve'
+                ? language === 'bn'
+                  ? 'অন্য ডিভাইসের Waiting স্ক্রিনের QR কোড স্ক্যান করলে ১ ক্লিকেই অনুমোদন হবে'
+                  : 'Scan the QR code displayed on your new device or PC to approve login instantly'
+                : language === 'bn'
+                ? 'প্রোফাইল, গ্রুপ বা নতুন ডিভাইস অনুমোদন QR কোড স্ক্যান করুন'
+                : 'Scan a friend, group, or device login approval QR code'}
             </p>
           </div>
         </div>
@@ -314,7 +361,11 @@ export function QrScannerModal({ onClose, onDetected }: QrScannerModalProps) {
           <label className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
             <Link2 className="w-3.5 h-3.5 text-slate-400" />
             <span>
-              {language === 'bn'
+              {mode === 'device_approve'
+                ? language === 'bn'
+                  ? 'অথবা ডিভাইস অনুমোদন কোড (anomahchat://...) পেস্ট করুন'
+                  : 'Or paste device approval code (anomahchat://...)'
+                : language === 'bn'
                 ? 'অথবা চ্যাট/গ্রুপ লিংক বা @ইউজারনেম পেস্ট করুন'
                 : 'Or paste a user/group link or @username'}
             </span>
@@ -324,7 +375,13 @@ export function QrScannerModal({ onClose, onDetected }: QrScannerModalProps) {
               type="text"
               value={manualLink}
               onChange={(e) => setManualLink(e.target.value)}
-              placeholder={language === 'bn' ? 'লিংক বা @username লিখুন...' : 'Paste link or @username...'}
+              placeholder={
+                mode === 'device_approve'
+                  ? 'anomahchat://device-approve?...'
+                  : language === 'bn'
+                  ? 'লিংক বা @username লিখুন...'
+                  : 'Paste link or @username...'
+              }
               className="flex-1 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
             />
             <button

@@ -6,8 +6,10 @@ import {
   Eye,
   Laptop,
   Lock,
+  Mail,
   MessageSquare,
   Phone,
+  QrCode,
   Save,
   Search,
   ShieldAlert,
@@ -18,6 +20,7 @@ import { SUPER_ADMIN_EMAIL } from '../../services/adminService';
 import type {
   AdminSecuritySettings,
   AppSecuritySettings,
+  NewDeviceApprovalMode,
   PhoneRegistryEntry,
   UserProfile,
 } from '../../types/chat';
@@ -46,7 +49,10 @@ interface AdminUsersTabProps {
   onSaveGlobalSecuritySettings?: (settings: {
     defaultMobileLimit: number;
     defaultWebLimit: number;
-    requireApprovalForNewDevice: boolean;
+    newDeviceApprovalMode: NewDeviceApprovalMode;
+    defaultOptionalApproval: boolean;
+    enableMagicLinkLogin: boolean;
+    enableQrDeviceApproval: boolean;
   }) => Promise<void>;
   onSaveAdminSecuritySettings?: (settings: {
     adminMobileLimit: number;
@@ -85,8 +91,14 @@ export function AdminUsersTab({
   const [webLimitDraft, setWebLimitDraft] = useState<string>(
     String(globalSecuritySettings?.defaultWebLimit ?? 1)
   );
-  const [requireApprovalDraft, setRequireApprovalDraft] = useState<boolean>(
-    globalSecuritySettings?.requireApprovalForNewDevice !== false
+  const [approvalModeDraft, setApprovalModeDraft] = useState<NewDeviceApprovalMode>(
+    globalSecuritySettings?.newDeviceApprovalMode ?? 'optional'
+  );
+  const [enableMagicLinkDraft, setEnableMagicLinkDraft] = useState<boolean>(
+    globalSecuritySettings?.enableMagicLinkLogin !== false
+  );
+  const [enableQrApprovalDraft, setEnableQrApprovalDraft] = useState<boolean>(
+    globalSecuritySettings?.enableQrDeviceApproval !== false
   );
 
   const [adminMobileDraft, setAdminMobileDraft] = useState<string>(
@@ -103,11 +115,15 @@ export function AdminUsersTab({
     if (!globalSecuritySettings) return;
     setMobileLimitDraft(String(globalSecuritySettings.defaultMobileLimit));
     setWebLimitDraft(String(globalSecuritySettings.defaultWebLimit));
-    setRequireApprovalDraft(globalSecuritySettings.requireApprovalForNewDevice !== false);
+    setApprovalModeDraft(globalSecuritySettings.newDeviceApprovalMode ?? 'optional');
+    setEnableMagicLinkDraft(globalSecuritySettings.enableMagicLinkLogin !== false);
+    setEnableQrApprovalDraft(globalSecuritySettings.enableQrDeviceApproval !== false);
   }, [
     globalSecuritySettings?.defaultMobileLimit,
     globalSecuritySettings?.defaultWebLimit,
-    globalSecuritySettings?.requireApprovalForNewDevice,
+    globalSecuritySettings?.newDeviceApprovalMode,
+    globalSecuritySettings?.enableMagicLinkLogin,
+    globalSecuritySettings?.enableQrDeviceApproval,
   ]);
 
   useEffect(() => {
@@ -123,32 +139,157 @@ export function AdminUsersTab({
 
   return (
     <div className="space-y-4 max-w-5xl mx-auto">
-      {/* Global Device Limit & Login Approval Control */}
+      {/* Global Device Limit, Auth Features & 2FA Control */}
       {globalSecuritySettings && onSaveGlobalSecuritySettings && (
-        <div className="p-3.5 sm:p-4 bg-slate-950/90 border border-slate-800 rounded-2xl space-y-3">
+        <div className="p-3.5 sm:p-4 bg-slate-950/90 border border-slate-800 rounded-2xl space-y-3.5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
               <div>
                 <h4 className="text-xs font-bold text-white">
                   {language === 'bn'
-                    ? 'গ্লোবাল ডিভাইস সীমা ও নতুন লগইন অনুমোদন নিয়ন্ত্রণ (সকল সাধারণ ইউজার)'
-                    : 'Global Device Limits & New Login Approval Policy (Regular Users)'}
+                    ? 'গ্লোবাল লগইন, QR ও 2FA নিরাপত্তা নীতি (সকল সাধারণ ইউজার)'
+                    : 'Global Login, QR & 2FA Security Controls (Regular Users)'}
                 </h4>
                 <p className="text-[10px] text-slate-400">
                   {language === 'bn'
-                    ? 'সকল সাধারণ ইউজার একসাথে সর্বোচ্চ কয়টি মোবাইল ও ওয়েব/পিসি চালাতে পারবে তা এখান থেকে নিয়ন্ত্রণ করুন (সুপার অ্যাডমিনের নিজস্ব নীতি নিচে আলাদা)।'
-                    : 'Applies to all regular user accounts. Super Admin uses its dedicated security policy below.'}
+                    ? 'Magic Link ও QR লগইন ফিচার চালু/বন্ধ করুন এবং সাধারণ ইউজারদের নতুন ডিভাইস 2FA ও ডিভাইস সীমা সেট করুন।'
+                    : 'Toggle Magic Link & QR Approval features anytime, configure New Device 2FA policy, and set device limits.'}
                 </p>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-end text-xs">
-            <div className="space-y-1">
+          {/* Section 1: Global Feature Switches (Magic Link & QR Login) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+            <div className="flex items-center justify-between gap-2.5 p-2.5 bg-slate-900/90 border border-slate-800 rounded-xl">
+              <div className="flex items-start gap-2 min-w-0">
+                <Mail className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <div className="text-[11px] font-bold text-white">
+                    {language === 'bn'
+                      ? 'Passwordless Magic Link লগইন'
+                      : 'Passwordless Email Magic Link'}
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-snug">
+                    {language === 'bn'
+                      ? 'বন্ধ করলে লগইন স্ক্রিন থেকে Magic Link বাটন সাথে সাথে সরে যাবে।'
+                      : 'Turn OFF to immediately hide Magic Link sign-in from the login screen.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={enableMagicLinkDraft}
+                onClick={() => setEnableMagicLinkDraft((prev) => !prev)}
+                className={`w-10 h-5 rounded-full transition relative shrink-0 cursor-pointer ${
+                  enableMagicLinkDraft ? 'bg-emerald-500' : 'bg-slate-700'
+                }`}
+              >
+                <span
+                  className={`block w-3.5 h-3.5 bg-white rounded-full shadow transition-transform ${
+                    enableMagicLinkDraft ? 'translate-x-5.5' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-2.5 p-2.5 bg-slate-900/90 border border-slate-800 rounded-xl">
+              <div className="flex items-start gap-2 min-w-0">
+                <QrCode className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <div className="text-[11px] font-bold text-white">
+                    {language === 'bn'
+                      ? 'QR কোড ডিভাইস/PC অনুমোদন'
+                      : 'QR Code Device / PC Approval'}
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-snug">
+                    {language === 'bn'
+                      ? 'নতুন পিসি/ডিভাইসে ২-মিনিটের স্ক্যানযোগ্য QR ও মোবাইলে Scan PC QR দেখাবে।'
+                      : 'Shows auto-refreshing 2-min approval QR on new PC/device & Scan PC QR on mobile.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={enableQrApprovalDraft}
+                onClick={() => setEnableQrApprovalDraft((prev) => !prev)}
+                className={`w-10 h-5 rounded-full transition relative shrink-0 cursor-pointer ${
+                  enableQrApprovalDraft ? 'bg-emerald-500' : 'bg-slate-700'
+                }`}
+              >
+                <span
+                  className={`block w-3.5 h-3.5 bg-white rounded-full shadow transition-transform ${
+                    enableQrApprovalDraft ? 'translate-x-5.5' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          {/* Section 2: 3-Way New Device 2FA Policy + Device Quotas */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 items-end text-xs">
+            <div className="lg:col-span-6 space-y-1">
+              <label className="text-[10px] text-slate-400 font-semibold block">
+                {language === 'bn'
+                  ? 'নতুন ডিভাইস লগইন সুরক্ষা নীতি (2FA / QR কোয়ারেন্টাইন)'
+                  : 'New Device 2FA Quarantine Policy (Regular Users)'}
+              </label>
+              <div className="grid grid-cols-3 gap-1 p-1 bg-slate-900 border border-slate-700 rounded-xl">
+                {(
+                  [
+                    {
+                      id: 'off' as const,
+                      label: language === 'bn' ? 'সবার জন্য বন্ধ' : 'Off for All',
+                      activeCls: 'bg-slate-700 text-white shadow',
+                    },
+                    {
+                      id: 'optional' as const,
+                      label: language === 'bn' ? 'ইউজারের ইচ্ছাধীন' : 'User Optional',
+                      activeCls: 'bg-emerald-600 text-white shadow',
+                    },
+                    {
+                      id: 'required' as const,
+                      label: language === 'bn' ? 'সবার জন্য আবশ্যিক' : 'Required All',
+                      activeCls: 'bg-amber-600 text-white shadow',
+                    },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setApprovalModeDraft(opt.id)}
+                    className={`py-1.5 px-2 rounded-lg text-[10px] font-bold transition cursor-pointer truncate ${
+                      approvalModeDraft === opt.id
+                        ? opt.activeCls
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-400">
+                {approvalModeDraft === 'optional'
+                  ? language === 'bn'
+                    ? 'ইউজারের ইচ্ছাধীন: ডিফল্ট সরাসরি লগইন হবে; যে ইউজার Profile → Security থেকে চালু করবে, তার নতুন ডিভাইসে 2FA/QR লাগবে।'
+                    : 'Opt-in default: Normal users sign in directly unless they enable 2FA in Profile → Security (device limits still apply).'
+                  : approvalModeDraft === 'required'
+                  ? language === 'bn'
+                    ? 'সবার জন্য আবশ্যিক: প্রত্যেক সাধারণ ইউজার নতুন ডিভাইসে ঢুকতে QR স্ক্যান বা আগের ডিভাইসের অনুমোদন লাগবে।'
+                    : 'Mandatory: Every new device login requires QR scan or trusted-device approval.'
+                  : language === 'bn'
+                  ? 'বন্ধ: নতুন ডিভাইসে 2FA কোয়ারেন্টাইন বন্ধ থাকবে (কেবল ডিভাইস সংখ্যা সীমা পূর্ণ হলে যাচাই চাইবে)।'
+                  : 'Disabled: 2FA quarantine is bypassed globally unless device quota is full.'}
+              </p>
+            </div>
+
+            <div className="lg:col-span-2 space-y-1">
               <label className="text-[10px] text-slate-400 font-semibold flex items-center gap-1">
                 <Smartphone className="w-3 h-3 text-emerald-400" />
-                <span>{language === 'bn' ? 'সর্বোচ্চ মোবাইল সংখ্যা' : 'Max Mobile Devices'}</span>
+                <span>{language === 'bn' ? 'সর্বোচ্চ মোবাইল' : 'Max Mobile'}</span>
               </label>
               <input
                 type="number"
@@ -160,7 +301,7 @@ export function AdminUsersTab({
               />
             </div>
 
-            <div className="space-y-1">
+            <div className="lg:col-span-2 space-y-1">
               <label className="text-[10px] text-slate-400 font-semibold flex items-center gap-1">
                 <Laptop className="w-3 h-3 text-sky-400" />
                 <span>{language === 'bn' ? 'সর্বোচ্চ ওয়েব/পিসি' : 'Max PC / Web'}</span>
@@ -175,44 +316,28 @@ export function AdminUsersTab({
               />
             </div>
 
-            <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl">
-              <span className="text-[11px] text-slate-300 font-medium">
-                {language === 'bn' ? 'নতুন ডিভাইস অনুমোদন' : 'Require Approval'}
-              </span>
+            <div className="lg:col-span-2">
               <button
                 type="button"
-                role="switch"
-                aria-checked={requireApprovalDraft}
-                onClick={() => setRequireApprovalDraft((prev) => !prev)}
-                className={`w-10 h-5 rounded-full transition relative shrink-0 cursor-pointer ${
-                  requireApprovalDraft ? 'bg-emerald-500' : 'bg-slate-700'
-                }`}
+                disabled={securityPolicyBusy}
+                onClick={() => {
+                  const m = Math.min(20, Math.max(0, Number(mobileLimitDraft) || 0));
+                  const w = Math.min(20, Math.max(0, Number(webLimitDraft) || 0));
+                  onSaveGlobalSecuritySettings({
+                    defaultMobileLimit: m,
+                    defaultWebLimit: w,
+                    newDeviceApprovalMode: approvalModeDraft,
+                    defaultOptionalApproval: false,
+                    enableMagicLinkLogin: enableMagicLinkDraft,
+                    enableQrDeviceApproval: enableQrApprovalDraft,
+                  });
+                }}
+                className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition shadow"
               >
-                <span
-                  className={`block w-3.5 h-3.5 bg-white rounded-full shadow transition-transform ${
-                    requireApprovalDraft ? 'translate-x-5.5' : 'translate-x-1'
-                  }`}
-                />
+                <Save className="w-3.5 h-3.5" />
+                <span>{language === 'bn' ? 'গ্লোবাল নীতি সেভ' : 'Save Policy'}</span>
               </button>
             </div>
-
-            <button
-              type="button"
-              disabled={securityPolicyBusy}
-              onClick={() => {
-                const m = Math.min(20, Math.max(0, Number(mobileLimitDraft) || 0));
-                const w = Math.min(20, Math.max(0, Number(webLimitDraft) || 0));
-                onSaveGlobalSecuritySettings({
-                  defaultMobileLimit: m,
-                  defaultWebLimit: w,
-                  requireApprovalForNewDevice: requireApprovalDraft,
-                });
-              }}
-              className="py-1.5 px-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition shadow"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>{language === 'bn' ? 'গ্লোবাল নীতি সেভ' : 'Save Global Policy'}</span>
-            </button>
           </div>
 
           {/* Super Admin Dedicated Policy Sub-Panel */}

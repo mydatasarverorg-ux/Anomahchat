@@ -20,6 +20,7 @@ import {
   Languages,
   Phone,
   AtSign,
+  Sparkles,
 } from 'lucide-react';
 import {
   submitRecoveryRequest,
@@ -40,6 +41,11 @@ export function LoginScreen() {
     signInWithGoogle,
     signUpWithEmail,
     signInWithEmail,
+    sendMagicSignInLink,
+    completeMagicSignInLink,
+    dismissMagicLinkPrompt,
+    pendingMagicLinkPrompt,
+    publicAuthFlags,
     sendPasswordReset,
     loading,
     authError,
@@ -58,6 +64,12 @@ export function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // Passwordless Magic Link UI State
+  const [magicLinkMode, setMagicLinkMode] = useState(false);
+  const [magicLinkSentTo, setMagicLinkSentTo] = useState<string | null>(null);
+  const [magicConfirmEmail, setMagicConfirmEmail] = useState('');
+  const [magicConfirmBusy, setMagicConfirmBusy] = useState(false);
 
   // Status & Notifications
   const [localError, setLocalError] = useState<string | null>(null);
@@ -97,6 +109,14 @@ export function LoginScreen() {
       // ignore
     }
   }, []);
+
+  // Automatically exit Magic Link mode if administrator disables it globally
+  useEffect(() => {
+    if (!publicAuthFlags.enableMagicLinkLogin && magicLinkMode) {
+      setMagicLinkMode(false);
+      setMagicLinkSentTo(null);
+    }
+  }, [publicAuthFlags.enableMagicLinkLogin, magicLinkMode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,14 +161,36 @@ export function LoginScreen() {
         await signUpWithEmail(email, password, name, cleanUser || undefined, signupPhone);
       } else {
         const resolvedEmail = selectedSavedAccount ? selectedSavedAccount.email : email;
-        if (!resolvedEmail.trim() || !password.trim()) {
-          setLocalError(language === 'bn' ? 'ইমেইল ও পাসওয়ার্ড লিখুন।' : 'Please enter your email and password.');
-          return;
+        if (magicLinkMode && publicAuthFlags.enableMagicLinkLogin) {
+          if (!resolvedEmail.trim()) {
+            setLocalError(
+              language === 'bn'
+                ? 'ম্যাজিক লিংক পেতে আপনার ইমেইল লিখুন।'
+                : 'Please enter your email address for the Magic Link.'
+            );
+            return;
+          }
+          await sendMagicSignInLink(resolvedEmail);
+          const cleanTarget = resolvedEmail.trim().toLowerCase();
+          setMagicLinkSentTo(cleanTarget);
+          setInfoMessage(
+            language === 'bn'
+              ? `${cleanTarget} ঠিকানায় ১-ক্লিক লগইন ম্যাজিক লিংক পাঠানো হয়েছে! ইনবক্স বা স্প্যাম ফোল্ডার চেক করে লিংকে ক্লিক করুন।`
+              : `One-click Magic Sign-In Link sent to ${cleanTarget}! Open your inbox (or spam) and tap the link to sign in.`
+          );
+        } else {
+          if (!resolvedEmail.trim() || !password.trim()) {
+            setLocalError(language === 'bn' ? 'ইমেইল ও পাসওয়ার্ড লিখুন।' : 'Please enter your email and password.');
+            return;
+          }
+          await signInWithEmail(resolvedEmail, password);
         }
-        await signInWithEmail(resolvedEmail, password);
       }
-    } catch {
-      // Error handled in AuthContext or localError
+    } catch (err: unknown) {
+      if (magicLinkMode && err instanceof Error && err.message) {
+        setLocalError(err.message);
+      }
+      // Standard auth errors handled in AuthContext or localError
     }
   };
 
@@ -311,14 +353,22 @@ export function LoginScreen() {
                     key={acc.userId}
                     onClick={() => {
                       setLocalError(null);
+                      setInfoMessage(null);
+                      setMagicLinkSentTo(null);
                       clearAuthError();
                       if (acc.provider === 'google') {
                         setRememberDevicePending(true);
                         signInWithGoogle();
+                      } else if (acc.provider === 'magic_link' && publicAuthFlags.enableMagicLinkLogin) {
+                        setSelectedSavedAccount(acc);
+                        setEmail(acc.email);
+                        setPassword('');
+                        setMagicLinkMode(true);
                       } else {
                         setSelectedSavedAccount(acc);
                         setEmail(acc.email);
                         setPassword('');
+                        setMagicLinkMode(false);
                         setTimeout(() => passwordInputRef.current?.focus(), 60);
                       }
                     }}
@@ -332,7 +382,16 @@ export function LoginScreen() {
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-bold text-white truncate">{acc.displayName}</div>
                       <div className="text-[10px] text-slate-400 truncate">
-                        {acc.maskedEmail} · {acc.provider === 'google' ? 'Google' : language === 'bn' ? 'পাসওয়ার্ড' : 'Password'}
+                        {acc.maskedEmail} ·{' '}
+                        {acc.provider === 'google'
+                          ? 'Google'
+                          : acc.provider === 'magic_link'
+                          ? language === 'bn'
+                            ? 'ম্যাজিক লিংক'
+                            : 'Magic Link'
+                          : language === 'bn'
+                          ? 'পাসওয়ার্ড'
+                          : 'Password'}
                       </div>
                     </div>
                     <button
@@ -490,49 +549,111 @@ export function LoginScreen() {
               </div>
             )}
 
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-[11px] font-semibold text-slate-300">
-                  {t('loginPasswordLabel')} {authMode === 'email-signup' && <span className="text-slate-400 font-normal">(min 6)</span>}
-                </label>
-                {authMode === 'email-signin' && (
+            {/* Password Field (Hidden when using Passwordless Magic Link mode) */}
+            {!(authMode === 'email-signin' && magicLinkMode && publicAuthFlags.enableMagicLinkLogin) ? (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-semibold text-slate-300">
+                    {t('loginPasswordLabel')}{' '}
+                    {authMode === 'email-signup' && (
+                      <span className="text-slate-400 font-normal">(min 6)</span>
+                    )}
+                  </label>
+                  {authMode === 'email-signin' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModalError(null);
+                        if (selectedSavedAccount?.email) {
+                          setForgotEmail(selectedSavedAccount.email);
+                          setSupportEmail(selectedSavedAccount.email);
+                        }
+                        setShowForgotModal(true);
+                      }}
+                      className="text-[10px] text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
+                    >
+                      {t('loginForgotPasswordBtn')}
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    ref={passwordInputRef}
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full pl-10 pr-10 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+                    minLength={6}
+                  />
                   <button
                     type="button"
-                    onClick={() => {
-                      setModalError(null);
-                      if (selectedSavedAccount?.email) {
-                        setForgotEmail(selectedSavedAccount.email);
-                        setSupportEmail(selectedSavedAccount.email);
-                      }
-                      setShowForgotModal(true);
-                    }}
-                    className="text-[10px] text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer p-0.5"
                   >
-                    {t('loginForgotPasswordBtn')}
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
-                )}
+                </div>
               </div>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  ref={passwordInputRef}
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-10 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
-                  minLength={6}
-                />
+            ) : (
+              <div className="p-3 rounded-xl bg-emerald-950/35 border border-emerald-500/35 text-[11px] text-emerald-200/90 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-emerald-300">
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    {language === 'bn'
+                      ? 'পাসওয়ার্ড ছাড়াই ইমেইল ম্যাজিক লিংক লগইন'
+                      : 'Passwordless Email Magic Link'}
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-300 leading-relaxed">
+                  {magicLinkSentTo
+                    ? language === 'bn'
+                      ? `${magicLinkSentTo} ইনবক্সে যাওয়া লিংকে ক্লিক করলেই সরাসরি লগইন হয়ে যাবে। না পেলে Spam/Promotions ফোল্ডার দেখুন।`
+                      : `Tap the one-click link sent to ${magicLinkSentTo}. Check Spam/Promotions if needed.`
+                    : language === 'bn'
+                    ? 'আপনার ইমেইলে একটি সুরক্ষিত ওয়ান-টাইম লগইন লিংক পাঠানো হবে। কোনো পাসওয়ার্ড টাইপ করতে হবে না।'
+                    : 'We will email a secure one-time sign-in link to your inbox—no password needed.'}
+                </p>
+              </div>
+            )}
+
+            {/* Toggle between Password Sign-In and Magic Link Sign-In (when Admin enabled) */}
+            {authMode === 'email-signin' && publicAuthFlags.enableMagicLinkLogin && (
+              <div className="flex items-center justify-between gap-2 pt-0.5">
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer p-0.5"
+                  onClick={() => {
+                    setMagicLinkMode((prev) => !prev);
+                    setMagicLinkSentTo(null);
+                    setLocalError(null);
+                    clearAuthError();
+                  }}
+                  className="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-1.5 cursor-pointer transition"
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {magicLinkMode ? (
+                    <>
+                      <Lock className="w-3 h-3" />
+                      <span>
+                        {language === 'bn'
+                          ? 'পাসওয়ার্ড দিয়ে লগইনে ফিরে যান'
+                          : 'Use Password Instead'}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3 h-3" />
+                      <span>
+                        {language === 'bn'
+                          ? 'পাসওয়ার্ড ছাড়া Magic Link দিয়ে লগইন করুন'
+                          : 'Sign In with Email Magic Link (No Password)'}
+                      </span>
+                    </>
+                  )}
                 </button>
               </div>
-            </div>
+            )}
 
             {/* Opt-in Remember Account Card (Passwordless Quick-Tap) */}
             {!selectedSavedAccount && (
@@ -561,6 +682,19 @@ export function LoginScreen() {
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
                   <span>{t('loading')}</span>
+                </>
+              ) : authMode === 'email-signin' && magicLinkMode && publicAuthFlags.enableMagicLinkLogin ? (
+                <>
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>
+                    {magicLinkSentTo
+                      ? language === 'bn'
+                        ? 'আবার ম্যাজিক লিংক পাঠান'
+                        : 'Resend Magic Login Link'
+                      : language === 'bn'
+                      ? 'ইমেইলে ম্যাজিক লিংক পাঠান'
+                      : 'Send Magic Sign-In Link'}
+                  </span>
                 </>
               ) : (
                 <>
@@ -958,6 +1092,82 @@ export function LoginScreen() {
                 </button>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Cross-Device Magic Link Email Confirmation Modal */}
+      {pendingMagicLinkPrompt && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-emerald-500/40 rounded-3xl w-full max-w-sm p-6 shadow-2xl space-y-4 relative">
+            <button
+              type="button"
+              onClick={dismissMagicLinkPrompt}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              aria-label={t('close')}
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-white">
+                  {language === 'bn' ? 'ম্যাজিক লিংক যাচাই করুন' : 'Confirm Magic Link Email'}
+                </h4>
+                <p className="text-[11px] text-slate-400">
+                  {language === 'bn'
+                    ? 'নিরাপত্তার জন্য যে ইমেইলে লিংক পাঠিয়েছিলেন সেটি লিখুন'
+                    : 'Re-enter the email that received this link'}
+                </p>
+              </div>
+            </div>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!magicConfirmEmail.trim()) return;
+                setMagicConfirmBusy(true);
+                try {
+                  setRememberDevicePending(rememberDevice);
+                  await completeMagicSignInLink(magicConfirmEmail.trim());
+                } finally {
+                  setMagicConfirmBusy(false);
+                }
+              }}
+              className="space-y-3"
+            >
+              <input
+                type="email"
+                required
+                autoFocus
+                value={magicConfirmEmail}
+                onChange={(e) => setMagicConfirmEmail(e.target.value)}
+                placeholder="name@example.com"
+                className="w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={dismissMagicLinkPrompt}
+                  className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  {t('cancel')}
+                </button>
+                <button
+                  type="submit"
+                  disabled={magicConfirmBusy || !magicConfirmEmail.trim()}
+                  className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  {magicConfirmBusy ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  )}
+                  <span>{language === 'bn' ? 'লগইন সম্পন্ন করুন' : 'Complete Sign-In'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -5,6 +5,9 @@ import {
   onAuthStateChanged,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
   sendPasswordResetEmail,
   sendEmailVerification,
   updatePassword,
@@ -34,7 +37,9 @@ import {
   consumeRememberDevicePending,
   isDeviceAccountSaved,
   saveDeviceAccount,
+  type DeviceApprovalQrPayload,
 } from '../utils/accountShortcut';
+import { isNativeApkApp } from '../utils/appVersion';
 import { isSuperAdmin, SUPER_ADMIN_EMAIL } from '../services/adminService';
 import { getCanonicalPhoneKey, validateMobileNumber } from '../utils/phoneUtils';
 import {
@@ -45,10 +50,14 @@ import {
 } from '../services/phoneRegistryService';
 import {
   DEFAULT_ADMIN_SECURITY_SETTINGS,
+  DEFAULT_PUBLIC_AUTH_FLAGS,
   DEFAULT_SECURITY_SETTINGS,
   acknowledgeAdminLoginSession,
   approveDeviceSession,
+  approveDeviceViaQrPayload,
   getOrCreateDeviceId,
+  getPublicAuthFlags,
+  issuePendingDeviceQrChallenge,
   logoutAllOtherDeviceSessions,
   markDeviceSessionLoggedOut,
   registerOrSyncDeviceSession,
@@ -59,14 +68,17 @@ import {
   retryRejectedDeviceSession,
   subscribeToAdminSecuritySettings,
   subscribeToGlobalSecuritySettings,
+  subscribeToPublicAuthFlags,
   subscribeToUserDeviceSessions,
   toggleDeviceTrust,
+  updateUserRequireDeviceApproval,
 } from '../services/deviceSessionService';
 import type {
   AdminSecuritySettings,
   AppSecuritySettings,
   DeviceSession,
   PhoneChangeHistoryEntry,
+  PublicAuthFlags,
   ThemeMode,
   UserProfile,
 } from '../types/chat';
@@ -76,6 +88,45 @@ function getActiveLanguage(): 'en' | 'bn' {
     return localStorage.getItem('anomah_chat_language') === 'bn' ? 'bn' : 'en';
   } catch {
     return 'en';
+  }
+}
+
+const MAGIC_LINK_EMAIL_KEY = 'anomah_magic_link_email';
+
+function buildMagicLinkActionUrl(): string {
+  if (typeof window === 'undefined') {
+    return 'https://mydatasarverorg-ux.github.io/Anomahchat/';
+  }
+  if (
+    !isNativeApkApp() &&
+    (window.location.protocol === 'https:' ||
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1')
+  ) {
+    return `${window.location.origin}${window.location.pathname}`;
+  }
+  return 'https://mydatasarverorg-ux.github.io/Anomahchat/';
+}
+
+function cleanMagicLinkUrlParams(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const url = new URL(window.location.href);
+    const keysToRemove = ['apiKey', 'mode', 'oobCode', 'continueUrl', 'lang'];
+    let changed = false;
+    for (const k of keysToRemove) {
+      if (url.searchParams.has(k)) {
+        url.searchParams.delete(k);
+        changed = true;
+      }
+    }
+    if (changed) {
+      const cleanSearch = url.searchParams.toString();
+      const nextUrl = `${url.pathname}${cleanSearch ? `?${cleanSearch}` : ''}${url.hash}`;
+      window.history.replaceState({}, '', nextUrl);
+    }
+  } catch {
+    // ignore URL cleanup error
   }
 }
 
@@ -112,6 +163,12 @@ interface AuthContextType {
     phoneNumber?: string
   ) => Promise<void>;
   signInWithEmail: (email: string, pass: string) => Promise<void>;
+  sendMagicSignInLink: (email: string) => Promise<void>;
+  completeMagicSignInLink: (overrideEmail?: string) => Promise<void>;
+  dismissMagicLinkPrompt: () => void;
+  pendingMagicLinkPrompt: boolean;
+  publicAuthFlags: PublicAuthFlags;
+  globalSecuritySettings: AppSecuritySettings;
   sendPasswordReset: (email: string) => Promise<void>;
   changePassword: (currentPass: string, newPass: string) => Promise<void>;
   signOutUser: () => Promise<void>;
@@ -149,6 +206,9 @@ interface AuthContextType {
   retryCurrentDeviceApproval: () => Promise<void>;
   selfApproveCurrentDeviceWithPin: (pin: string) => Promise<{ success: boolean; error?: string }>;
   forceLogoutOtherDevice: (targetDeviceId: string) => Promise<void>;
+  updateOptionalDevice2FA: (enabled: boolean) => Promise<void>;
+  refreshPendingDeviceQr: () => Promise<{ challenge: string; expiresAtMs: number } | null>;
+  approveDeviceByQr: (payload: DeviceApprovalQrPayload) => Promise<DeviceSession>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -191,14 +251,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentDeviceSession, setCurrentDeviceSession] = useState<DeviceSession | null>(null);
   const [globalSecuritySettings, setGlobalSecuritySettings] =
     useState<AppSecuritySettings>(DEFAULT_SECURITY_SETTINGS);
+  const [publicAuthFlags, setPublicAuthFlags] =
+    useState<PublicAuthFlags>(DEFAULT_PUBLIC_AUTH_FLAGS);
+  const [pendingMagicLinkPrompt, setPendingMagicLinkPrompt] = useState(false);
   const [adminSecuritySettings, setAdminSecuritySettings] =
     useState<AdminSecuritySettings>(DEFAULT_ADMIN_SECURITY_SETTINGS);
 
   // Prevents locking the user out immediately during an explicit login/signup action
   const explicitAuthInProgressRef = useRef(false);
+  const magicLinkCheckedRef = useRef(false);
   const knownPendingAlertIdsRef = useRef<Set<string>>(new Set());
   const knownAdminAlertIdsRef = useRef<Set<string>>(new Set());
   const wasSessionActiveRef = useRef(false);
+
+  // Unconditional pre-login subscription to zero-PII public auth feature flags
+  useEffect(() => {
+    return subscribeToPublicAuthFlags((flags) => {
+      setPublicAuthFlags(flags);
+    });
+  }, []);
 
   const [theme, setThemeState] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem('anomah_chat_theme') as ThemeMode;
@@ -310,7 +381,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               JSON.stringify(prev.phoneHistory || []) !== JSON.stringify(fresh.phoneHistory || []) ||
               JSON.stringify(prev.deviceLimits || null) !== JSON.stringify(fresh.deviceLimits || null) ||
               prev.discoverableByPhone !== fresh.discoverableByPhone ||
-              prev.hasAppLockPin !== fresh.hasAppLockPin
+              prev.hasAppLockPin !== fresh.hasAppLockPin ||
+              prev.requireDeviceApproval !== fresh.requireDeviceApproval
             ) {
               return { ...prev, ...fresh };
             }
@@ -536,13 +608,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
             setUser(profile);
             if (isDeviceAccountSaved(profile.userId) && profile.email) {
-              const isGoogleUser = !current.providerData.some((p) => p.providerId === 'password');
+              const isGoogleUser = current.providerData.some((p) => p.providerId === 'google.com');
+              const isMagicLinkUser =
+                current.providerData.some((p) => p.providerId === 'emailLink') &&
+                !current.providerData.some((p) => p.providerId === 'password');
               saveDeviceAccount({
                 userId: profile.userId,
                 displayName: profile.displayName,
                 photoURL: profile.photoURL || '',
                 email: profile.email,
-                provider: isGoogleUser ? 'google' : 'password',
+                provider: isGoogleUser ? 'google' : isMagicLinkUser ? 'magic_link' : 'password',
               });
             }
           } else {
@@ -867,6 +942,231 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
   };
+
+  const sendMagicSignInLink = async (rawEmail: string) => {
+    setAuthError(null);
+    const lang = getActiveLanguage();
+    const cleanEmail = rawEmail.trim().toLowerCase();
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      throw new Error(
+        lang === 'bn' ? 'দয়া করে একটি সঠিক ইমেইল ঠিকানা লিখুন।' : 'Please enter a valid email address.'
+      );
+    }
+
+    const flags = await getPublicAuthFlags();
+    if (!flags.enableMagicLinkLogin) {
+      throw new Error(
+        lang === 'bn'
+          ? 'অ্যাডমিন বর্তমানে Magic Link লগইন সুবিধাটি বন্ধ রেখেছেন। পাসওয়ার্ড বা Google ব্যবহার করুন।'
+          : 'Passwordless Magic Link sign-in is currently disabled by the administrator.'
+      );
+    }
+
+    try {
+      await sendSignInLinkToEmail(auth, cleanEmail, {
+        url: buildMagicLinkActionUrl(),
+        handleCodeInApp: true,
+      });
+      try {
+        localStorage.setItem(MAGIC_LINK_EMAIL_KEY, cleanEmail);
+      } catch {
+        // ignore storage limits; cross-device prompt handles missing local email
+      }
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      console.warn('Magic link send notice:', code || err);
+      if (code === 'auth/operation-not-allowed') {
+        throw new Error(
+          lang === 'bn'
+            ? 'Firebase Console-এ Authentication > Sign-in method > Email/Password-এর ভেতর "Email link (passwordless sign-in)" এখনও চালু করা হয়নি।'
+            : 'Email link (passwordless sign-in) is not enabled in Firebase Console yet under Authentication > Sign-in method > Email/Password.'
+        );
+      }
+      if (code === 'auth/unauthorized-continue-uri' || code === 'auth/invalid-continue-uri') {
+        throw new Error(
+          lang === 'bn'
+            ? 'এই ডোমেইনটি Firebase Console > Authentication > Settings > Authorized domains-এ যুক্ত নেই।'
+            : 'This domain is not listed under Firebase Console > Authentication > Settings > Authorized domains.'
+        );
+      }
+      if (code === 'auth/too-many-requests') {
+        throw new Error(
+          lang === 'bn'
+            ? 'অনেকবার অনুরোধ পাঠানো হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।'
+            : 'Too many requests. Please wait a few minutes before trying again.'
+        );
+      }
+      if (code === 'auth/invalid-email') {
+        throw new Error(
+          lang === 'bn' ? 'সঠিক ইমেইল ঠিকানা লিখুন।' : 'Please enter a valid email address.'
+        );
+      }
+      throw new Error(
+        lang === 'bn'
+          ? 'ম্যাজিক লিংক পাঠানো যায়নি। ইন্টারনেট ও ইমেইল ঠিকানা পরীক্ষা করে আবার চেষ্টা করুন।'
+          : 'Could not send Magic Sign-In Link right now. Please check your email and connection.'
+      );
+    }
+  };
+
+  const completeMagicSignInLink = async (overrideEmail?: string) => {
+    if (typeof window === 'undefined') return;
+    if (!isSignInWithEmailLink(auth, window.location.href)) return;
+
+    const lang = getActiveLanguage();
+    let storedEmail = '';
+    try {
+      storedEmail = localStorage.getItem(MAGIC_LINK_EMAIL_KEY) || '';
+    } catch {
+      storedEmail = '';
+    }
+    const targetEmail = (overrideEmail || storedEmail).trim().toLowerCase();
+
+    const flags = await getPublicAuthFlags();
+    if (!flags.enableMagicLinkLogin) {
+      cleanMagicLinkUrlParams();
+      try {
+        localStorage.removeItem(MAGIC_LINK_EMAIL_KEY);
+      } catch {
+        // ignore
+      }
+      setPendingMagicLinkPrompt(false);
+      setAuthError(
+        lang === 'bn'
+          ? 'অ্যাডমিন বর্তমানে Magic Link লগইন বন্ধ রেখেছেন। অনুগ্রহ করে পাসওয়ার্ড বা Google দিয়ে লগইন করুন।'
+          : 'Magic Link login is currently disabled by the administrator. Please sign in with password or Google.'
+      );
+      setLoading(false);
+      return;
+    }
+
+    if (!targetEmail) {
+      setPendingMagicLinkPrompt(true);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setAuthError(null);
+    explicitAuthInProgressRef.current = true;
+    try {
+      const res = await signInWithEmailLink(auth, targetEmail, window.location.href);
+      try {
+        localStorage.removeItem(MAGIC_LINK_EMAIL_KEY);
+      } catch {
+        // ignore
+      }
+      setPendingMagicLinkPrompt(false);
+      cleanMagicLinkUrlParams();
+
+      if (res.user) {
+        markPinSessionUnlocked(res.user.uid);
+        setIsAppLocked(false);
+        const profile = await syncUserProfile({
+          uid: res.user.uid,
+          displayName: res.user.displayName,
+          email: targetEmail,
+          photoURL: res.user.photoURL,
+        });
+        if (!verifyDeletionStatus(profile)) {
+          if (!profile.isBanned && profile.phoneNumber) {
+            await releasePhoneSlot(profile.userId, profile.phoneNumber);
+          }
+          await updateDoc(doc(db, 'users', profile.userId), { status: 'deleted' }).catch(() => {});
+          await syncDirectoryEntry(profile.userId, {
+            status: 'deleted',
+            phoneLookupHash: null,
+            username: deleteField(),
+          }).catch(() => {});
+          await signOut(auth);
+          setIsAppLocked(false);
+          return;
+        }
+        const devSess = await registerOrSyncDeviceSession(profile);
+        if (devSess?.status === 'logged_out') {
+          wasSessionActiveRef.current = false;
+          setCurrentDeviceSession(null);
+          setAuthError(
+            lang === 'bn'
+              ? 'অ্যাডমিন থেকে এই ডিভাইস ক্যাটাগরির অনুমতি বন্ধ (লিমিট ০) করা হয়েছে।'
+              : 'Access from this device category has been restricted by an administrator.'
+          );
+          clearPinSessionUnlocked(profile.userId);
+          await signOut(auth);
+          setIsAppLocked(false);
+          return;
+        }
+        if (devSess) {
+          wasSessionActiveRef.current = devSess.status === 'active';
+          setCurrentDeviceSession(devSess);
+        } else {
+          wasSessionActiveRef.current = false;
+          setCurrentDeviceSession(null);
+        }
+        setUser(profile);
+        if (devSess?.status === 'active') {
+          setPresence(res.user.uid, true);
+        }
+        if (consumeRememberDevicePending() || isDeviceAccountSaved(profile.userId)) {
+          saveDeviceAccount({
+            userId: profile.userId,
+            displayName: profile.displayName,
+            photoURL: profile.photoURL || '',
+            email: targetEmail,
+            provider: 'magic_link',
+          });
+        }
+      }
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      console.warn('Magic link sign-in error:', code || err);
+      if (code === 'auth/expired-action-code' || code === 'auth/invalid-action-code') {
+        cleanMagicLinkUrlParams();
+        try {
+          localStorage.removeItem(MAGIC_LINK_EMAIL_KEY);
+        } catch {
+          // ignore
+        }
+        setPendingMagicLinkPrompt(false);
+        setAuthError(
+          lang === 'bn'
+            ? 'এই ম্যাজিক লিংকটির মেয়াদ শেষ বা ইতিমধ্যেই ব্যবহৃত হয়ে গেছে। নতুন ম্যাজিক লিংক পাঠিয়ে আবার চেষ্টা করুন।'
+            : 'This Magic Link has expired or was already used. Please request a new Magic Link.'
+        );
+      } else if (code === 'auth/invalid-email') {
+        setPendingMagicLinkPrompt(true);
+        setAuthError(
+          lang === 'bn'
+            ? 'এই ইমেইলটি ম্যাজিক লিংকের ইমেইলের সাথে মেলেনি। যে ইমেইলে লিংক পাঠিয়েছিলেন সেটি দিন।'
+            : 'The email entered does not match the Magic Link request. Enter the email that received the link.'
+        );
+      } else {
+        setAuthError(
+          err instanceof Error
+            ? err.message
+            : lang === 'bn'
+            ? 'ম্যাজিক লিংক দিয়ে লগইন সম্পন্ন করা যায়নি।'
+            : 'Unable to complete Magic Link sign-in.'
+        );
+      }
+    } finally {
+      explicitAuthInProgressRef.current = false;
+      setLoading(false);
+    }
+  };
+
+  const dismissMagicLinkPrompt = () => {
+    setPendingMagicLinkPrompt(false);
+    cleanMagicLinkUrlParams();
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || magicLinkCheckedRef.current) return;
+    if (isSignInWithEmailLink(auth, window.location.href)) {
+      magicLinkCheckedRef.current = true;
+      void completeMagicSignInLink();
+    }
+  }, []);
 
   const resendVerificationEmail = async () => {
     if (!auth.currentUser) {
@@ -1450,7 +1750,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) return { success: false, error: 'Not signed in.' };
     const result = await verifyAppLockPin(user.userId, pin);
     if (!result.success) return result;
-    await approveDeviceSession(user.userId, currentDeviceId, `${currentDeviceId}_pin_verified`, user);
+    await approveDeviceSession(
+      user.userId,
+      currentDeviceId,
+      `${currentDeviceId}_pin_verified`,
+      user,
+      'app_lock_pin'
+    );
     markPinSessionUnlocked(user.userId);
     wasSessionActiveRef.current = true;
     return { success: true };
@@ -1459,6 +1765,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const forceLogoutOtherDevice = async (targetDeviceId: string) => {
     if (!user || targetDeviceId === currentDeviceId) return;
     await remoteLogoutDeviceSession(user.userId, targetDeviceId);
+  };
+
+  const updateOptionalDevice2FA = async (enabled: boolean) => {
+    if (!user) return;
+    await updateUserRequireDeviceApproval(user.userId, enabled);
+    setUser((prev) => (prev ? { ...prev, requireDeviceApproval: enabled } : prev));
+  };
+
+  const refreshPendingDeviceQr = async (): Promise<{
+    challenge: string;
+    expiresAtMs: number;
+  } | null> => {
+    if (!user) return null;
+    return issuePendingDeviceQrChallenge(user.userId, currentDeviceId);
+  };
+
+  const approveDeviceByQr = async (
+    payload: DeviceApprovalQrPayload
+  ): Promise<DeviceSession> => {
+    if (!user) {
+      throw new Error('Not signed in.');
+    }
+    return approveDeviceViaQrPayload(user, currentDeviceId, payload, getActiveLanguage());
   };
 
   return (
@@ -1482,6 +1811,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signInWithGoogle,
         signUpWithEmail,
         signInWithEmail,
+        sendMagicSignInLink,
+        completeMagicSignInLink,
+        dismissMagicLinkPrompt,
+        pendingMagicLinkPrompt,
+        publicAuthFlags,
+        globalSecuritySettings,
         sendPasswordReset,
         changePassword,
         signOutUser,
@@ -1506,6 +1841,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         retryCurrentDeviceApproval,
         selfApproveCurrentDeviceWithPin,
         forceLogoutOtherDevice,
+        updateOptionalDevice2FA,
+        refreshPendingDeviceQr,
+        approveDeviceByQr,
       }}
     >
       {children}

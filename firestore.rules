@@ -73,7 +73,7 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'userId', 'displayName', 'email', 'phoneNumber', 'initialPhoneNumber', 'initialPhoneSetAt',
           'phoneHistory', 'lastPhoneChangedAt', 'discoverableByPhone', 'photoURL', 'about', 'username',
-          'hasAppLockPin', 'status', 'themePreference', 'isOnline', 'lastSeen', 'createdAt'
+          'hasAppLockPin', 'requireDeviceApproval', 'status', 'themePreference', 'isOnline', 'lastSeen', 'createdAt'
         ])
         && data.userId is string && data.userId == userId && data.userId.size() <= 128
         && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
@@ -89,6 +89,7 @@ service cloud.firestore {
         && (!('about' in data) || (data.about is string && data.about.size() <= 200))
         && (!('username' in data) || (data.username is string && data.username.size() >= 3 && data.username.size() <= 50))
         && (!('hasAppLockPin' in data) || data.hasAppLockPin is bool)
+        && (!('requireDeviceApproval' in data) || data.requireDeviceApproval == null || data.requireDeviceApproval is bool)
         && (!('status' in data) || data.status in ['active', 'scheduled_for_deletion', 'deleted'])
         && (!('themePreference' in data) || data.themePreference in ['deep-slate', 'minimal-light', 'telegram-blue'])
         && (!('isOnline' in data) || data.isOnline is bool)
@@ -100,7 +101,7 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'userId', 'displayName', 'email', 'phoneNumber', 'initialPhoneNumber', 'initialPhoneSetAt',
           'phoneHistory', 'lastPhoneChangedAt', 'lastPhoneChangedAtMs', 'phoneChangeCooldownBypass', 'deviceLimits',
-          'discoverableByPhone', 'photoURL', 'about', 'username',
+          'requireDeviceApproval', 'discoverableByPhone', 'photoURL', 'about', 'username',
           'hasAppLockPin', 'status', 'deleteRequestedAt', 'deleteScheduledAt',
           'themePreference', 'role', 'isBanned', 'banReason', 'bannedAt',
           'bannedBy', 'bannedUntil', 'bannedUntilMs', 'warningNotice',
@@ -124,6 +125,7 @@ service cloud.firestore {
           (!('mobile' in data.deviceLimits) || (data.deviceLimits.mobile is number && data.deviceLimits.mobile >= 0 && data.deviceLimits.mobile <= 20)) &&
           (!('web' in data.deviceLimits) || (data.deviceLimits.web is number && data.deviceLimits.web >= 0 && data.deviceLimits.web <= 20))
         ))
+        && (!('requireDeviceApproval' in data) || data.requireDeviceApproval == null || data.requireDeviceApproval is bool)
         && (!('discoverableByPhone' in data) || data.discoverableByPhone is bool)
         && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000))
         && (!('about' in data) || (data.about is string && data.about.size() <= 200))
@@ -508,6 +510,7 @@ service cloud.firestore {
           'deviceId', 'userId', 'platformCategory', 'runtimeType', 'deviceLabel',
           'approxLocation', 'status', 'isPrimaryTrusted', 'adminAlertPending', 'limitBlocked',
           'approvedByDeviceId', 'rejectedByDeviceId', 'rejectionNote',
+          'approvalChallenge', 'approvalChallengeExpiresAtMs', 'approvalMethod', 'qrApprovedAt',
           'createdAt', 'lastActiveAt', 'loginAt'
         ])
         && data.deviceId is string && data.deviceId == deviceId && data.deviceId.size() <= 128
@@ -525,6 +528,10 @@ service cloud.firestore {
         && (!('approvedByDeviceId' in data) || data.approvedByDeviceId == null || (data.approvedByDeviceId is string && data.approvedByDeviceId.size() <= 128))
         && (!('rejectedByDeviceId' in data) || data.rejectedByDeviceId == null || (data.rejectedByDeviceId is string && data.rejectedByDeviceId.size() <= 128))
         && (!('rejectionNote' in data) || data.rejectionNote == null || (data.rejectionNote is string && data.rejectionNote.size() <= 300))
+        && (!('approvalChallenge' in data) || data.approvalChallenge == null || (data.approvalChallenge is string && data.approvalChallenge.size() >= 24 && data.approvalChallenge.size() <= 64 && data.approvalChallenge.matches('^[a-fA-F0-9]{24,64}$')))
+        && (!('approvalChallengeExpiresAtMs' in data) || data.approvalChallengeExpiresAtMs == null || data.approvalChallengeExpiresAtMs is number)
+        && (!('approvalMethod' in data) || data.approvalMethod == null || data.approvalMethod in ['device_tap', 'qr_scan', 'app_lock_pin', 'admin'])
+        && (!('qrApprovedAt' in data) || data.qrApprovedAt == null || (data.qrApprovedAt is string && data.qrApprovedAt.size() <= 64))
         && (!('loginAt' in data) || (data.loginAt is string && data.loginAt.size() <= 64));
     }
 
@@ -533,13 +540,32 @@ service cloud.firestore {
           'defaultMobileLimit', 'defaultWebLimit', 'requireApprovalForNewDevice', 'updatedAt', 'updatedBy'
         ])
         && data.keys().hasOnly([
-          'defaultMobileLimit', 'defaultWebLimit', 'requireApprovalForNewDevice', 'updatedAt', 'updatedBy'
+          'defaultMobileLimit', 'defaultWebLimit', 'requireApprovalForNewDevice',
+          'newDeviceApprovalMode', 'defaultOptionalApproval',
+          'enableMagicLinkLogin', 'enableQrDeviceApproval',
+          'updatedAt', 'updatedBy'
         ])
         && data.defaultMobileLimit is number && data.defaultMobileLimit >= 0 && data.defaultMobileLimit <= 20
         && data.defaultWebLimit is number && data.defaultWebLimit >= 0 && data.defaultWebLimit <= 20
         && data.requireApprovalForNewDevice is bool
+        && (!('newDeviceApprovalMode' in data) || data.newDeviceApprovalMode in ['off', 'optional', 'required'])
+        && (!('defaultOptionalApproval' in data) || data.defaultOptionalApproval is bool)
+        && (!('enableMagicLinkLogin' in data) || data.enableMagicLinkLogin is bool)
+        && (!('enableQrDeviceApproval' in data) || data.enableQrDeviceApproval is bool)
         && data.updatedAt is string && data.updatedAt.size() <= 64
         && data.updatedBy is string && data.updatedBy.size() <= 150;
+    }
+
+    function isValidPublicAuthFlags(data) {
+      return data.keys().hasAll([
+          'enableMagicLinkLogin', 'enableQrDeviceApproval', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'enableMagicLinkLogin', 'enableQrDeviceApproval', 'updatedAt'
+        ])
+        && data.enableMagicLinkLogin is bool
+        && data.enableQrDeviceApproval is bool
+        && data.updatedAt is string && data.updatedAt.size() <= 64;
     }
 
     function isValidAdminSecuritySettings(data) {
@@ -602,8 +628,9 @@ service cloud.firestore {
               )
             )
           ) ||
-          // Action 3: Toggle Quick App-Lock PIN flag
+          // Action 3: Toggle Quick App-Lock PIN flag or Optional New-Device 2FA flag
           incoming().diff(existing()).affectedKeys().hasOnly(['hasAppLockPin']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['requireDeviceApproval']) ||
           // Action 4: Acknowledge official warning
           (incoming().diff(existing()).affectedKeys().hasOnly(['warningDismissed']) && incoming().warningDismissed == true) ||
           // Action 5: Schedule 15-day deletion or restore account
@@ -1208,13 +1235,19 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(updateId);
     }
 
-    // 8A. Global Security & Device Quota Settings (Signed-in read for 'security'; Super Admin only for 'admin_security')
+    // 8A. Global Security & Public Auth Feature Flags
+    // 'public_flags' holds ONLY non-PII booleans for pre-login screen; 'security' requires auth; 'admin_security' is Super Admin only
     match /app_settings/{settingId} {
-      allow get: if isValidId(settingId) && (isAdmin() || (isSignedIn() && settingId == 'security'));
+      allow get: if isValidId(settingId) && (
+        settingId == 'public_flags' ||
+        isAdmin() ||
+        (isSignedIn() && settingId == 'security')
+      );
       allow list: if isAdmin();
       allow create, update: if isAdmin() && isValidId(settingId) && (
         (settingId == 'security' && isValidSecuritySettings(incoming())) ||
-        (settingId == 'admin_security' && isValidAdminSecuritySettings(incoming()))
+        (settingId == 'admin_security' && isValidAdminSecuritySettings(incoming())) ||
+        (settingId == 'public_flags' && isValidPublicAuthFlags(incoming()))
       );
       allow delete: if isAdmin() && isValidId(settingId);
     }

@@ -7,7 +7,7 @@ export interface SavedDeviceAccount {
   photoURL: string;
   email: string;
   maskedEmail: string;
-  provider: 'password' | 'google';
+  provider: 'password' | 'google' | 'magic_link';
   savedAt: string;
 }
 
@@ -15,6 +15,13 @@ export interface DeepLinkTarget {
   type: 'chat' | 'group';
   value: string;
   isQr?: boolean;
+}
+
+export interface DeviceApprovalQrPayload {
+  userId: string;
+  deviceId: string;
+  challenge: string;
+  expiresAtMs: number;
 }
 
 const SAVED_ACCOUNTS_STORAGE_KEY = 'anomah_saved_device_accounts_v1';
@@ -54,7 +61,7 @@ export function getSavedDeviceAccounts(): SavedDeviceAccount[] {
         typeof item.userId === 'string' &&
         typeof item.email === 'string' &&
         typeof item.displayName === 'string' &&
-        (item.provider === 'password' || item.provider === 'google')
+        (item.provider === 'password' || item.provider === 'google' || item.provider === 'magic_link')
     );
   } catch {
     return [];
@@ -254,5 +261,57 @@ export function consumeRememberDevicePending(): boolean {
     return val;
   } catch {
     return false;
+  }
+}
+
+export function buildDeviceApprovalQrString(payload: DeviceApprovalQrPayload): string {
+  const params = new URLSearchParams({
+    uid: payload.userId,
+    did: payload.deviceId,
+    ch: payload.challenge,
+    exp: String(payload.expiresAtMs),
+  });
+  return `anomahchat://device-approve?${params.toString()}`;
+}
+
+export function extractDeviceApprovalQrPayload(
+  rawInput: string
+): DeviceApprovalQrPayload | null {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+
+  try {
+    if (!trimmed.toLowerCase().includes('device-approve')) return null;
+    const normalized = trimmed.startsWith('anomahchat://')
+      ? trimmed.replace(/^anomahchat:\/\//i, 'https://anomah.chat/')
+      : trimmed;
+    const url = normalized.startsWith('http')
+      ? new URL(normalized)
+      : new URL(normalized, 'https://anomah.chat');
+
+    const uid = url.searchParams.get('uid')?.trim() || '';
+    const did = url.searchParams.get('did')?.trim() || '';
+    const ch = url.searchParams.get('ch')?.trim() || '';
+    const expRaw = url.searchParams.get('exp')?.trim() || '';
+    const exp = Number(expRaw);
+
+    if (
+      !/^[a-zA-Z0-9_-]{4,128}$/.test(uid) ||
+      !/^[a-zA-Z0-9_-]{4,128}$/.test(did) ||
+      !/^[a-fA-F0-9]{24,64}$/.test(ch) ||
+      !Number.isFinite(exp) ||
+      exp <= 0
+    ) {
+      return null;
+    }
+
+    return {
+      userId: uid,
+      deviceId: did,
+      challenge: ch,
+      expiresAtMs: exp,
+    };
+  } catch {
+    return null;
   }
 }
