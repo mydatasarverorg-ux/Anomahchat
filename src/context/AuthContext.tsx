@@ -260,6 +260,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Prevents locking the user out immediately during an explicit login/signup action
   const explicitAuthInProgressRef = useRef(false);
   const magicLinkCheckedRef = useRef(false);
+  const pendingMagicLinkUrlRef = useRef<string | null>(null);
   const knownPendingAlertIdsRef = useRef<Set<string>>(new Set());
   const knownAdminAlertIdsRef = useRef<Set<string>>(new Set());
   const wasSessionActiveRef = useRef(false);
@@ -720,19 +721,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (err: unknown) {
       console.warn('Google sign-in attempt notice:', err);
+      const lang = getActiveLanguage();
       const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
 
       if (msg.includes('popup-closed-by-user') || msg.includes('cancelled')) {
-        setAuthError('Google sign-in was cancelled. Please tap "Continue with Google" to try again.');
+        setAuthError(
+          lang === 'bn'
+            ? isNativeApkApp()
+              ? 'Google লগইন বাতিল হয়েছে অথবা ব্রাউজার পপআপ আটকে গেছে। আবার চেষ্টা করুন অথবা নিচের Email Magic Link / পাসওয়ার্ড দিয়ে লগইন করুন।'
+              : 'Google সাইন-ইন বাতিল হয়েছে। আবার "Continue with Google" বাটনে চাপুন।'
+            : isNativeApkApp()
+            ? 'Google sign-in was cancelled or interrupted. Try again, or use Email Magic Link / Password inside the APK.'
+            : 'Google sign-in was cancelled. Please tap "Continue with Google" to try again.'
+        );
+      } else if (msg.includes('popup-blocked')) {
+        setAuthError(
+          lang === 'bn'
+            ? 'লগইন পপআপ ব্লক হয়েছে। নতুন APK ইনস্টল করে আবার চেষ্টা করুন অথবা Email Magic Link ব্যবহার করুন।'
+            : 'Google sign-in popup was blocked. Please allow popups, update the APK, or sign in with Email Magic Link.'
+        );
       } else if (msg.includes('unauthorized-domain')) {
         setAuthError(
-          'This domain is not authorized in Firebase Console yet. Please add your domain (e.g. "mydatasarverorg-ux.github.io") under Authentication > Settings > Authorized domains.'
+          lang === 'bn'
+            ? 'এই ডোমেইনটি Firebase Console > Authentication > Settings > Authorized domains-এ যুক্ত নেই (যেমন: "mydatasarverorg-ux.github.io")।'
+            : 'This domain is not authorized in Firebase Console yet. Please add your domain (e.g. "mydatasarverorg-ux.github.io") under Authentication > Settings > Authorized domains.'
         );
       } else {
         setAuthError(
           err instanceof Error
             ? err.message
-            : 'Unable to complete Google sign-in. Please try again or use Email login.'
+            : lang === 'bn'
+            ? 'Google দিয়ে লগইন সম্পন্ন করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন অথবা ইমেইল / ম্যাজিক লিংক ব্যবহার করুন।'
+            : 'Unable to complete Google sign-in. Please try again or use Email / Magic Link login.'
         );
       }
     } finally {
@@ -1009,9 +1029,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const completeMagicSignInLink = async (overrideEmail?: string) => {
+  const completeMagicSignInLink = async (overrideEmail?: string, overrideLinkUrl?: string) => {
     if (typeof window === 'undefined') return;
-    if (!isSignInWithEmailLink(auth, window.location.href)) return;
+    const targetLink = (
+      overrideLinkUrl ||
+      pendingMagicLinkUrlRef.current ||
+      window.location.href
+    ).trim();
+    if (!isSignInWithEmailLink(auth, targetLink)) return;
 
     const lang = getActiveLanguage();
     let storedEmail = '';
@@ -1024,6 +1049,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const flags = await getPublicAuthFlags();
     if (!flags.enableMagicLinkLogin) {
+      pendingMagicLinkUrlRef.current = null;
       cleanMagicLinkUrlParams();
       try {
         localStorage.removeItem(MAGIC_LINK_EMAIL_KEY);
@@ -1041,6 +1067,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (!targetEmail) {
+      pendingMagicLinkUrlRef.current = targetLink;
       setPendingMagicLinkPrompt(true);
       setLoading(false);
       return;
@@ -1050,7 +1077,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthError(null);
     explicitAuthInProgressRef.current = true;
     try {
-      const res = await signInWithEmailLink(auth, targetEmail, window.location.href);
+      const res = await signInWithEmailLink(auth, targetEmail, targetLink);
+      pendingMagicLinkUrlRef.current = null;
       try {
         localStorage.removeItem(MAGIC_LINK_EMAIL_KEY);
       } catch {
@@ -1156,16 +1184,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const dismissMagicLinkPrompt = () => {
+    pendingMagicLinkUrlRef.current = null;
     setPendingMagicLinkPrompt(false);
     cleanMagicLinkUrlParams();
   };
 
   useEffect(() => {
-    if (typeof window === 'undefined' || magicLinkCheckedRef.current) return;
-    if (isSignInWithEmailLink(auth, window.location.href)) {
-      magicLinkCheckedRef.current = true;
-      void completeMagicSignInLink();
+    if (typeof window === 'undefined') return;
+    const win = window as unknown as { __pendingMagicLinkUrl?: string };
+    if (!magicLinkCheckedRef.current) {
+      const initialLink = win.__pendingMagicLinkUrl || window.location.href;
+      if (win.__pendingMagicLinkUrl) {
+        delete win.__pendingMagicLinkUrl;
+      }
+      if (isSignInWithEmailLink(auth, initialLink)) {
+        magicLinkCheckedRef.current = true;
+        void completeMagicSignInLink(undefined, initialLink);
+      }
     }
+
+    const handleNativeMagicLink = (e: CustomEvent<{ url?: string }>) => {
+      const incomingUrl = e.detail?.url;
+      if (incomingUrl && isSignInWithEmailLink(auth, incomingUrl)) {
+        magicLinkCheckedRef.current = true;
+        void completeMagicSignInLink(undefined, incomingUrl);
+      }
+    };
+    window.addEventListener('anomah_magic_link', handleNativeMagicLink as EventListener);
+    return () => {
+      window.removeEventListener('anomah_magic_link', handleNativeMagicLink as EventListener);
+    };
   }, []);
 
   const resendVerificationEmail = async () => {

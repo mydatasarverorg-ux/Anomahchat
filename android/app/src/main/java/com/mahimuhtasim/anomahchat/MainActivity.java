@@ -20,8 +20,10 @@ import android.os.Environment;
 import android.provider.Settings;
 import android.view.Window;
 import android.view.WindowManager;
+import android.webkit.CookieManager;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.Toast;
@@ -93,17 +95,53 @@ public class MainActivity extends BridgeActivity {
     private boolean isAllowedOAuthPopupUrl(Uri uri) {
         if (uri == null) return false;
         String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase() : "";
-        String host = uri.getHost() != null ? uri.getHost().toLowerCase() : "";
+        if ("about".equals(scheme)) {
+            return true;
+        }
         if (!"https".equals(scheme)) {
             return false;
         }
-        return "accounts.google.com".equals(host)
+        String host = uri.getHost() != null ? uri.getHost().toLowerCase() : "";
+        if (host.isEmpty()) {
+            return false;
+        }
+        return "google.com".equals(host)
                 || host.endsWith(".google.com")
+                || host.matches(".*\\.google\\.[a-z]{2,3}(\\.[a-z]{2})?$")
+                || "youtube.com".equals(host)
+                || host.endsWith(".youtube.com")
+                || "googleusercontent.com".equals(host)
                 || host.endsWith(".googleusercontent.com")
+                || "gstatic.com".equals(host)
                 || host.endsWith(".gstatic.com")
+                || "googleapis.com".equals(host)
+                || host.endsWith(".googleapis.com")
+                || "withgoogle.com".equals(host)
+                || host.endsWith(".withgoogle.com")
+                || "pki.goog".equals(host)
+                || host.endsWith(".pki.goog")
                 || host.endsWith(".firebaseapp.com")
                 || host.endsWith(".web.app")
                 || "mydatasarverorg-ux.github.io".equals(host);
+    }
+
+    private String resolveOAuthSafeUserAgent(Context context) {
+        String fallback = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
+        try {
+            String defUa = WebSettings.getDefaultUserAgent(context);
+            if (defUa != null && !defUa.trim().isEmpty()) {
+                String cleaned = defUa
+                        .replace("; wv)", ")")
+                        .replace("; wv;", ";")
+                        .replace(" wv)", ")")
+                        .replace("Version/4.0 ", "");
+                if (!cleaned.trim().isEmpty()) {
+                    return cleaned;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return fallback;
     }
 
     private String computeStreamSha256(InputStream is) {
@@ -182,18 +220,23 @@ public class MainActivity extends BridgeActivity {
             createNotificationChannels();
             requestMissingRuntimePermissions();
 
+            CookieManager cookieManager = CookieManager.getInstance();
+            cookieManager.setAcceptCookie(true);
+
             WebView webView = getBridge().getWebView();
             if (webView != null) {
                 webView.setFitsSystemWindows(true);
+                cookieManager.setAcceptThirdPartyCookies(webView, true);
                 WebSettings settings = webView.getSettings();
                 settings.setJavaScriptEnabled(true);
                 settings.setDomStorageEnabled(true);
+                settings.setDatabaseEnabled(true);
                 settings.setSupportMultipleWindows(true);
                 settings.setJavaScriptCanOpenWindowsAutomatically(true);
                 settings.setMediaPlaybackRequiresUserGesture(false);
 
-                // Standard Chrome UA is intentionally required so Google Sign-In works inside WebView without 403 disallowed_useragent
-                String standardChromeUA = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
+                // Strip '; wv' dynamically from device WebView UA so Chromium version matches Sec-CH-UA headers without 403 disallowed_useragent
+                final String standardChromeUA = resolveOAuthSafeUserAgent(MainActivity.this);
                 settings.setUserAgentString(standardChromeUA);
 
                 // Subclass BridgeWebChromeClient to preserve file chooser (onShowFileChooser) & JS dialogs while keeping trusted-origin media permissions
@@ -251,10 +294,15 @@ public class MainActivity extends BridgeActivity {
                     public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, android.os.Message resultMsg) {
                         final android.app.Dialog authDialog = new android.app.Dialog(MainActivity.this, android.R.style.Theme_DeviceDefault_Light_NoActionBar_Fullscreen);
                         final WebView authWebView = new WebView(MainActivity.this);
+                        CookieManager authCookies = CookieManager.getInstance();
+                        authCookies.setAcceptCookie(true);
+                        authCookies.setAcceptThirdPartyCookies(authWebView, true);
+
                         WebSettings authSettings = authWebView.getSettings();
                         authSettings.setJavaScriptEnabled(true);
                         authSettings.setDomStorageEnabled(true);
-                        authSettings.setSupportMultipleWindows(true);
+                        authSettings.setDatabaseEnabled(true);
+                        authSettings.setSupportMultipleWindows(false);
                         authSettings.setJavaScriptCanOpenWindowsAutomatically(true);
                         authSettings.setUserAgentString(standardChromeUA);
 
@@ -269,10 +317,29 @@ public class MainActivity extends BridgeActivity {
 
                         authWebView.setWebViewClient(new android.webkit.WebViewClient() {
                             @Override
-                            public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest request) {
+                            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                                 Uri targetUri = request != null ? request.getUrl() : null;
                                 if (isAllowedOAuthPopupUrl(targetUri)) {
                                     return false;
+                                }
+                                if (targetUri != null && "intent".equalsIgnoreCase(targetUri.getScheme())) {
+                                    try {
+                                        String raw = targetUri.toString();
+                                        int idx = raw.indexOf("S.browser_fallback_url=");
+                                        if (idx != -1) {
+                                            String rest = raw.substring(idx + "S.browser_fallback_url=".length());
+                                            int endIdx = rest.indexOf(";");
+                                            String encoded = endIdx != -1 ? rest.substring(0, endIdx) : rest;
+                                            String decoded = Uri.decode(encoded);
+                                            Uri fallbackUri = Uri.parse(decoded);
+                                            if (isAllowedOAuthPopupUrl(fallbackUri)) {
+                                                view.loadUrl(decoded);
+                                                return true;
+                                            }
+                                        }
+                                    } catch (Exception ignored) {
+                                    }
+                                    return true;
                                 }
                                 if (targetUri != null && "https".equalsIgnoreCase(targetUri.getScheme())) {
                                     try {
@@ -284,9 +351,22 @@ public class MainActivity extends BridgeActivity {
                                 }
                                 return true;
                             }
+
+                            @Override
+                            public void onPageFinished(WebView view, String url) {
+                                super.onPageFinished(view, url);
+                                try {
+                                    CookieManager.getInstance().flush();
+                                } catch (Exception ignored) {
+                                }
+                            }
                         });
 
                         authDialog.setOnDismissListener(d -> {
+                            try {
+                                CookieManager.getInstance().flush();
+                            } catch (Exception ignored) {
+                            }
                             try {
                                 authWebView.stopLoading();
                                 authWebView.loadUrl("about:blank");
@@ -352,6 +432,36 @@ public class MainActivity extends BridgeActivity {
         boolean isAllowed = ("anomahchat".equals(scheme) && "open".equals(host))
                 || ("https".equals(scheme) && "mydatasarverorg-ux.github.io".equals(host));
         if (!isAllowed) return;
+
+        // Forward Firebase Passwordless Email Magic Link when opened via Android App Link
+        final String modeParam = data.getQueryParameter("mode");
+        final String oobCodeParam = data.getQueryParameter("oobCode");
+        if ("signIn".equals(modeParam) && oobCodeParam != null && !oobCodeParam.trim().isEmpty()) {
+            final String fullMagicUrl = data.toString();
+            intent.setData(null);
+            try {
+                org.json.JSONObject magicPayload = new org.json.JSONObject();
+                magicPayload.put("url", fullMagicUrl);
+                final String magicJson = magicPayload.toString();
+                runOnUiThread(() -> {
+                    try {
+                        WebView webView = getBridge().getWebView();
+                        if (webView != null) {
+                            webView.postDelayed(() -> {
+                                String script = "window.__pendingMagicLinkUrl=" + magicJson + ".url;"
+                                        + "window.dispatchEvent(new CustomEvent('anomah_magic_link',{detail:" + magicJson + "}));";
+                                webView.evaluateJavascript(script, null);
+                            }, 450);
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                });
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            return;
+        }
 
         final String chatParam = data.getQueryParameter("chat");
         final String groupParam = data.getQueryParameter("group");
