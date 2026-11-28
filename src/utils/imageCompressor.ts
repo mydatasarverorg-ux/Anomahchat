@@ -38,6 +38,8 @@ export async function compressImageForChat(
           return;
         }
 
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
 
         // Export as JPEG with compression
@@ -55,6 +57,8 @@ export async function compressImageForChat(
           smallCanvas.height = Math.round(height * 0.7);
           const smallCtx = smallCanvas.getContext('2d');
           if (smallCtx) {
+            smallCtx.fillStyle = '#ffffff';
+            smallCtx.fillRect(0, 0, smallCanvas.width, smallCanvas.height);
             smallCtx.drawImage(canvas, 0, 0, smallCanvas.width, smallCanvas.height);
             result = smallCanvas.toDataURL('image/jpeg', 0.55);
           }

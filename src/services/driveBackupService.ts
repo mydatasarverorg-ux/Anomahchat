@@ -856,11 +856,21 @@ function sanitizeChatRoomForRestore(raw: ChatRoom): Record<string, unknown> | nu
   };
 
   if (typeof raw.name === 'string') clean.name = raw.name.slice(0, 100);
+  if (typeof raw.description === 'string') clean.description = raw.description.slice(0, 300);
   if (typeof raw.creatorId === 'string') clean.creatorId = raw.creatorId.slice(0, 128);
   if (Array.isArray(raw.adminIds)) {
     clean.adminIds = raw.adminIds.filter((id): id is string => typeof id === 'string').slice(0, 50);
   }
   if (typeof raw.groupPhoto === 'string') clean.groupPhoto = raw.groupPhoto.slice(0, 1000);
+  if (raw.visibility === 'private' || raw.visibility === 'public') {
+    clean.visibility = raw.visibility;
+  }
+  if (raw.joinPolicy === 'invite_only' || raw.joinPolicy === 'direct' || raw.joinPolicy === 'approval') {
+    clean.joinPolicy = raw.joinPolicy;
+  }
+  if (Array.isArray(raw.bannedUserIds)) {
+    clean.bannedUserIds = raw.bannedUserIds.filter((id): id is string => typeof id === 'string').slice(0, 100);
+  }
   if (raw.participantDetails && typeof raw.participantDetails === 'object') {
     clean.participantDetails = raw.participantDetails;
   }

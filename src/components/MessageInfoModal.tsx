@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, CheckCheck, Clock, MessageSquare } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { useModalHistory } from '../hooks/useModalHistory';
 import type { ChatMessage, ChatRoom, DirectoryUser } from '../types/chat';
 
 interface MessageInfoModalProps {
@@ -21,6 +22,7 @@ export const MessageInfoModal: React.FC<MessageInfoModalProps> = ({
   isPartnerDeleted,
 }) => {
   const { t, language } = useLanguage();
+  useModalHistory(isOpen && Boolean(message), onClose);
 
   if (!isOpen || !message) return null;
 

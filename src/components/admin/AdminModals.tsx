@@ -952,7 +952,7 @@ export function AdminModals({
                 <button
                   type="button"
                   onClick={onCloseRecovery}
-                  className="flex-1 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs cursor-pointer hover:bg-slate-750"
+                  className="flex-1 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs cursor-pointer hover:bg-slate-700"
                 >
                   {t('cancel')}
                 </button>

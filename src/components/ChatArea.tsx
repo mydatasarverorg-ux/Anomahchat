@@ -389,7 +389,7 @@ export function ChatArea({
   };
 
   const handleCopyText = (text: string) => {
-    navigator.clipboard.writeText(text);
+    navigator.clipboard?.writeText(text).catch(() => {});
     setActiveMenuMessage(null);
   };
 
@@ -1129,7 +1129,7 @@ export function ChatArea({
               className={`p-2.5 rounded-xl transition cursor-pointer flex items-center justify-center shrink-0 active:scale-[0.98] ${
                 voice.isRecording
                   ? 'bg-red-600 text-white shadow-xs'
-                  : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-750'
+                  : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
               } ${voice.isSendingVoice ? 'opacity-60 cursor-wait' : ''}`}
               title={voice.isSendingVoice ? 'Sending voice note...' : t('recordVoiceTooltip')}
             >

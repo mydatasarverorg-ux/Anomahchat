@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   X,
   Users,
@@ -21,6 +21,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { useModalHistory } from '../hooks/useModalHistory';
 import type {
   ChatRoom,
   Friendship,
@@ -92,11 +93,12 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
   const [joinRequests, setJoinRequests] = useState<GroupJoinRequest[]>([]);
   const [busyReqId, setBusyReqId] = useState<string | null>(null);
 
-  // Confirm dialogs
+  // Confirm dialogs & error notice
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [banOnRemove, setBanOnRemove] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const isCreator = chat.creatorId === currentUser.userId;
   const isCurrentUserAdmin =
@@ -121,31 +123,23 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
     return () => unsub();
   }, [isOpen, isCurrentUserAdmin, chat.id, chat.visibility]);
 
-  // Close nested dialogs or modal on Escape
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (confirmLeave) {
-        setConfirmLeave(false);
-      } else if (confirmDelete) {
-        setConfirmDelete(false);
-      } else if (confirmRemoveId) {
-        setConfirmRemoveId(null);
-      } else if (showAddMembers) {
-        setShowAddMembers(false);
-      } else if (showPrivacySettings) {
-        setShowPrivacySettings(false);
-      } else if (isEditingTitle) {
-        setIsEditingTitle(false);
-      } else {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+  const handleHierarchicalClose = useCallback(() => {
+    if (confirmLeave) {
+      setConfirmLeave(false);
+    } else if (confirmDelete) {
+      setConfirmDelete(false);
+    } else if (confirmRemoveId) {
+      setConfirmRemoveId(null);
+    } else if (showAddMembers) {
+      setShowAddMembers(false);
+    } else if (showPrivacySettings) {
+      setShowPrivacySettings(false);
+    } else if (isEditingTitle) {
+      setIsEditingTitle(false);
+    } else {
+      onClose();
+    }
   }, [
-    isOpen,
     confirmLeave,
     confirmDelete,
     confirmRemoveId,
@@ -154,6 +148,9 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
     isEditingTitle,
     onClose,
   ]);
+
+  // Close nested dialogs or modal on Back button / Escape
+  useModalHistory(isOpen, handleHierarchicalClose);
 
   // Strictly accepted friends NOT already in this group
   const availableFriends = useMemo<UserProfile[]>(() => {
@@ -195,22 +192,32 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
     return name.includes(q) || email.includes(q);
   });
 
+  const getErrorText = (err: unknown, fallbackEn: string, fallbackBn: string) =>
+    err instanceof Error && err.message
+      ? err.message
+      : language === 'bn'
+      ? fallbackBn
+      : fallbackEn;
+
   const handleSaveTitle = async () => {
     if (!editedTitle.trim() || editedTitle.trim() === chat.name) {
       setIsEditingTitle(false);
       return;
     }
+    setActionError(null);
     try {
       await updateGroupTitle(chat.id, editedTitle.trim());
       setIsEditingTitle(false);
     } catch (err) {
       console.error('Failed to update group title:', err);
+      setActionError(getErrorText(err, 'Failed to update group name.', 'গ্রুপের নাম আপডেট করা যায়নি।'));
     }
   };
 
   const handleSavePrivacySettings = async () => {
     if (savingSettings) return;
     setSavingSettings(true);
+    setActionError(null);
     try {
       const nextPolicy: GroupJoinPolicy =
         editVisibility === 'public' ? editJoinPolicy : 'invite_only';
@@ -222,6 +229,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
       setShowPrivacySettings(false);
     } catch (err) {
       console.error('Failed to update group privacy settings:', err);
+      setActionError(getErrorText(err, 'Failed to save privacy settings.', 'প্রাইভেসি সেটিংস সংরক্ষণ করা যায়নি।'));
     } finally {
       setSavingSettings(false);
     }
@@ -229,24 +237,29 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
 
   const handleMakeAdmin = async (targetId: string) => {
     setActiveMemberMenu(null);
+    setActionError(null);
     try {
       await makeGroupAdmin(chat.id, targetId);
     } catch (err) {
       console.error('Failed to make admin:', err);
+      setActionError(getErrorText(err, 'Failed to promote member to admin.', 'সদস্যকে অ্যাডমিন করা যায়নি।'));
     }
   };
 
   const handleDismissAdmin = async (targetId: string) => {
     setActiveMemberMenu(null);
+    setActionError(null);
     try {
       await dismissGroupAdmin(chat.id, targetId);
     } catch (err) {
       console.error('Failed to dismiss admin:', err);
+      setActionError(getErrorText(err, 'Failed to remove admin role.', 'অ্যাডমিন দায়িত্ব সরানো যায়নি।'));
     }
   };
 
   const handleConfirmRemove = async () => {
     if (!confirmRemoveId) return;
+    setActionError(null);
     try {
       await removeGroupMember(chat.id, confirmRemoveId, currentUser.displayName, banOnRemove);
       setConfirmRemoveId(null);
@@ -254,6 +267,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
       setActiveMemberMenu(null);
     } catch (err) {
       console.error('Failed to remove member:', err);
+      setActionError(getErrorText(err, 'Failed to remove member.', 'সদস্যকে সরানো যায়নি।'));
     }
   };
 
@@ -275,6 +289,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
     const usersToAdd = Object.values(selectedUsersMap);
     if (usersToAdd.length === 0 || submitting) return;
     setSubmitting(true);
+    setActionError(null);
     try {
       await addGroupMembers(chat.id, usersToAdd, currentUser.displayName);
       setShowAddMembers(false);
@@ -282,12 +297,14 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
       setUserSearchQuery('');
     } catch (err) {
       console.error('Failed to add members:', err);
+      setActionError(getErrorText(err, 'Failed to add selected friends.', 'নির্বাচিত বন্ধুদের যুক্ত করা যায়নি।'));
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleExecuteLeave = async () => {
+    setActionError(null);
     try {
       await leaveGroupChat(chat.id, currentUser.userId, currentUser.displayName);
       setConfirmLeave(false);
@@ -295,10 +312,13 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
       if (onLeaveGroup) onLeaveGroup();
     } catch (err) {
       console.error('Failed to leave group:', err);
+      setConfirmLeave(false);
+      setActionError(getErrorText(err, 'Failed to leave group.', 'গ্রুপ থেকে বের হওয়া যায়নি।'));
     }
   };
 
   const handleExecuteDelete = async () => {
+    setActionError(null);
     try {
       await deleteGroupChatPermanently(chat.id);
       setConfirmDelete(false);
@@ -306,6 +326,8 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
       if (onDeleteGroup) onDeleteGroup();
     } catch (err) {
       console.error('Failed to delete group:', err);
+      setConfirmDelete(false);
+      setActionError(getErrorText(err, 'Failed to delete group.', 'গ্রুপটি মুছে ফেলা যায়নি।'));
     }
   };
 
@@ -341,6 +363,18 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {actionError && (
+            <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-200 text-xs flex items-center justify-between gap-2">
+              <span>{actionError}</span>
+              <button
+                type="button"
+                onClick={() => setActionError(null)}
+                className="p-1 text-rose-300 hover:text-white cursor-pointer shrink-0"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
           {/* Group Profile Hero Card */}
           <div className="flex flex-col items-center text-center p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80">
             <div className="relative mb-3">
@@ -608,8 +642,11 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
                           disabled={isBusy}
                           onClick={async () => {
                             setBusyReqId(req.userId);
+                            setActionError(null);
                             try {
                               await approveGroupJoinRequest(chat.id, req, currentUser.displayName);
+                            } catch (err) {
+                              setActionError(getErrorText(err, 'Failed to approve join request.', 'জয়েন রিকোয়েস্ট অনুমোদন করা যায়নি।'));
                             } finally {
                               setBusyReqId(null);
                             }
@@ -623,8 +660,11 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
                           disabled={isBusy}
                           onClick={async () => {
                             setBusyReqId(req.userId);
+                            setActionError(null);
                             try {
                               await declineGroupJoinRequest(chat.id, req.userId);
+                            } catch (err) {
+                              setActionError(getErrorText(err, 'Failed to decline join request.', 'জয়েন রিকোয়েস্ট বাতিল করা যায়নি।'));
                             } finally {
                               setBusyReqId(null);
                             }

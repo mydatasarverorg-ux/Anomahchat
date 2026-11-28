@@ -171,6 +171,7 @@ export function CallModal({ session, currentUser, onEndCall }: CallModalProps) {
         }
         setCallState('connected');
       } else if (connState === 'failed') {
+        cleanupMediaAndPeer();
         setErrorText(
           language === 'bn'
             ? 'নেটওয়ার্ক সংযোগ বিচ্ছিন্ন হয়েছে। কল শেষ করা হচ্ছে।'

@@ -754,7 +754,7 @@ export async function sendMessage(params: {
       chatId: params.chatId,
       senderId: params.sender.userId,
       senderName: params.sender.displayName,
-      senderPhoto: params.sender.photoURL,
+      senderPhoto: params.sender.photoURL || '',
       text: (params.text || '').trim().slice(0, 5000),
       type: params.type || 'text',
       readBy: [params.sender.userId],
@@ -1019,15 +1019,28 @@ export async function deleteChatMessage(chatId: string, messageId: string) {
 // Edit message text
 export async function editChatMessage(chatId: string, messageId: string, newText: string) {
   const path = `chats/${chatId}/messages/${messageId}`;
+  const cleanText = (newText || '').trim().slice(0, 5000);
+  if (!cleanText) return;
+  const nowIso = new Date().toISOString();
   try {
     const msgRef = doc(db, 'chats', chatId, 'messages', messageId);
     await updateDoc(msgRef, {
-      text: newText.trim(),
+      text: cleanText,
       isEdited: true,
-      editedAt: new Date().toISOString(),
+      editedAt: nowIso,
     });
+
+    const chatRef = doc(db, 'chats', chatId);
+    const chatSnap = await getDoc(chatRef).catch(() => null);
+    if (chatSnap?.exists() && chatSnap.data()?.lastMessageId === messageId) {
+      await updateDoc(chatRef, {
+        lastMessageText: cleanText.slice(0, 500),
+        updatedAt: nowIso,
+      }).catch(() => {});
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+    throw error;
   }
 }
 

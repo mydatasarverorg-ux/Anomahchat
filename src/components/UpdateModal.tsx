@@ -169,7 +169,7 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
 
   const handleCopyLink = () => {
     if (!release.apkDownloadUrl) return;
-    navigator.clipboard.writeText(release.apkDownloadUrl);
+    navigator.clipboard?.writeText(release.apkDownloadUrl).catch(() => {});
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2500);
   };
@@ -285,7 +285,7 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
                 <button
                   type="button"
                   onClick={handleLaunchInstallerAgain}
-                  className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 rounded-xl text-[11px] font-semibold flex items-center justify-center gap-2 transition cursor-pointer"
+                  className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-[11px] font-semibold flex items-center justify-center gap-2 transition cursor-pointer"
                 >
                   <PackageCheck className="w-3.5 h-3.5 text-emerald-400" />
                   <span>{language === 'bn' ? 'ইনস্টলার উইন্ডো খুলুন' : 'Open Installer'}</span>
@@ -297,7 +297,7 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
               <button
                 type="button"
                 onClick={handleOpenInBrowser}
-                className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl text-[11px] font-medium transition cursor-pointer flex items-center justify-center gap-1.5 border border-slate-700/80"
+                className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-[11px] font-medium transition cursor-pointer flex items-center justify-center gap-1.5 border border-slate-700/80"
               >
                 <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
                 <span>{language === 'bn' ? 'ব্রাউজার ফোলব্যাক' : 'Browser Fallback'}</span>
@@ -306,7 +306,7 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
               <button
                 type="button"
                 onClick={handleCopyLink}
-                className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl text-[11px] font-medium transition cursor-pointer flex items-center justify-center gap-1.5 border border-slate-700/80"
+                className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-[11px] font-medium transition cursor-pointer flex items-center justify-center gap-1.5 border border-slate-700/80"
               >
                 {copiedLink ? (
                   <>
@@ -336,7 +336,7 @@ export function UpdateModal({ release, onClose, isManualCheck = false }: UpdateM
             <button
               type="button"
               onClick={handleOpenInBrowser}
-              className="w-full py-2 px-4 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl text-xs font-medium transition cursor-pointer flex items-center justify-center gap-1.5 border border-slate-700/80"
+              className="w-full py-2 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium transition cursor-pointer flex items-center justify-center gap-1.5 border border-slate-700/80"
             >
               <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
               <span>{language === 'bn' ? 'ব্রাউজার থেকে সরাসরি ডাউনলোড' : 'Download via Browser'}</span>

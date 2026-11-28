@@ -235,7 +235,7 @@ export function AdminChatAuditTab({
                     className={`p-2.5 rounded-xl border transition cursor-pointer select-none ${
                       isSelected
                         ? 'bg-sky-950/40 border-sky-500/80 text-white shadow-sm ring-1 ring-sky-500/30'
-                        : 'bg-slate-900/60 border-slate-800/80 text-slate-300 hover:bg-slate-850 hover:border-slate-700'
+                        : 'bg-slate-900/60 border-slate-800/80 text-slate-300 hover:bg-slate-800 hover:border-slate-700'
                     }`}
                   >
                     <div className="flex items-start gap-2.5">
@@ -359,7 +359,7 @@ export function AdminChatAuditTab({
                         className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-medium border shrink-0 whitespace-nowrap ${
                           isInspected
                             ? 'bg-sky-500/20 text-sky-300 border-sky-500/40 ring-1 ring-sky-500/20'
-                            : 'bg-slate-850 text-slate-300 border-slate-700/80'
+                            : 'bg-slate-800 text-slate-300 border-slate-700/80'
                         }`}
                         title={`${p.displayName} (${p.email || ''})`}
                       >

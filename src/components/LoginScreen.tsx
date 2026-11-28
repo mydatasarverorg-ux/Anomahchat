@@ -736,7 +736,7 @@ export function LoginScreen() {
               signInWithGoogle();
             }}
             disabled={loading}
-            className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700/80 rounded-xl text-xs font-medium flex items-center justify-center gap-2.5 transition cursor-pointer disabled:opacity-50 hover:border-slate-600"
+            className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/80 rounded-xl text-xs font-medium flex items-center justify-center gap-2.5 transition cursor-pointer disabled:opacity-50 hover:border-slate-600"
           >
             <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
               <path

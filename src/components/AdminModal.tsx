@@ -432,7 +432,7 @@ export function AdminModal({ onClose, onEnterGhostMode }: AdminModalProps) {
     extractReadableFirestoreError(err, language, fallback);
 
   const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+    navigator.clipboard?.writeText(text).catch(() => {});
     setCopiedText(text);
     setTimeout(() => setCopiedText(null), 2000);
   };

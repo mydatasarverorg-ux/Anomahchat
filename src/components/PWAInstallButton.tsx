@@ -218,15 +218,15 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 's
     <>
       <button
         onClick={handleAction}
-        className="w-full px-3 py-2 bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-500/30 text-emerald-300 hover:text-white rounded-xl text-xs font-bold transition flex items-center justify-between cursor-pointer shadow-sm group"
+        className="w-full px-3 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 hover:text-white rounded-xl text-xs font-medium transition flex items-center justify-between cursor-pointer group whitespace-nowrap"
         title={tagline}
       >
-        <div className="flex items-center gap-2">
-          <Download className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
-          <span>{label}</span>
-        </div>
-        <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 bg-emerald-500/20 border border-emerald-400/30 rounded text-emerald-300">
-          PWA
+        <span className="flex items-center gap-2 min-w-0">
+          <Download className="w-3.5 h-3.5 text-emerald-400 shrink-0 group-hover:translate-y-0.5 transition-transform" />
+          <span className="truncate">{label}</span>
+        </span>
+        <span className="text-[11px] text-slate-400 font-medium shrink-0">
+          App
         </span>
       </button>
 

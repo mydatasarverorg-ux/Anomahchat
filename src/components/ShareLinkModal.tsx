@@ -77,7 +77,7 @@ export function ShareLinkModal({
   }, [activeUrl]);
 
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(activeUrl);
+    navigator.clipboard?.writeText(activeUrl).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
   };

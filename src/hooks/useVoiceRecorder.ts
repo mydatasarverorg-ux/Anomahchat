@@ -200,7 +200,6 @@ export function useVoiceRecorder({
             }
 
             try {
-              sounds.playMessageSent();
               await sendMessage({
                 chatId,
                 sender: user,
@@ -209,8 +208,14 @@ export function useVoiceRecorder({
                 mediaUrl: base64Audio,
                 audioDuration: elapsedSeconds,
               });
+              sounds.playMessageSent();
             } catch (err) {
               console.warn('Voice message delivery notice:', err);
+              setMicError(
+                language === 'bn'
+                  ? 'ভয়েস মেসেজ পাঠানো যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।'
+                  : 'Failed to send voice note. Please try again.'
+              );
             } finally {
               setIsSendingVoice(false);
             }

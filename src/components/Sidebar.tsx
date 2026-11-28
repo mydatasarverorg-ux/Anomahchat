@@ -67,6 +67,8 @@ export function Sidebar({
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'direct' | 'group'>('all');
   const [chatToDelete, setChatToDelete] = useState<ChatRoom | null>(null);
+  const [deletingChat, setDeletingChat] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [liveUsersMap, setLiveUsersMap] = useState<Record<string, DirectoryUser>>({});
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -297,7 +299,7 @@ export function Sidebar({
 
           {/* Standard 3-Dot Dropdown Menu (Telegram macOS / WhatsApp Web style) */}
           {showMenu && (
-            <div className="absolute right-0 top-11 z-50 w-56 bg-slate-900/95 border border-slate-750 rounded-2xl shadow-2xl py-1.5 backdrop-blur-md animate-in fade-in zoom-in-95 duration-100">
+            <div className="absolute right-0 top-11 z-50 w-56 bg-slate-900/95 border border-slate-700 rounded-2xl shadow-2xl py-1.5 backdrop-blur-md animate-in fade-in zoom-in-95 duration-100">
               {/* Exit Ghost Mode Action if in Ghost Mode */}
               {ghostUser && onExitGhostMode && (
                 <button
@@ -609,26 +611,48 @@ export function Sidebar({
                 </p>
               </div>
             </div>
+            {deleteError && (
+              <div className="px-3 py-2 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-200 text-xs">
+                {deleteError}
+              </div>
+            )}
             <div className="flex gap-2 justify-end pt-2">
               <button
                 type="button"
-                onClick={() => setChatToDelete(null)}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 cursor-pointer"
+                disabled={deletingChat}
+                onClick={() => {
+                  setDeleteError(null);
+                  setChatToDelete(null);
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 cursor-pointer disabled:opacity-50"
               >
                 {t('cancel')}
               </button>
               <button
                 type="button"
+                disabled={deletingChat}
                 onClick={async () => {
-                  if (user && chatToDelete) {
+                  if (!user || !chatToDelete || deletingChat) return;
+                  setDeletingChat(true);
+                  setDeleteError(null);
+                  try {
                     await deleteChatRoom(chatToDelete.id, user.userId);
                     setChatToDelete(null);
+                  } catch (err) {
+                    console.error('Delete chat failed:', err);
+                    setDeleteError(
+                      language === 'bn'
+                        ? 'চ্যাট মুছতে সমস্যা হয়েছে। আবার চেষ্টা করুন।'
+                        : 'Failed to delete conversation. Please try again.'
+                    );
+                  } finally {
+                    setDeletingChat(false);
                   }
                 }}
-                className="px-4 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-semibold text-white cursor-pointer shadow flex items-center gap-1.5"
+                className="px-4 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-xs font-semibold text-white cursor-pointer shadow flex items-center gap-1.5"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>{t('delete')}</span>
+                <span>{deletingChat ? (language === 'bn' ? 'মুছে ফেলা হচ্ছে...' : 'Deleting...') : t('delete')}</span>
               </button>
             </div>
           </div>
